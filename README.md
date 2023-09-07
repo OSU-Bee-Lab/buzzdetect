@@ -46,7 +46,7 @@ The lefthand file selector is for files on your computer; the righthand file sel
 Navigate to /users/PAS1063/jcunderwood/bee-audio on the righthand pane and drag the files you want to move from your computer
 
 ## Complete buzzdetect.py command-line documentation
-Complete buzzdetect.py command-line documentation can be found [here](https://docs.google.com/document/d/1cJ9G1x0miZvBXJzAGsfQL3t3a1BUVic8Zd-Kbn5WS-4/edit). (still a wip) 
+Complete buzzdetect.py command-line documentation can be found [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation_CLI.md). (still a wip) 
 
 ## Misc.
 The legacy folder is a sort of graveyard of old scripts, as well as testing data, that are not used by BuzzDetect. If you’re trying to run some kind of analysis/testing/processing that is not supported off-the-shelf, you may find a script here that does what you want.
