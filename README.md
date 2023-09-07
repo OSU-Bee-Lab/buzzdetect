@@ -39,7 +39,9 @@ Follow the same instructions as above, but for step 3b, use --type bulk, and inp
 Files can be uploaded with drag-and-drop, or with the “Upload” button.
 However, when you need to upload a lot of data, you can use FileZilla
 Download/install at https://filezilla-project.org/download.php
-Click the “Site Manager” button in the top left.
+Click the “Site Manager” button in the top left:
+<img src="filezilla_sitemanager.png" width="400">
+
 The lefthand file selector is for files on your computer; the righthand file selector contains files on the server
 Navigate to /users/PAS1063/jcunderwood/bee-audio on the righthand pane and drag the files you want to move from your computer
 
