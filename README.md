@@ -13,15 +13,15 @@
 
    i. Click files
    
-   ii. Navigate to /users/PAS1063/jcunderwood/bee-audio
+   ii. Navigate to /fs/ess/PAS1063/buzzdetect
    
-   iii. Within the bee-audio folder, click “open in terminal”
+   iii. Within the buzzdetect folder, click “open in terminal”
 
-3. Load python 3.9 with Anaconda
-
-    i. In the terminal, type `module load python/3.9-2022.05`
+3. Load the buzzdetect conda environment
    
-   ii. Type `source activate local`
+   i. Type `conda activate buzzdetect`
+
+   - If you get the error `CommandNotFoundError: Your shell has not been properly configured to use 'conda activate'.`, run `conda init bash` and then rerun the activate command
 
 ## To analyze audio in bulk (several audio files)
 
@@ -46,7 +46,7 @@
 
     - The whole command will look something like this: `python buzzdetect.py --action analyze --type bulk --analyzesrc loadingdock/togo`
    
-    - By default .txt files will be outputted into the bulkoutput folder. If the file already exists, it will be appended to (not overwritten), which may cause problems
+    - By default .txt files will be output into the bulkoutput folder. If the file already exists, it will be appended to (not overwritten), which may cause problems
 
     - Audio files will not be deleted.
 
