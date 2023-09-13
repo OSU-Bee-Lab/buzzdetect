@@ -29,7 +29,7 @@
 
     a. Files must be .wav files
    
-    b. Use python buzzdetect.py –action preprocess --preprocesspath [path to directory] to ensure each .wav file is 16bit
+    b. Use `python buzzdetect.py –action preprocess --preprocesspath [path to directory]` to ensure each .wav file is 16bit
    
    Note: preprocesspath demands a directory containing the audio files to preprocess. If you are looking to preprocess a single audio file, put it in an otherwise empty directory and use that directory’s path
 4. Run the buzzdetect.py script, including the following flags:
