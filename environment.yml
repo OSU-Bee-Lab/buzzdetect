@@ -7,4 +7,5 @@ dependencies:
   - pip=23.2.1
   - pip:
     - tensorflow==2.13
+    - pydub==0.25.1
 prefix: /fs/ess/PAS1063/buzzdetect/
