@@ -5,4 +5,4 @@ channels:
 dependencies:
   - python=3.9
   - tensorflow==2.13
-
+prefix: /fs/ess/PAS1063/buzzdetect/
