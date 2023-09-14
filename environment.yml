@@ -4,6 +4,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.9
+  - pip=23.2.1
   - pip:
     - tensorflow==2.13
 prefix: /fs/ess/PAS1063/buzzdetect/
