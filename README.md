@@ -17,7 +17,7 @@
    
    iii. Within the buzzdetect folder, click “open in terminal”
 
-3. There is a conda environment that has all necessary modules installed and configurations made. Load the environment by typing `conda activate ./environment`
+3. There is a conda environment that has all necessary modules installed and configurations made. Load the environment by typing `conda activate buzzdetect-py39`
 
    - If you get the error `CommandNotFoundError: Your shell has not been properly configured to use 'conda activate'.`, run `conda init bash` and then rerun the activate command
 
