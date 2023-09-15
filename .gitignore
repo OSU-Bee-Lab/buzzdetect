@@ -6,3 +6,4 @@
 __pycache__
 datasets/
 dogs_and_cats_yamnet/
+independent_attempt.py
