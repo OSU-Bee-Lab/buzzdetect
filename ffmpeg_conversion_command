@@ -1,0 +1,1 @@
+for i in *.wav; do ffmpeg -y -i "$i" -c:a pcm_s16le -sample_fmt s16 "../audio_preprocessed/${i%.*}.wav"; done
