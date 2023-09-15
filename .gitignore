@@ -4,3 +4,5 @@
 .Ruserdata
 *.Rproj
 __pycache__
+datasets/
+dogs_and_cats_yamnet/
