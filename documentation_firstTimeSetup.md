@@ -8,7 +8,7 @@ Directory structure is still very much in flux; I'm sure as soon as I'm done I'l
 Put the following text in a text file with the extension `.yml` (a so-called YAML file):
   
 ```
-  name: buzzdetect-py39
+name: buzzdetect-py39
 channels:
   - defaults
   - conda-forge
@@ -17,6 +17,10 @@ dependencies:
   - pip=23.2.1
   - pip:
     - tensorflow==2.13
+    - pydub==0.25.1
+    - tensorflow_io-0.34.0
+    - tensorflow_hub==0.14.0
+    - ffmpeg==1.4
 ```
 
 Note: despite specifying the environment name in the YAML file, conda doesn't appear to pick up on the name when it's installed in the project directory instead of your home directory. Thus, we'll have to activate it with the file path.
