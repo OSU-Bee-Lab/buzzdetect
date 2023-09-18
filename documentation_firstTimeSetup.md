@@ -1,7 +1,7 @@
 # Setting up buzzdetect for the first time
 
-## Folder structure
-Folder structure is still very much in flux; I'm sure as soon as I'm done I'll come right back to the document and update it. There's no chance some future researcher or grad student will come across this "under construction" note, because I'm not the kind of guy that leaves documentation half-finished. No siree.
+## Directory structure
+Directory structure is still very much in flux; I'm sure as soon as I'm done I'll come right back to the document and update it. There's no chance some future researcher or grad student will come across this "under construction" note, because I'm not the kind of guy that leaves documentation half-finished. No siree.
 
 ## Create the cona environment
 ### Create the YAML (.yml) file to specify packages
@@ -30,3 +30,4 @@ Save the YAML file to your directory of choice. The location doesn't matter, but
 3. Conda will create the `environment` subdirectory and install an environment with all required packages there.
 
 ### Confirm the environment works
+Activate the conda environment with `conda activate /fs/ess/PAS1063/buzzdetect/environment` (or, if you're already in the buzzdetect directory, just: `conda activate ./environment`. If everything installed correctly, you should receive no errors and should be able to see all of the specified dependencies when you run `conda list`.
