@@ -13,4 +13,4 @@ dependencies:
   - pip:
     - tensorflow==2.13
 ```
-  cd into the project directory and run: `conda env create -f environment.yml -p /fs/ess/PAS1063/buzzdetect`; the -p argument is the path where the conda environment will be created. At the time of writing (September 2023), it was `/fs/ess/PAS1063/buzzdetect`, but update as needed.
+  cd into the project directory and run: `conda env create -f environment.yml -p /fs/ess/PAS1063/buzzdetect/environment`; the -p argument is the path where the conda environment will be created. At the time of writing (September 2023), it was `/fs/ess/PAS1063/buzzdetect`, but update as needed.
