@@ -11,4 +11,4 @@ dependencies:
     - tensorflow_io-0.34.0
     - tensorflow_hub==0.14.0
     - ffmpeg==1.4
-prefix: /fs/ess/PAS1063/buzzdetect/
+prefix: /fs/ess/PAS1063/buzzdetect/environment
