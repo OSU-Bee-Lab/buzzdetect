@@ -4,6 +4,9 @@
 Directory structure is still very much in flux; I'm sure as soon as I'm done I'll come right back to the document and update it. There's no chance some future researcher or grad student will come across this "under construction" note, because I'm not the kind of guy that leaves documentation half-finished. No siree.
 
 ## Create the cona environment
+### conda version
+This documentation was written in regards to conda version 23.7.4. The version available on OSC was 4.12.0. I never encountered problems that were definitely the result of an out-of-date conda version, but I brought my conda up to date as a precaution. To update conda to the latest version, run `conda update -n base -c defaults conda`.
+
 ### Create the YAML (.yml) file to specify packages
 Put the following text in a text file with the extension `.yml` (a so-called YAML file):
   
