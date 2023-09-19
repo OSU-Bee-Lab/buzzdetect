@@ -8,6 +8,5 @@ dependencies:
   - pip:
     - tensorflow==2.13
     - pydub==0.25.1
-    - tensorflow_io==0.34.0
     - tensorflow_hub==0.14.0
-    - ffmpeg==1.4
+    - tensorflow-io==0.34.0
