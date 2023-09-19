@@ -8,22 +8,7 @@ Directory structure is still very much in flux; I'm sure as soon as I'm done I'l
 The version of conda available on OSC is 4.12.0. For some reason related to privileges, I was not able update conda to the current version of 23.7.4. Nonetheless, I never ran into any problems
 
 ### 1. Create the YAML (.yml) file to specify packages
-Put the following text in a text file with the extension `.yml` (a so-called YAML file):
-  
-```
-name: buzzdetect-py39
-channels:
-  - defaults
-  - conda-forge
-dependencies:
-  - python=3.9
-  - pip=23.2.1
-  - pip:
-    - tensorflow==2.13
-    - pydub==0.25.1
-    - tensorflow_hub==0.14.0
-    - tensorflow-io==0.34.0
-```
+Create a text file with the extension `.yml` (a so-called YAML file) with contents as found in [environment.yml](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/environment.yml)
 
 Note: despite specifying the environment name in the YAML file, conda doesn't appear to pick up on the name when it's installed in the project directory instead of your home directory. Thus, we'll have to activate it with the file path.
 
