@@ -40,7 +40,7 @@
    
     `--analyzesrc [path to directory]`
 
-    - See the comprehensive command-line documentation [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation_CLI.md) for additional configuration options.
+    - See the comprehensive command-line documentation [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_CLI.md) for additional configuration options.
 
     - The whole command will look something like this: `python buzzdetect.py --action analyze --type bulk --analyzesrc loadingdock/togo`
    
@@ -65,7 +65,7 @@ Files can be uploaded with drag-and-drop, or with the “Upload” button, howev
 4. Navigate to /users/PAS1063/jcunderwood/bee-audio on the righthand pane and drag the files you want to move from your computer
 
 ## Complete buzzdetect.py command-line documentation
-Complete buzzdetect.py command-line documentation can be found [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation_CLI.md). (still a wip) 
+Complete buzzdetect.py command-line documentation can be found [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_CLI.md). (still a wip) 
 
 ## Misc.
 The legacy folder is a sort of graveyard of old scripts, as well as testing data, that are not used by BuzzDetect. If you’re trying to run some kind of analysis/testing/processing that is not supported off-the-shelf, you may find a script here that does what you want.
