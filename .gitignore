@@ -4,8 +4,7 @@
 .Ruserdata
 *.Rproj
 __pycache__
-datasets/
-dogs_and_cats_yamnet/
 environment/
+local/
 independent_attempt.py
 condaenv.l8rr463d.requirements.txt
