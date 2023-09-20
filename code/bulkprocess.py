@@ -5,10 +5,10 @@ from analyzeaudio import loadUp
 
 #import importlib
 #importlib.reload(analyzeaudio)
-# loadedmodel = tf.keras.models.load_model("./savedmodels/model3")
+# loadedmodel = tf.keras.models.load_model("./models/model3")
 
 
-loadedmodel = loadUp("./savedmodels/model3")
+loadedmodel = loadUp("models/model3")
 
 import os
 

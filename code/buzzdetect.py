@@ -16,21 +16,16 @@ parser = argparse.ArgumentParser(
 parser.add_argument('--action', choices=['train', 'analyze', 'preprocess'], required=True)
 
 #train
-parser.add_argument('--saveto', required=False, default="./savedmodels/model3")
+parser.add_argument('--saveto', required=False, default="./models/model3")
 
 #anaylze
-parser.add_argument('--modelsrc', required=False, default="./savedmodels/model1")
+parser.add_argument('--modelsrc', required=False, default="./models/model1")
 parser.add_argument('--type', choices=['single', 'bulk'], required=False)
 parser.add_argument('--analyzesrc', required=False)
 parser.add_argument('--framelength', required=False, default='1000')
 parser.add_argument('--framehop', required=False, default='500')
 parser.add_argument('--preprocesspath', required=False)
 parser.add_argument('--concat', required=False,default=False)
-
-
-
-
-
 
 args = parser.parse_args()
 
