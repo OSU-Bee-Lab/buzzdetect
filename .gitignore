@@ -1,10 +1,19 @@
+# r things
 .Rproj.user
 .Rhistory
 .RData
 .Ruserdata
 *.Rproj
+
+# python/conda things
 __pycache__
 environment/
-local/
-independent_attempt.py
 condaenv.l8rr463d.requirements.txt
+.idea/
+
+# directories for local execution
+audio_in/
+datasets/
+models/
+output/
+trainingdata/
