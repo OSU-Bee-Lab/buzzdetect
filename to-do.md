@@ -29,3 +29,9 @@
   - Are we working with terabytes at once?
   - How do you move files from the scratch space to the local storage on the node?
 * Could also send files back right to SharePoint?
+
+## Documentation
+### README.md
+* Is now quite out of date.
+* FileZilla information should be updated when we figure out how to integrate SharePoint
+* CLI commands and flags will need to change once we update buzzdetect.py
