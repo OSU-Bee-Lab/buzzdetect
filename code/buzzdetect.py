@@ -2,12 +2,6 @@ import argparse
 import os
 import subprocess
 
-
-
-
-# import generatemodel
-
-
 parser = argparse.ArgumentParser(
                     prog='buzzdetect.py',
                     description='A program to detect bee buzzes using ML',
