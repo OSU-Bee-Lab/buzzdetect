@@ -16,4 +16,4 @@ audio_in/
 datasets/
 models/
 output/
-trainingdata/
+training/
