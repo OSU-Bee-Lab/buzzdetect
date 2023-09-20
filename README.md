@@ -60,7 +60,7 @@ Files can be uploaded with drag-and-drop, or with the “Upload” button, howev
 1. Download/install at https://filezilla-project.org/download.php
 2. Click the “Site Manager” button in the top left:
 
-    <img src="filezilla_sitemanager.png" width="400">=
+    <img src="/documentation/filezilla_sitemanager.png" width="400">=
 3. The lefthand file selector is for files on your computer; the righthand file selector contains files on the server
 4. Navigate to /users/PAS1063/jcunderwood/bee-audio on the righthand pane and drag the files you want to move from your computer
 
