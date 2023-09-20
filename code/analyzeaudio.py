@@ -3,22 +3,9 @@ print("hello from analyzeaudio.py")
 import tensorflow as tf
 import tensorflow_hub as hub
 import re
-from concatlabelfiles import *
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
-
-def loadUp(path):
-    return tf.keras.models.load_model(path)
-
-def load_wav_16k_mono(filename):
-    """ Load a WAV file, convert it to a float tensor """ # I removed resampling as this should be done in preprocessing
-    file_contents = tf.io.read_file(filename)
-    wav, sample_rate = tf.audio.decode_wav(
-          file_contents,
-          desired_channels=1)
-    wav = tf.squeeze(wav, axis=-1)
-    return wav
 
 def framez(model, path, outputFilePath, frameLength = 500, frameHop = 250, classes = None):
     if classes is None:
