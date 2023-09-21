@@ -5,10 +5,11 @@
   - Can we parallelize the process?
 
 ## Code
-### generatemodel.py
+### train.py
 * Store copy of metadata csv within model directory; or is it already in the object? What about training parameters like number of epochs?
+* Allow to read from different directories
 
-### analyzeaudio.py
+### analyze.py
 * Rename to something more useful (maybe just name each script after the action: train, analyze, preprocess)
 * Rewrite to input files from any directory structure (e.g., all WAVs within the input path) and output with a cloned directory structure
 * Output confidence score as probability?
