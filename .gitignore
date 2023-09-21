@@ -13,7 +13,7 @@ condaenv.l8rr463d.requirements.txt
 
 # directories for local execution
 audio_in/
-datasets/
+localData/
 models/
 output/
 training/
