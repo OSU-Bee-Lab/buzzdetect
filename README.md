@@ -71,4 +71,4 @@ Complete buzzdetect.py command-line documentation can be found [here](https://gi
 The legacy folder is a sort of graveyard of old scripts, as well as testing data, that are not used by BuzzDetect. If you’re trying to run some kind of analysis/testing/processing that is not supported off-the-shelf, you may find a script here that does what you want.
 
 
-— James Underwood / jcunderwood@protonmail.com
+— James Underwood / jcunderwood [at] protonmail [dot] com
