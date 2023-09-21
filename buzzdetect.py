@@ -1,7 +1,4 @@
 import argparse
-import os
-import subprocess
-import sys
 
 parser = argparse.ArgumentParser(
     prog='buzzdetect.py',
