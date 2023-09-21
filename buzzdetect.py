@@ -18,7 +18,7 @@ parser_analyze.add_argument('--frameHop', required=False, default = 250, type = 
 # train
 parser_train = subparsers.add_parser('train', help = 'train a new model')
 parser_train.add_argument('--modelname', required=True, type = str)
-parser_train.add_argument('--epochs', required=True, type = int)
+parser_train.add_argument('--epochs', required=False, default = 30, type = int)
 parser_train.add_argument('--trainingset', required=True, type = str)
 
 # preprocess; work in progress
