@@ -11,7 +11,7 @@ from buzzcode.tools import load_wav_16k_mono
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
 
-def generate_model(modelName, trainingSet):
+def generate_model(modelName, trainingSet, epochs_in):
     model_path = os.path.join("models/", modelName)
 
     if os.path.exists(model_path):
@@ -111,7 +111,7 @@ def generate_model(modelName, trainingSet):
                                                 restore_best_weights=True)
 
     history = my_model.fit(train_ds,
-                           epochs=20,
+                           epochs=epochs_in,
                            validation_data=val_ds,
                            callbacks=callback)
 
