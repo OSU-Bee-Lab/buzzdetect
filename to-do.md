@@ -1,6 +1,7 @@
 # So much to do...
 ## Preprocessing pipeline
 * Do we need to get Reed's snipper code working?
+* Does tfio.audio.AudioIOTensor` from [this guide](https://www.tensorflow.org/io/tutorials/audio) mean we don't have to worry about trimming down files?
 * MP3 → WAV; on supercomputer instead of local?
   - Can we parallelize the process?
 
@@ -17,9 +18,7 @@
     - We wouldn't likely even use the probability, except as a cutoff to classify be activity, which we can do with the confidence score anyways.
 * Resolve issues with very large files
   - [This guide](https://www.tensorflow.org/io/tutorials/audio) has something about audio slicing that might be useful; I can read in very large files with `tfio.audio.AudioIOTensor` and it doesn't kill my memory.
-
-### buzzdetect.py
-* Get new command line operation working
+* Throw out last frame that overruns audio file
 
 ### To build
 * MAKE script to create directory structure
