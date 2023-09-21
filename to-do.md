@@ -18,6 +18,9 @@
 ### buzzdetect.py
 * Get new command line operation working
 
+### To build
+* MAKE script to create directory structure
+
 ## Machine Learning Design
 * Leverage all data by accounting for uneven replication somehow ([adding bias](https://www.tensorflow.org/tutorials/structured_data/imbalanced_data) to categories?)
 
