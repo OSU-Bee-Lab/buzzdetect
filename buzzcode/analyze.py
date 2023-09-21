@@ -1,13 +1,14 @@
 print("hello from analyzeaudio.py")
 
-import tensorflow as tf
 import tensorflow_hub as hub
 import re
+import sys
+from buzzcode.tools import *
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
 
-def framez(model, path_in, path_out, frameLength = 500, frameHop = 250, classes = None):
+def analyze_file(model, path_in, path_out, frameLength = 500, frameHop = 250, classes = None):
     if classes is None:
         classes = []
 
@@ -35,8 +36,8 @@ def framez(model, path_in, path_out, frameLength = 500, frameHop = 250, classes 
         with open(path_out, 'a') as out:
             out.write(f"{(i*frameHop)/1000},{((i*frameHop)+frameLength)/1000},{inferred_class},{confidence_score}\n")
 
-def framez_batch(model_name, directory_in ="./audio_in", directory_out ="./output", frameLength = 500, frameHop = 250):
-    model = loadUp(os.path.join("./models/", model_name))
+def analyze_batch(model_name, directory_in ="./audio_in", directory_out ="./output", frameLength = 500, frameHop = 250):
+    model = loadUp(model_name)
     subdirectory_out = os.path.join(directory_out, model_name)
     if not os.path.exists(subdirectory_out):
         os.makedirs(subdirectory_out)
@@ -55,4 +56,4 @@ def framez_batch(model_name, directory_in ="./audio_in", directory_out ="./outpu
         file_path = os.path.join(directory_in, file_name)
         file_output = re.sub(string = file_name, pattern =  r".wav$", repl = ".txt")
         file_path_out = os.path.join(subdirectory_out, file_output)
-        framez(model = model, path_in= file_path, path_out=file_path_out, frameLength = frameLength, frameHop = frameHop, classes = classes)
+        analyze_file(model = model, path_in= file_path, path_out=file_path_out, frameLength = frameLength, frameHop = frameHop, classes = classes)

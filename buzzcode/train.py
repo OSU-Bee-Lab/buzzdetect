@@ -4,8 +4,7 @@ import os
 import pandas as pd
 import tensorflow as tf
 import tensorflow_hub as hub
-sys.path.insert(0, "./code/")
-from tools import load_wav_16k_mono
+from buzzcode.tools import load_wav_16k_mono
 
 # Loading YAMNet from TensorFlow Hub
 #

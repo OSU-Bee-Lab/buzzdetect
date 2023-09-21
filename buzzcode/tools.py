@@ -1,7 +1,8 @@
 import tensorflow as tf
+import os
 
 def loadUp(path):
-    return tf.keras.models.load_model(path)
+    return tf.keras.models.load_model(os.path.join("./models/", path))
 
 def load_wav_16k_mono(filename):
     """ Load a WAV file, convert it to a float tensor """ # I removed resampling as this should be done in preprocessing
