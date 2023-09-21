@@ -11,6 +11,9 @@
 ### analyzeaudio.py
 * Rename to something more useful (maybe just name each script after the action: train, analyze, preprocess)
 * Rewrite to input files from any directory structure (e.g., all WAVs within the input path) and output with a cloned directory structure
+* Output confidence score as probability?
+    - Issue: each frame has its own probability. How do you rigorously turn that into a bee probability?
+    - We wouldn't likely even use the probability, except as a cutoff to classify be activity, which we can do with the confidence score anyways.
 
 ### buzzdetect.py
 * Get new command line operation working
