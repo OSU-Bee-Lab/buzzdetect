@@ -9,7 +9,8 @@
 * Store copy of metadata csv within model directory; or is it already in the object? What about training parameters like number of epochs?
 
 ### analyzeaudio.py
-* Rename to something more useful
+* Rename to something more useful (maybe just name each script after the action: train, analyze, preprocess)
+* Rewrite to input files from any directory structure (e.g., all WAVs within the input path) and output with a cloned directory structure
 
 ### buzzdetect.py
 * Get new command line operation working
