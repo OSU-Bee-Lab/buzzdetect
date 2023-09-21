@@ -9,17 +9,20 @@ parser = argparse.ArgumentParser(
                     
 parser.add_argument('--action', choices=['train', 'analyze', 'preprocess'], required=True)
 
-#train
-parser.add_argument('--saveto', required=False, default="./models/model3")
+# ACTIONS: train or analyze
+parser.add_argument('--modelname', required=True)
 
-#anaylze
-parser.add_argument('--modelsrc', required=False, default="./models/model1")
-parser.add_argument('--type', choices=['single', 'bulk'], required=False)
-parser.add_argument('--analyzesrc', required=False)
-parser.add_argument('--framelength', required=False, default='1000')
-parser.add_argument('--framehop', required=False, default='500')
+# ACTION: train
+parser.add_argument('--trainingset', required=False, default="all")
+
+# ACTION: analyze
+parser.add_argument('--dir_in', required=False)
+parser.add_argument('--dir_out', required=False)
+parser.add_argument('--framelength', required=False)
+parser.add_argument('--framehop', required=False)
+
+# ACTION: preprocess
 parser.add_argument('--preprocesspath', required=False)
-parser.add_argument('--concat', required=False,default=False)
 
 args = parser.parse_args()
 
@@ -58,26 +61,26 @@ elif (args.action == "analyze"):
         exit()
         
     try:
-        print(args.analyzesrc)
+        print(args.dir_in)
     except:
-        print("Error: Must provide --analyzesrc flag")
+        print("Error: Must provide --dir_in flag")
         exit()
 
     from analyzeaudio import *
     
-    print(args.modelsrc)
-    loadedmodel = loadUp(args.modelsrc)
+    print(args.modelname)
+    loadedmodel = loadUp(args.modelname)
         
     if (args.type == "bulk"):
     
-        for filename in os.listdir(args.analyzesrc):
-            f = os.path.join(args.analyzesrc, filename)
+        for filename in os.listdir(args.dir_in):
+            f = os.path.join(args.dir_in, filename)
             # checking if it is a file
             if os.path.isfile(f):
                 print(f)
                 #f = open(f"./bulkoutput/{filename}.txt", "x") 
                 framez(loadedmodel, f, f"./bulkoutput/{filename}.txt", int(args.framelength), int(args.framehop),bool(args.concat))
     else:
-        framez(loadedmodel, args.analyzesrc, f"./singleoutput/{os.path.basename(args.analyzesrc)}.txt", int(args.framelength), int(args.framehop),bool(args.concat))
+        framez(loadedmodel, args.dir_in, f"./singleoutput/{os.path.basename(args.dir_in)}.txt", int(args.framelength), int(args.framehop),bool(args.concat))
 
     
