@@ -2,7 +2,6 @@ print("hello from analyzeaudio.py")
 
 import tensorflow_hub as hub
 import re
-import sys
 from buzzcode.tools import *
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
