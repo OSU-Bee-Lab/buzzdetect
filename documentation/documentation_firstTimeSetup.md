@@ -12,12 +12,12 @@ Create a text file with the extension `.yml` (a so-called YAML file) with conten
 
 Note: despite specifying the environment name in the YAML file, conda doesn't appear to pick up on the name when it's installed in the project directory instead of your home directory. Thus, we'll have to activate it with the file path.
 
-Save the YAML file to your directory of choice. The location doesn't matter, but it makes the most sense to keep it in the project directory.
+Save the YAML file to the project directory.
 
 ### 2. Build from the YAML file
 1. Open a terminal in the same directory as your YAML file
 2. Run the command: `conda env create -f environment.yml -p /fs/ess/PAS1063/buzzdetect/environment`
-  - the -p argument is the path where the conda environment will be created. At the time of writing (September 2023), it was `/fs/ess/PAS1063/buzzdetect`, but change as needed.
+  - the -p argument is the path where the conda environment will be created. I've chosen to create it as a subdirectory of the project directory. So long as the environment is accessible to all users, location doesn't matter.
 3. Conda will create the `environment` subdirectory and install an environment with all required packages there.
 
 ### 3. Confirm the environment works
