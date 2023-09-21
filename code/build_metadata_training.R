@@ -52,5 +52,5 @@ library(stringr)
 # Write
 #
   
-  write.csv(metadata, "./datasets/bee_training/meta/metadata_bee.csv", row.names = F)
+  write.csv(metadata, "./training/metadata_bee.csv", row.names = F)
   
