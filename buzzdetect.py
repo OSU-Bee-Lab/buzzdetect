@@ -4,59 +4,42 @@ import subprocess
 import sys
 
 parser = argparse.ArgumentParser(
-                    prog='buzzdetect.py',
-                    description='A program to detect bee buzzes using ML',
-                    epilog='github.com/OSU-Bee-Lab/BuzzDetect')
-                    
-parser.add_argument('--action', choices=['train', 'analyze', 'preprocess'], required=True)
+    prog='buzzdetect.py',
+    description='A program to detect bee buzzes using ML',
+    epilog='github.com/OSU-Bee-Lab/BuzzDetect'
+)
+subparsers = parser.add_subparsers(help='sub-command help', dest='action', required = True)
 
-# ACTIONS: train or analyze
-parser.add_argument('--modelname', required=True)
+# analyze
+parser_analyze = subparsers.add_parser('analyze', help = 'analyze something')
+parser_analyze.add_argument('--modelname', required=True, type = str)
+parser_analyze.add_argument('--dir_in', required=False, default = "./audio_in", type = str)
+parser_analyze.add_argument('--dir_out', required=False, default = "./output", type = str)
+parser_analyze.add_argument('--frameLength', required=False, default = 500, type = int)
+parser_analyze.add_argument('--frameHop', required=False, default = 250, type = int)
 
-# ACTION: train
-parser.add_argument('--trainingset', required=False, default="all")
+# train
+parser_train = subparsers.add_parser('train', help = 'train a new model')
+parser_train.add_argument('--modelname', required=True, type = str)
+parser_train.add_argument('--trainingset', required=True, type = str)
 
-# ACTION: analyze
-parser.add_argument('--dir_in', required=False, default = "./audio_in")
-parser.add_argument('--dir_out', required=False) # this is where I need a subparser; default for analyze should be different than default for train
-parser.add_argument('--frameLength', required=False, default = 500)
-parser.add_argument('--frameHop', required=False, default = 250)
-
-# ACTION: preprocess
-parser.add_argument('--preprocesspath', required=False)
+# preprocess; work in progress
+# parser_preprocess = subparsers.add_parser('preprocess', help = 'convert audio files into the proper format')
+# parser_preprocess.add_argument('--preprocesspath', required=False, type = str)
 
 args = parser.parse_args()
 
-sys.path.insert(0, "./code/")
-print(args.action)
 if (args.action == "train"):
-    print("training model " + args.modelname)
+    print("Training new model " + args.modelname + " with set " + args.trainingset)
     from buzzcode.train import *
     save(args.saveto)
 
-elif (args.action == "preprocess"):
-    try:
-        print(args.preprocesspath)
-    except:
-        print("need --preprocesspath to be provided")
-        exit()
+elif (args.action== "preprocess"):
+    print("this action is still a work in progress!")
+    exit()
 
-    for filename in os.listdir(args.preprocesspath):
-        if filename.endswith(".wav"):
-            input_file = os.path.join(args.preprocesspath, filename)
-            output_file = os.path.join(args.preprocesspath, f"{os.path.splitext(filename)[0]}_16bit.wav")
-            cmd = f'module load ffmpeg/4.1.3-static && ffmpeg -y -i "{input_file}" -c:a pcm_s16le "{output_file}"'
-            subprocess.run(cmd, shell=True)
-
-    
 elif (args.action == "analyze"):
-    try:
-        print(args.dir_in)
-    except:
-        print("Error: Must provide --dir_in flag")
-        exit()
-
     from buzzcode.analyze import *
-    
-    print("analyzing audio in " + str(args.dir_in) + " with model" + str(args.modelname))
-    analyze_batch(model_name = str(args.modelname), directory_in = str(args.dir_in), directory_out = str(args.dir_out), frameLength = int(args.frameLength), frameHop = int(args.frameHop))
+
+    print("analyzing audio in " + args.dir_in + " with model " + args.modelname)
+    analyze_batch(model_name = args.modelname, directory_in = args.dir_in, directory_out = args.dir_out, frameLength = args.frameLength, frameHop = args.frameHop)
