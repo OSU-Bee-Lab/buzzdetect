@@ -4,7 +4,7 @@
 1. Log in to OSC
 
     i. Visit www.osc.edu, click the "Access OSC" dropdown in the top right, and click System Gateway
-<img src="/documentation/OSC_login.png" width="500"
+    <img src="/documentation/OSC_login.png" width="600">
    
    ii. Log in with your username and password
 
@@ -13,8 +13,8 @@
    i. Click the "Files" dropdown in the top left
 
    ii. Click "/fs/ess/PAS1063"
-
-        You are now in the "project directory" for the Bee Lab. Files made here will, by default, be accessible to anyone else on this project. This differs from your home directory, which has a path of `/fs/users/PAS1063/[your username]`. Note: if you were first granted access to the supercomputer on another project, your home directory won't have `PAS1063`, but the ID of the first project you were granted access to.
+   
+   You are now in the "project directory" for the Bee Lab. Files made here will, by default, be accessible to anyone else on this project. This differs from your home directory, which has a path of /fs/users/PAS1063/[your username]. Note: if you were first granted access to the supercomputer on another project, your home directory won't have PAS1063, but the ID of the first project you were granted access to.
    
    ii. Navigate to /fs/ess/PAS1063/buzzdetect
    
