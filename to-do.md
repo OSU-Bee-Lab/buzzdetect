@@ -19,6 +19,7 @@
 * Resolve issues with very large files
   - [This guide](https://www.tensorflow.org/io/tutorials/audio) has something about audio slicing that might be useful; I can read in very large files with `tfio.audio.AudioIOTensor` and it doesn't kill my memory.
 * Throw out last frame that overruns audio file
+* Detect output file conflicts ahead of time (maybe just if the dir already exists, make a new dir with a timestamp)
 
 ### To build
 * MAKE script to create directory structure
