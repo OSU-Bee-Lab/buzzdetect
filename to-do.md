@@ -25,7 +25,8 @@
 * MAKE script to create directory structure
 
 ## Machine Learning Design
-* Leverage all data by accounting for uneven replication somehow ([adding bias](https://www.tensorflow.org/tutorials/structured_data/imbalanced_data) to categories?)
+* Make sure you're doing biasing correctly! Does the sample from the training set apply to the sample from the field audio?
+* Make "none"/"ambient" audio in training set?
 
 ## Supercomputing
 ### Figure out supercomputing
