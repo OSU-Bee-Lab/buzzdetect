@@ -30,6 +30,7 @@ def analyze_file(model, path_in, path_out, frameLength = 500, frameHop = 250, cl
         class_means = result.mean(axis=0)
         predicted_class_index = class_means.argmax()
         inferred_class = classes[predicted_class_index]
+
         confidence_score = class_means[predicted_class_index]
 
         with open(path_out, 'a') as out:
@@ -37,9 +38,13 @@ def analyze_file(model, path_in, path_out, frameLength = 500, frameHop = 250, cl
 
 def analyze_batch(model_name, directory_in ="./audio_in", directory_out ="./output", frameLength = 500, frameHop = 250):
     model = loadUp(model_name)
-    subdirectory_out = os.path.join(directory_out, model_name)
-    if not os.path.exists(subdirectory_out):
-        os.makedirs(subdirectory_out)
+
+    # if user leaves directory out as default, store results in model subdirectory of output
+    if directory_out == './output':
+        directory_out = os.path.join(directory_out, model_name)
+
+    if not os.path.exists(directory_out):
+        os.makedirs(directory_out)
 
     classes = []
 
@@ -50,9 +55,11 @@ def analyze_batch(model_name, directory_in ="./audio_in", directory_out ="./outp
             classes.append(line.strip())
 
     file_list = os.listdir(directory_in)
+    r = re.compile('.+\.wav$')
+    wav_files = list(filter(r.match, file_list))
 
-    for file_name in file_list:
+    for file_name in wav_files:
         file_path = os.path.join(directory_in, file_name)
-        file_output = re.sub(string = file_name, pattern =  r".wav$", repl = ".txt")
-        file_path_out = os.path.join(subdirectory_out, file_output)
-        analyze_file(model = model, path_in= file_path, path_out=file_path_out, frameLength = frameLength, frameHop = frameHop, classes = classes)
+        file_output = re.sub(string = file_name, pattern =  r".wav$", repl = "_buzzdetect.txt")
+        file_path_out = os.path.join(directory_out, file_output)
+        analyze_file(model = model, path_in = file_path, path_out = file_path_out, frameLength = frameLength, frameHop = frameHop, classes = classes)
