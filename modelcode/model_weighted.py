@@ -35,6 +35,7 @@ classes = [
     "other",
     "siren",
     "traffic",
+    "train",
 
     # ESC-50 categories
     "rain",
@@ -121,8 +122,6 @@ my_model = tf.keras.Sequential([
     tf.keras.layers.Dense(len(classes))
 ], name='my_model')
 
-#my_model.summary()
-
 my_model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                  optimizer="adam",
                  metrics=['accuracy'])
@@ -135,7 +134,8 @@ history = my_model.fit(train_ds,
                        epochs=epochs_in,
                        validation_data=val_ds,
                        callbacks=callback,
-                       class_weight=map_class_to_weight) # ahhh crap. These weights are about expected frequencies? But for the hours-long audio...will the weights hold? The training set doesn't represent the real set when the training set is sub-second snippets.
+                       class_weight=map_class_to_weight)
 
 
 my_model.save(os.path.join("models", modelName), include_optimizer=True)
+
