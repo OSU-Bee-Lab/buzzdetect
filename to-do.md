@@ -1,48 +1,68 @@
 # So much to do...
 ## Preprocessing pipeline
-* Do we need to get Reed's snipper code working?
 * Does tfio.audio.AudioIOTensor` from [this guide](https://www.tensorflow.org/io/tutorials/audio) mean we don't have to worry about trimming down files?
-* MP3 → WAV; on supercomputer instead of local?
-  - Can we parallelize the process?
+  - Maybe? I can't figure out how to pass the raw audio tensor through the model
 
 ## Code
 ### train.py
-* Store copy of metadata csv within model directory; or is it already in the object? What about training parameters like number of epochs?
+* Store training history as python object in model directory (see the pickle package for python)
 * Allow to read from different directories
 
 ### analyze.py
-* Rename to something more useful (maybe just name each script after the action: train, analyze, preprocess)
 * Rewrite to input files from any directory structure (e.g., all WAVs within the input path) and output with a cloned directory structure
-* Output confidence score as probability?
-    - Issue: each frame has its own probability. How do you rigorously turn that into a bee probability?
-    - We wouldn't likely even use the probability, except as a cutoff to classify be activity, which we can do with the confidence score anyways.
-* Resolve issues with very large files
-  - [This guide](https://www.tensorflow.org/io/tutorials/audio) has something about audio slicing that might be useful; I can read in very large files with `tfio.audio.AudioIOTensor` and it doesn't kill my memory.
 * Throw out last frame that overruns audio file
-* Detect output file conflicts ahead of time (maybe just if the dir already exists, make a new dir with a timestamp)
+* Detect whether output file conflicts ahead of time instead of just appending (maybe just if the dir already exists, make a new dir with a timestamp)
 
 ### To build
 * MAKE script to create directory structure
 
 ## Machine Learning Design
-* Make sure you're doing biasing correctly! Does the sample from the training set apply to the sample from the field audio?
 * Make "none"/"ambient" audio in training set?
+* Re-create training set as mp3 instead of downsampled wav
 
 ## Supercomputing
 ### Figure out supercomputing
-* This doesn't take long at all to train or analyze a dozen files on my cheap laptop...surely we aren't using the full power of the supercomputer.
-  - last I used it, we got a warning about no CUDA cores/TensorRT warnings. The supercomputer has CUDA cores, right? Do we need to make some sort of request when we use them?
+* Run on GPU
+* Parallelize
+* Learn about scheduling
 
 ### Figure out Teams → OSC file transfer
 * Should be able to transfer files directly from Teams (SharePoint Azure Blobs) to the supercomputer. This would be much better in every way.
   - Send as single archive?
   - Send in multiple batches so that processing can start even as more files are arriving?
-  - Are we working with terabytes at once?
   - How do you move files from the scratch space to the local storage on the node?
 * Could also send files back right to SharePoint?
 
 ## Documentation
 ### README.md
-* Is now quite out of date.
 * FileZilla information should be updated when we figure out how to integrate SharePoint
 * CLI commands and flags will need to change once we update buzzdetect.py
+
+# So much done!
+## Preprocessing pipeline
+* Do we need to get Reed's snipper code working?
+  - New chunking code working that splits audio into 1h segments, but doesn't downsample or snip out buzzes only; I don't think we have a need to snip out buzzes at this point
+*  MP3 → WAV; on supercomputer instead of local?
+  -  No longer converting to WAV, but chunking on supercomputer probably makes sense; parallelizing would be great!
+
+## Code
+### train.py
+* [done!] Store metadata csv within model directory
+
+### analyze.py
+* Output confidence score as probability?
+    - Apparently, working with raw confidence scores is normal and acceptable; instead of probability, I need to figure out a confidence cutoff that balances false positives/negatives
+ 
+## Machine Learning Design
+* Make sure you're doing biasing correctly! Does the sample from the training set apply to the sample from the field audio?
+    - I'm going to call this one done just because I feel comfortable with the biasing at the moment; maybe the biases should shift the prior expectation from rates-in-training to rates-in-field, but rates-in-field can't really be known ahead of time.
+ 
+## Supercomputing
+### Figure out Teams → OSC file transfer
+* Are we working with terabytes at once?
+  - No. Lily's entire experiment is only 67GB (assuming it's all uploaded on Teams)
+ 
+## Documentation
+### README.md
+* FileZilla information should be updated when we figure out how to integrate SharePoint
+    - Bummer...FileZilla doesn't work with SharePoint unless you pay for Pro. Which honestly might be worth it...
