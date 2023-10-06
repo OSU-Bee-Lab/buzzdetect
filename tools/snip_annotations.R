@@ -4,14 +4,18 @@ library(stringr)
 project_directory = "./localData"
 
 df <- data.frame(
-  annotation = list.files(path = project_directory, recursive = T, full.names = T, pattern = "combinedAnnotations")
+  path_annotation = list.files(path = project_directory, recursive = T, full.names = T, pattern = "combinedAnnotations")
 ) %>% 
   mutate(
-    raws = annotation %>% 
+    path_raw = path_annotation %>% 
       str_replace("combined annotations", "raw audio") %>% 
-      str_replace(fixed("combined_annotations.txt"), ".mp3"),
+      str_replace(fixed("_combinedAnnotations.txt"), ".mp3"),
     
-    snip_directory = annotation %>% 
+    name_raw = path_raw  %>% 
+      str_split("/", simplify = T) %>% 
+      .[,ncol(.)],
+    
+    snip_dir = path_annotation %>% 
       str_replace("combined annotations", "annotated snips") %>% 
       # lazy way to kill the filenames off the end of the path
       str_split("/", simplify = F) %>% 
@@ -20,23 +24,53 @@ df <- data.frame(
   )
 
 # make directories
-df$snip_directory %>% 
+df$snip_dir %>% 
   unique() %>% 
   sapply(function(dp) dir.create(dp, recursive = T))
 
-sapply(
-  1:nrow(annotations),
-  FUN = function(){
-    annotation <- read.table(annotations[[obs]])
-    names(annotation) <- c("start", "end", "classification")
+ffcommands <- sapply(
+  simplify = F,
+  1:nrow(df),
+  function(ann){
+    path_raw <-  df$path_raw[ann]
+    snip_dir <-  df$snip_dir[ann]
     
-    
-    
-    sapply(
-      1:nrow(annotation),
-      function(obs){
-        filename
-      }
-    )
+    ffdf <- df$path_annotation[ann] %>% 
+      read.table() %>% 
+      rename("start" = V1, "end" = V2, "classification" = V3) %>% 
+      mutate(
+        filename = paste0(
+          classification,
+          "_",
+          df$name_raw[ann] %>% 
+            str_remove(fixed(".mp3")),
+          "_",
+          floor(start),
+          ".mp3"
+        ),
+        
+        path_out = paste0(snip_dir, "/", filename),
+        
+        command = paste0(
+          "ffmpeg -i ",
+          "\"", path_raw, "\"",
+          
+          " -ss ",
+          start,
+          
+          " -to ",
+          end,
+          
+          " -c copy ",
+         "\"", path_out, "\""
+        )
+      )
   }
-)
+) %>% 
+  bind_rows()
+
+ffcommands %>% 
+  filter(classification == "bee") %>% 
+  .$command %>% 
+  sapply(system)
+  
