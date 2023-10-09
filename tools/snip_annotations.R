@@ -53,7 +53,7 @@ ffcommands <- sapply(
         path_out = paste0(snip_dir, "/", filename),
         
         command = paste0(
-          "ffmpeg -n -i ",
+          "ffmpeg -y -i ",
           "\"", path_raw, "\"",
           
           " -ss ",
@@ -82,6 +82,8 @@ processed <- list.files(
 
 ffcommands %>% 
   filter(!(path_out %in% processed)) %>%
+  filter(classification == "bee") %>% 
+  slice(sample(1:n())) %>% # shuffles data frame
   .$command %>% 
-  mclapply(system, mc.cores = 6)
+  mclapply(system, mc.cores = 2)
   
