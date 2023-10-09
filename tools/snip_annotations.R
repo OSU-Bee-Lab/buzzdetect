@@ -1,5 +1,6 @@
 library(dplyr)
 library(stringr)
+library(parallel)
 
 project_directory = "./localData"
 
@@ -52,7 +53,7 @@ ffcommands <- sapply(
         path_out = paste0(snip_dir, "/", filename),
         
         command = paste0(
-          "ffmpeg -i ",
+          "ffmpeg -n -i ",
           "\"", path_raw, "\"",
           
           " -ss ",
@@ -69,8 +70,18 @@ ffcommands <- sapply(
 ) %>% 
   bind_rows()
 
+processed <- list.files(
+  path = project_directory,
+  pattern = "annotated snips",
+  include.dirs = T,
+  recursive = T,
+  full.names = T
+) %>% 
+  sapply(function(dp)list.files(path = dp, full.names = T, recursive = T), simplify = F) %>% 
+  unlist()
+
 ffcommands %>% 
-  filter(classification == "bee") %>% 
+  filter(!(path_out %in% processed)) %>%
   .$command %>% 
-  sapply(system)
+  mclapply(system, mc.cores = 6)
   
