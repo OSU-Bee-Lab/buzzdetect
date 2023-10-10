@@ -6,10 +6,14 @@ library(stringr)
 #
   project_root <- "./localData"
   
+  buffer <- 1
+  
   regex_chunk <- c(
       "Bee Audio 2022 Original" = "^.*_(\\d+)_(\\d+)_manual.*$",
       "Karlan Forrester - Soybean Attractiveness" = "^chunk(\\d+)_(\\d+).*$"
   )
+  
+  correctionDF <- read.csv(paste0(project_root, "/correction.csv"))
   
 
 #
@@ -103,10 +107,10 @@ library(stringr)
 #
   
   
-  combine <- function(site_in, recorder_in){
+  combine <- function(experiment_in, site_in, recorder_in){
     # work within a set; all annotations greater than the last time WITHIN the set belongs to that recording file
     set <- raw_files %>%
-      filter(site == site_in, recorder == recorder_in) %>% 
+      filter(experiment == experiment_in, site == site_in, recorder == recorder_in) %>% 
       arrange(time)
     
     setData <- sapply(
@@ -127,6 +131,12 @@ library(stringr)
         
         duration_total <- (((duration_raw[1] * 60) + duration_raw[2]) * 60) + duration_raw[3]
         
+        alignment_correction <- correctionDF %>% 
+          filter(experiment == experiment_in, site == site_in, recorder == recorder_in, raw_file == obs$filename) %>%
+          .$adjustment_to_labels %>% 
+          ifelse(length(.) == 0, 0, .)
+          
+        
         annotations <- annotation_data %>% 
           filter(
             site == obs$site,
@@ -136,11 +146,12 @@ library(stringr)
           )  %>% 
           mutate(
             difftime_chunk_raw = difftime(time_chunkStart, obs$time, units = "secs") %>% 
-              as.numeric(),
+              as.numeric() %>%
+              {. + alignment_correction},
             
-            start_adjusted = ((difftime_chunk_raw + start) - 1) %>% 
+            start_adjusted = ((difftime_chunk_raw + start) - buffer) %>% 
               ifelse(. < 0, 0, .), # expand the annotation by 1s on either side;
-            end_adjusted = (difftime_chunk_raw + end) + 1, # the south charleston annotations do not accurately capture the entire bee sound
+            end_adjusted = (difftime_chunk_raw + end) + buffer, # the south charleston annotations do not accurately capture the entire bee sound
             raw_file = obs$filepath,
             distance_from_end = duration_total - end_adjusted
           )
@@ -154,14 +165,15 @@ library(stringr)
     return(setData)
   }
   
-  siteRecorders <- raw_files %>% 
-    select(site, recorder) %>% 
+  uniqueRecorders <- raw_files %>% 
+    select(experiment, site, recorder) %>% 
     unique()
 
   data <- mapply(
     SIMPLIFY = F,
-    site_in = siteRecorders$site,
-    recorder_in = siteRecorders$recorder,
+    experiment_in = uniqueRecorders$experiment,
+    site_in = uniqueRecorders$site,
+    recorder_in = uniqueRecorders$recorder,
     FUN = combine
   )  
   
