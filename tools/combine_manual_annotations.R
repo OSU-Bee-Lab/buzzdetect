@@ -6,15 +6,19 @@ library(stringr)
 #
   project_root <- "./localData"
   
-  buffer <- 1
-  
   regex_chunk <- c(
       "Bee Audio 2022 Original" = "^.*_(\\d+)_(\\d+)_manual.*$",
       "Karlan Forrester - Soybean Attractiveness" = "^chunk(\\d+)_(\\d+).*$"
   )
   
-  correctionDF <- read.csv(paste0(project_root, "/correction.csv"))
+#
+# Conditional modifications
+#
   
+  alignmentDF <- read.csv(paste0(project_root, "/correction.csv"))
+  buffers <- c(
+    "bee" = 1.75
+  )
 
 #
 # Pull annotation data ----
@@ -131,7 +135,7 @@ library(stringr)
         
         duration_total <- (((duration_raw[1] * 60) + duration_raw[2]) * 60) + duration_raw[3]
         
-        alignment_correction <- correctionDF %>% 
+        alignment_correction <- alignmentDF %>% 
           filter(experiment == experiment_in, site == site_in, recorder == recorder_in, raw_file == obs$filename) %>%
           .$adjustment_to_labels %>% 
           ifelse(length(.) == 0, 0, .)
@@ -149,9 +153,12 @@ library(stringr)
               as.numeric() %>%
               {. + alignment_correction},
             
-            start_adjusted = ((difftime_chunk_raw + start) - buffer) %>% 
+            class_buffer = buffers[classification] %>% 
+              ifelse(is.na(.), 0, .),
+            
+            start_adjusted = ((difftime_chunk_raw + start) - class_buffer) %>% 
               ifelse(. < 0, 0, .), # expand the annotation by 1s on either side;
-            end_adjusted = (difftime_chunk_raw + end) + buffer, # the south charleston annotations do not accurately capture the entire bee sound
+            end_adjusted = (difftime_chunk_raw + end) + class_buffer, # the south charleston annotations do not accurately capture the entire bee sound
             raw_file = obs$filepath,
             distance_from_end = duration_total - end_adjusted
           )
