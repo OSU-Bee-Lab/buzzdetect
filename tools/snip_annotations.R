@@ -8,11 +8,13 @@
   
   project_root = "./localData"
   
+  threads <- 4
+  
 #
 # Master ----
 #
   
-  df <- data.frame(
+  annotations <- data.frame(
     path_annotation = list.files(path = project_root, recursive = T, full.names = T, pattern = "combinedAnnotations")
   ) %>% 
     mutate(
@@ -37,17 +39,17 @@
   
   ffcommands <- sapply(
     simplify = F,
-    1:nrow(df),
+    1:nrow(annotations),
     function(ann){
-      path_raw <-  df$path_raw[ann]
-      mp3_dir <-  df$mp3_dir[ann]
+      path_raw <-  annotations$path_raw[ann]
+      mp3_dir <-  annotations$mp3_dir[ann]
       
-      ffdf <- df$path_annotation[ann] %>% 
+      ffannotations <- annotations$path_annotation[ann] %>% 
         read.table() %>% 
         rename("start" = V1, "end" = V2, "classification" = V3) %>% 
         mutate(
           filename = paste0(
-            df$name_raw[ann] %>% 
+            annotations$name_raw[ann] %>% 
               str_remove(fixed(".mp3")),
             "_s",
             floor(start),
@@ -98,9 +100,8 @@
 #
 # Snip to mp3 ----
 #
-  
-# make directories
-  df$mp3_dir %>% 
+  # make directories
+  annotations$mp3_dir %>% 
     unique() %>% 
     sapply(function(dp) dir.create(dp, recursive = T))
   
@@ -117,18 +118,27 @@
   mp3_subset <- ffcommands %>%
     filter(!(mp3_out %in% mp3_processed)) %>%
     # filter(classification == "bee") %>%
-    slice(sample(1:n())) %>%  # shuffles data frame
-    .[1:100,]
+    slice(sample(1:n()))  # shuffles data frame
   
   mp3_subset %>%
     .$snip_command %>%
-    mclapply(system, mc.cores = 7)
+    mclapply(system, mc.cores = threads)
+  
+  mp3_processed <- list.files( # re-create mp3_processed to account for newly processed files (needed for knowing what wavs to conver)
+    path = project_root,
+    pattern = "mp3 snips",
+    include.dirs = T,
+    recursive = T,
+    full.names = T
+  ) %>% 
+    sapply(function(dp)list.files(path = dp, full.names = T, recursive = T), simplify = F) %>% 
+    unlist()
   
 #
 # Convert ----
 #
   # make directories
-  df$wav_dir %>% 
+  annotations$wav_dir %>% 
     unique() %>% 
     sapply(function(dp) dir.create(dp, recursive = T))
   
@@ -143,11 +153,12 @@
     unlist()
   
   wav_subset <- ffcommands %>% 
-  filter(!(wav_out %in% wav_processed)) %>%
+  filter(mp3_out %in% mp3_processed, !(wav_out %in% wav_processed)) %>%
   # filter(classification == "bee") %>%
   slice(sample(1:n())) # shuffles data frame
   
+
   wav_subset %>%
     .$wav_command %>%
-    mclapply(system, mc.cores = 7)
+    mclapply(system, mc.cores = threads)
     
