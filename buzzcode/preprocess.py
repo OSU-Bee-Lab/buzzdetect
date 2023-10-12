@@ -1,81 +1,43 @@
-# Script to make wav file chunks with Audacity label files from audio MP3 files from SONY recorders  
-# using ffmpeg, pydub and scikit-maad
-# 
-# Be sure ffmpeg is installed
-# 
-# Specify the directory as a command line argument or run this script on all subdirectories
-#
-# **Not working** find -type d -exec python3 [PATH TO] audio_downsample_split_id.py {} \;  
-
 import os
 import re
-import sys
-
-from datetime import datetime, timedelta
 
 from pydub import AudioSegment
+from pydub.utils import make_chunks
 
-from maad import sound, rois
-import pandas as pd
+raw = "./localData/Karlan Forrester - Soybean Attractiveness/raw audio/fake.mp3"
+filepath_in = "./localData/.wavtest/o.wav"
+directory_raw = "./localData/Karlan Forrester - Soybean Attractiveness/raw audio"
 
-# Read working directory from command line option
-working_directory = sys.argv[1]
-identifier = working_directory.replace("/", "_")
-print(identifier)
 
-# Set working directory
-os.chdir(working_directory)
+def chunk_directory(directory_raw):
+    rawFiles = []
 
-# Define chunk length
-chunk_length = 3600000 # in milliseconds; 1800000 = 30 min, 3600000 = 60 min, 7200000 = 120 min
+    for root, dirs, files in os.walk(directory_raw):
+        for file in files:
+            if file.endswith('.mp3'):
+                rawFiles.append(os.path.join(root, file))
 
-# Find raw audio files
-files_to_process = [] # Initialize array to hold raw audio files from SONY recorder
-files = os.listdir() # Get list of files in directory
-print(files)
-## Get list of SONY formatted mp3 files
-#for file in files:
-#    if(re.match("\d+_\d+\\.mp3", file)): # only find files formatted in output from SONY recorders e.g. '211216_1654.mp3'
-#        files_to_process.append(file)
-## Get pre-processed files downsampled to 16kHz
-for file in files:
-    if(re.match("\d+_\d+\\_16kHz.wav", file)): # only find downsampled files formatted in output from SONY recorders '211216_1654_16kHz.wav'
-    # if(file.startswith("\d") & file.endswith(".mp3")): 
-        files_to_process.append(file)
+    for raw in rawFiles:
+        chunk_out = re.sub(pattern = "raw audio", repl = "chunked audio", string = raw)
+        chunk_raw(raw, chunk_out)
 
-for file in files_to_process:
-    start_time = datetime( # Set datetime from raw SONY filename
-        int(file[0:2]) + 2000, #Year
-        int(file[2:4]), #Month
-        int(file[4:6]), #Day
-        int(file[7:9]), #Hour
-        int(file[9:11]) #Minute
-    )
-    
-    #sound_file = AudioSegment.from_mp3(file) # Load raw sound file
-    sound_file = AudioSegment.from_wav(file) # Load raw sound file
-    sound_file_length = len(sound_file) # Get length in milliseconds
-    audio_chunks = sound_file[::chunk_length]
-    for i, chunk in enumerate(audio_chunks):
-        chunk_time = start_time + timedelta(milliseconds=chunk_length * i)
-        out_wav = identifier + "{0}.wav".format(chunk_time.strftime("%Y%m%d_%H%M%S"))
-        out_csv = identifier + "{0}.txt".format(chunk_time.strftime("%Y%m%d_%H%M%S"))
-        print("exporting", out_wav)
-        #chunk = chunk.set_frame_rate(16000) # Downsample to 16kHz
-        chunk.export(out_wav, format="wav") 
-        s, fs = sound.load(out_wav)
-        buzz_list = rois.find_rois_cwt(s, fs, flims=(370,570), tlen=1, th=0.0001, display = False) # Second harmonic of bee wingbeat 370-570
-        try:
-            audacity_list = buzz_list.drop(columns=['min_f', 'max_f'])
-            audacity_list['label'] = "bee"
-            audacity_list.to_csv(out_csv, sep="\t", index=False, header=False)
-            print("exporting", out_csv)
-        except:
-            print("No detections, removing ", out_wav)
-            os.remove(out_wav)
+# note: 1hr wav in this format ~1.7 GB; seems like a doable default for memory
+# but maybe I need to balance memory usage per-thread? Divide total memory by total threads?
+def chunk_raw(raw_path, path_out_base, chunkLength_hr = 1):
+    chunk_length = int(1000 * 60 * 60 * chunkLength_hr) # in milliseconds
 
-#filtered_sound_file = sound_file.low_pass_filter(1000)
+    f = open(raw_path, 'rb')
+    audio_bytes = f.read()
+    raw_data = AudioSegment(audio_bytes, sample_width=2, frame_rate=16000, channels=1) # Manually specify file characteristics
 
-#play(sound_file)
-# sound_file = AudioSegment.from_mp3("audio 1.mp3")
-#audio_chunks = split_on_silence(sound_file, min_silence_len=500, silence_thresh=-40 )
+    chunks = make_chunks(audio_segment= raw_data, chunk_length = chunk_length)
+
+    for i, chunk in enumerate(chunks):
+        chunk_start_s = (i * chunk_length)/1000
+        path_out = path_out_base + "_" + chunk_start_s.__str__() + ".wav"
+        print("exporting", path_out)
+        chunk.export(
+            out_f = path_out,
+            format="wav",
+            codec = "pcm_s16le"
+        )
