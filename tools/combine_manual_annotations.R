@@ -16,6 +16,9 @@ library(stringr)
 #
   
   alignmentDF <- read.csv(paste0(project_root, "/correction.csv"))
+  
+  default_buffer <- 0.50
+  
   buffers <- c(
     "bee" = 1.75
   )
@@ -154,7 +157,7 @@ library(stringr)
               {. + alignment_correction},
             
             class_buffer = buffers[classification] %>% 
-              ifelse(is.na(.), 0, .),
+              ifelse(is.na(.), default_buffer, .),
             
             start_adjusted = ((difftime_chunk_raw + start) - class_buffer) %>% 
               ifelse(. < 0, 0, .), # expand the annotation by 1s on either side;
