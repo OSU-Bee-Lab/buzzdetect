@@ -1,3 +1,4 @@
+import os.path
 import tensorflow_hub as hub
 import pandas as pd
 from buzzcode.tools import *
@@ -35,10 +36,10 @@ def analyze_wav(model, classes, wav_in, frameLength = 500, frameHop = 250):
 
     return(output_df)
 
-def analyze_mp3_in_place(model, classes, mp3_in, chunkLength_hr = 1, frameLength = 1500, frameHop = 750):
+def analyze_mp3_in_place(model, classes, mp3_in, chunklength_hr = 1, frameLength = 1500, frameHop = 750):
     # make chunk list
     audio_length = librosa.get_duration(path=mp3_in)
-    chunk_length = int(60 * 60 * chunkLength_hr)  # in seconds
+    chunk_length = int(60 * 60 * chunklength_hr)  # in seconds
     chunklist = make_chunklist(audio_length, chunk_length)
 
     analysis_list = []
@@ -65,12 +66,8 @@ def analyze_mp3_in_place(model, classes, mp3_in, chunkLength_hr = 1, frameLength
 
 
 
-def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./output", frameLength = 500, frameHop = 250):
+def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./output", chunklength_hr = 1, frameLength = 1000, frameHop = 500):
     model = loadUp(modelname)
-
-    # if user leaves directory out as default, store results in model subdirectory of output
-    if directory_out == './output':
-        directory_out = os.path.join(directory_out, modelname)
 
     if not os.path.exists(directory_out):
         os.makedirs(directory_out)
@@ -83,12 +80,26 @@ def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./o
             # Remove the newline character and append the item to the list
             classes.append(line.strip())
 
-    file_list = os.listdir(directory_in)
-    r = re.compile('.+\.wav$')
-    wav_files = list(filter(r.match, file_list))
+    raw_files = []
+    for root, dirs, files in os.walk(directory_in):
+        for file in files:
+            if file.endswith('.mp3'):
+                raw_files.append(os.path.join(root, file))
 
-    for file_name in wav_files:
-        file_path = os.path.join(directory_in, file_name)
-        file_output = re.sub(string = file_name, pattern =  r".wav$", repl = "_buzzdetect.txt")
-        file_path_out = os.path.join(directory_out, file_output)
-        analyze_wav(model = model, wav_in= file_path, path_out = file_path_out, frameLength = frameLength, frameHop = frameHop, classes = classes)
+    dirs = []
+    for path in raw_files:
+        dirs.append(os.path.dirname(path))
+
+    dirs = list(set(dirs))
+
+    for dir in dirs:
+        dir_out = re.sub(string=dir, pattern=directory_in, repl=directory_out)
+        if not os.path.isdir(dir):
+            os.makedirs(dir_out)
+
+    for file in raw_files:
+        path_out = re.sub(string = file, pattern=directory_in, repl=directory_out)
+        path_out = re.sub(string = path_out, pattern =  "\.mp3$", repl = "_buzzdetect.txt")
+        analysis_df = analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, frameLength = frameLength, frameHop = frameHop, chunklength_hr = chunklength_hr)
+
+        analysis_df.to_csv(path_or_buf = path_out, sep = "\t", index = False)
