@@ -1,7 +1,5 @@
 # So much to do...
 ## Preprocessing pipeline
-* Does tfio.audio.AudioIOTensor` from [this guide](https://www.tensorflow.org/io/tutorials/audio) mean we don't have to worry about trimming down files?
-  - Maybe? I can't figure out how to pass the raw audio tensor through the model
 
 ## Code
 ### train.py
@@ -9,7 +7,6 @@
 * Allow to read from different directories
 
 ### analyze.py
-* Rewrite to input files from any directory structure (e.g., all WAVs within the input path) and output with a cloned directory structure
 * Throw out last frame that overruns audio file
 * Detect whether output file conflicts ahead of time instead of just appending (maybe just if the dir already exists, make a new dir with a timestamp)
 * Output analysis metadata (what model was used? When was the analysis run? Framerate? Framehop? Other things?)
@@ -18,8 +15,7 @@
 * MAKE script to create directory structure
 
 ## Machine Learning Design
-* Make "none"/"ambient" audio in training set?
-* Re-create training set as mp3 instead of downsampled wav
+* Make "none"/"ambient" audio in training set
 
 ## Supercomputing
 ### Figure out supercomputing
@@ -36,8 +32,10 @@
 
 ## Documentation
 ### README.md
-* FileZilla information should be updated when we figure out how to integrate SharePoint
 * CLI commands and flags will need to change once we update buzzdetect.py
+
+
+
 
 # So much done!
 ## Preprocessing pipeline
@@ -45,6 +43,14 @@
   - New chunking code working that splits audio into 1h segments, but doesn't downsample or snip out buzzes only; I don't think we have a need to snip out buzzes at this point
 *  MP3 → WAV; on supercomputer instead of local?
   -  No longer converting to WAV, but chunking on supercomputer probably makes sense; parallelizing would be great!
+* Does tfio.audio.AudioIOTensor` from [this guide](https://www.tensorflow.org/io/tutorials/audio) mean we don't have to worry about trimming down files?
+  - I don't think so. Giving up and just working with ffmpeg
+ 
+## Documentation
+### README.md
+* FileZilla information should be updated when we figure out how to integrate SharePoint
+    - Crap. Can't use FileZilla without paying (quite reasonable) license fee
+
 
 ## Code
 ### train.py
@@ -53,10 +59,14 @@
 ### analyze.py
 * Output confidence score as probability?
     - Apparently, working with raw confidence scores is normal and acceptable; instead of probability, I need to figure out a confidence cutoff that balances false positives/negatives
+* Rewrite to input files from any directory structure (e.g., all WAVs within the input path) and output with a cloned directory structure
+    - Done diddly. Takes in all mp3s located in input dir, finds the dirpaths of those mp3s, translates them to dirpaths of the output dir.
  
 ## Machine Learning Design
 * Make sure you're doing biasing correctly! Does the sample from the training set apply to the sample from the field audio?
     - I'm going to call this one done just because I feel comfortable with the biasing at the moment; maybe the biases should shift the prior expectation from rates-in-training to rates-in-field, but rates-in-field can't really be known ahead of time.
+* Re-create training set as mp3 instead of downsampled wav
+    - Well, it's wav, but wav directly from mp3 with minmal processing (only what's needed for yamnet)
  
 ## Supercomputing
 ### Figure out Teams → OSC file transfer
