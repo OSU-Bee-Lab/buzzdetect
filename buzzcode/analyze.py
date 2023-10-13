@@ -94,7 +94,7 @@ def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./o
 
     for dir in dirs:
         dir_out = re.sub(string=dir, pattern=directory_in, repl=directory_out)
-        if not os.path.isdir(dir):
+        if not os.path.exists(dir_out):
             os.makedirs(dir_out)
 
     for file in raw_files:
