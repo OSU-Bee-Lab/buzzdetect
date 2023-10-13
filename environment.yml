@@ -10,3 +10,4 @@ dependencies:
     - pydub==0.25.1
     - tensorflow_hub==0.14.0
     - tensorflow-io==0.34.0
+    - librosa==0.10
