@@ -31,6 +31,8 @@ def generate_model(modelName, trainingSet, epochs_in):
     training_data = './training/audio'
 
     metadata = pd.read_csv(training_metadata)
+    metadata.to_csv(model_path + "/metadata.csv")
+
     classes = metadata.category.unique()
 
     class_path = os.path.join(model_path, "classes.txt")
