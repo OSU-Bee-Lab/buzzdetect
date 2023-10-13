@@ -8,7 +8,14 @@
   
   project_root = "./localData"
   
-  threads <- 4
+  threads <- 7
+  
+  # This pipeline is split between two steps: snip-generating and wav-converting
+  # This may seem like an inefficient approach, and I should just snip and output a wav in one step,
+  # but for whatever reason, ffmpeg has been taking extremely long when doing both operations in one step.
+  # My suspicion is that ffmpeg is converting a large portion of the file to wav first, then snipping.
+  # It's been taking about 1 minute to snip-and-convert 1 file. It's much faster to snip first (~2.6 thread-seconds/file),
+  # then convert (negligible/file)
   
 #
 # Master ----
@@ -120,6 +127,7 @@
     # filter(classification == "bee") %>%
     slice(sample(1:n()))  # shuffles data frame
   
+
   mp3_subset %>%
     .$snip_command %>%
     mclapply(system, mc.cores = threads)
