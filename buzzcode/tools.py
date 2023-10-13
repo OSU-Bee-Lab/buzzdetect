@@ -1,8 +1,9 @@
 import tensorflow as tf
 import os
+from pydub import AudioSegment
 
-def loadUp(path):
-    return tf.keras.models.load_model(os.path.join("./models/", path))
+def loadUp(modelname):
+    return tf.keras.models.load_model(os.path.join("./models/", modelname))
 
 def load_wav_16k_mono(filename):
     """ Load a WAV file, convert it to a float tensor """ # I removed resampling as this should be done in preprocessing
@@ -12,3 +13,4 @@ def load_wav_16k_mono(filename):
           desired_channels=1)
     wav = tf.squeeze(wav, axis=-1)
     return wav
+
