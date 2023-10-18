@@ -10,6 +10,7 @@
 * Throw out last frame that overruns audio file
 * Detect whether output file conflicts ahead of time instead of just appending (maybe just if the dir already exists, make a new dir with a timestamp)
 * Output analysis metadata (what model was used? When was the analysis run? Framerate? Framehop? Other things?)
+* Add verbosity (change ffmpeg default to "converting [chunk]", add "analyzing [chunk]")
 
 ### To build
 * MAKE script to create directory structure
