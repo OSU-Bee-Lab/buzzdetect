@@ -36,20 +36,14 @@ def make_chunklist(audio_length, chunk_length):
 
     return chunklist
 
-def take_chunk(chunktuple, audio_path, dir_out = None):
-    if dir_out is None:
-        dir_out = os.path.dirname(audio_path)
-
+def take_chunk(chunktuple, audio_path, path_out):
     chunk_start = chunktuple[0]
     chunk_end = chunktuple[1]
-    audio_name = os.path.basename(audio_path)
-    chunk_name = re.sub(string=audio_name, pattern="\.mp3$",repl="_s" + chunk_start.__str__() + ".wav")
-    path_out = os.path.join(dir_out, chunk_name)
 
     subprocess.call([
         "ffmpeg",
         "-i", audio_path,  # Input file
-        "-n",  # don't overwrite, just error out
+        "-y",  # overwrite any chunks that didn't get deleted (from early interrupts)
         "-ar", "16000",  # Audio sample rate
         "-ac", "1",  # Audio channels
         "-ss", str(chunk_start),  # Start time
@@ -57,8 +51,6 @@ def take_chunk(chunktuple, audio_path, dir_out = None):
         "-c:a", "pcm_s16le",  # Audio codec
         path_out  # Output path
     ])
-
-    return path_out
 
 def chunk_raw(audio_path, path_out_base, chunkLength_hr = 1, chunks_to_process = "all"):
     audio_length = librosa.get_duration(path = audio_path)
