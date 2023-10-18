@@ -7,8 +7,8 @@ from buzzcode.preprocess import *
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
 
-def analyze_wav(model, classes, wav_in, frameLength = 500, frameHop = 250):
-    audio_data = load_wav_16k_mono(wav_in)
+def analyze_wav(model, classes, wav_path, frameLength = 500, frameHop = 250):
+    audio_data = load_wav_16k_mono(wav_path)
     audio_data_split = tf.signal.frame(audio_data, frameLength*16, frameHop*16, pad_end=True, pad_value=0)
 
     results = []
@@ -36,35 +36,42 @@ def analyze_wav(model, classes, wav_in, frameLength = 500, frameHop = 250):
 
     return(output_df)
 
-def analyze_mp3_in_place(model, classes, mp3_in, chunklength_hr = 1, frameLength = 1500, frameHop = 750):
+def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength_hr = 1, frameLength = 1500, frameHop = 750):
     # make chunk list
     audio_length = librosa.get_duration(path=mp3_in)
     chunk_length = int(60 * 60 * chunklength_hr)  # in seconds
     chunklist = make_chunklist(audio_length, chunk_length)
 
-    analysis_list = []
+
+    if result_dir is None:
+        result_dir = os.path.dirname(mp3_in)
 
     for chunk in chunklist:
-        # generate chunk and store path
-        chunk_path = take_chunk(chunk, mp3_in)
         chunk_start = chunk[0]
+        chunk_path = re.sub("\.mp3$", "_s" + chunk_start.__str__() + ".wav", mp3_in)
+        chunk_name = os.path.basename(chunk_path)
+
+        # if the result already exists, return None early
+        result_name = re.sub(string=chunk_name, pattern="\.wav$", repl="_results.txt")
+        result_path = os.path.join(result_dir, result_name)
+
+        if os.path.exists(result_path): # if this chunk has already been analyzed, skip!
+            continue
+
+        # generate chunk and store path
+        take_chunk(chunk, mp3_in, chunk_path)
 
         # analyze chunkfile
-        chunk_analysis = analyze_wav(model = model, classes = classes, wav_in = chunk_path, frameLength = frameLength, frameHop = frameHop)
+        chunk_analysis = analyze_wav(model = model, classes = classes, wav_path= chunk_path, frameLength = frameLength, frameHop = frameHop)
         chunk_analysis["start"] = chunk_analysis["start"] + chunk_start
         chunk_analysis["end"] = chunk_analysis["end"] + chunk_start
         # delete where frame out-runs file? chunk with one frame overlaps?
 
+        # write results
+        chunk_analysis.to_csv(path_or_buf=result_path, sep="\t", index=False)
+
         # delete chunkfile
         os.remove(chunk_path)
-
-        analysis_list.append(chunk_analysis)
-
-    full_analysis = pd.concat(analysis_list)
-
-    return(full_analysis)
-
-
 
 def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./output", chunklength_hr = 1, frameLength = 1000, frameHop = 500):
     model = loadUp(modelname)
@@ -98,8 +105,5 @@ def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./o
             os.makedirs(dir_out)
 
     for file in raw_files:
-        path_out = re.sub(string = file, pattern=directory_in, repl=directory_out)
-        path_out = re.sub(string = path_out, pattern =  "\.mp3$", repl = "_buzzdetect.txt")
-        analysis_df = analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, frameLength = frameLength, frameHop = frameHop, chunklength_hr = chunklength_hr)
-
-        analysis_df.to_csv(path_or_buf = path_out, sep = "\t", index = False)
+        dir_out = os.path.dirname(re.sub(string = file, pattern=directory_in, repl=directory_out))
+        analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, result_dir = dir_out, frameLength = frameLength, frameHop = frameHop, chunklength_hr = chunklength_hr)
