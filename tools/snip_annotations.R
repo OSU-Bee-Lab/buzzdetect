@@ -74,8 +74,6 @@
             
             " -vn ",
             
-            "-ar 16000 ",
-            
             "-ac 1 ",
             
             "-ss ",
@@ -95,7 +93,11 @@
             
             "\"", mp3_out, "\"",
             
-            " -c:a pcm_s16le ",
+            " -ar 16000 ",
+            
+            "-af highpass=f=200 ",
+            
+            "-c:a pcm_s16le ",
             
             "\"", wav_out, "\""
           )
@@ -162,7 +164,7 @@
   
   wav_subset <- ffcommands %>% 
   filter(mp3_out %in% mp3_processed, !(wav_out %in% wav_processed)) %>%
-  # filter(classification == "bee") %>%
+  filter(classification == "bee") %>%
   slice(sample(1:n())) # shuffles data frame
   
 
