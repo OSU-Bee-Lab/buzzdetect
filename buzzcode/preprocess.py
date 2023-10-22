@@ -46,7 +46,7 @@ def take_chunk(chunktuple, audio_path, path_out, band_low = 200):
         "-y",  # overwrite any chunks that didn't get deleted (from early interrupts)
         "-ar", "16000",  # Audio sample rate
         "-ac", "1",  # Audio channels
-        "-af", "highpass = f = " + band_low,
+        "-af", "highpass = f = " + str(band_low),
         "-ss", str(chunk_start),  # Start time
         "-to", str(chunk_end),  # End time
         "-c:a", "pcm_s16le",  # Audio codec
