@@ -17,6 +17,7 @@ library(stringr)
   
   alignmentDF <- read.csv(paste0(project_root, "/correction.csv"))
   
+  # hmm...these buffers should really be applied during the snipping; this script is meant only to combine annotations, not change them
   default_buffer <- 0.50
   
   buffers <- c(
