@@ -34,10 +34,6 @@ if (args.action == "train"):
     from buzzcode.train import *
     generate_model(args.modelname, args.trainingset, args.epochs)
 
-elif (args.action== "preprocess"):
-    print("this action is still a work in progress!")
-    exit()
-
 elif (args.action == "analyze"):
     from buzzcode.analyze import *
 
