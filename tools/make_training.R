@@ -206,9 +206,10 @@
     ) %>% 
     mutate(
       duration = end-start,
-      filename = paste0(basename, ".mp3")
+      filename = paste0(basename, ".wav")
     ) %>% 
     rename("category" = classification) %>% 
+    filter(!(category %in% c("goose", "otherr"))) %>% # kill the typo otherr (should fix later) and the goose observation, which is too rare to bother with for now
     select(
       experiment, site, recorder, filename, category, fold, duration
     )
