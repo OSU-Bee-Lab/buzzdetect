@@ -14,8 +14,8 @@ parser_analyze.add_argument('--modelname', required=True, type = str)
 parser_analyze.add_argument('--dir_in', required=False, default = "./audio_in", type = str)
 parser_analyze.add_argument('--dir_out', required=False, default = "./output", type = str)
 parser_analyze.add_argument('--chunkLength', required=False, default = 1, type = float)
-parser_analyze.add_argument('--frameLength', required=False, default = 1500, type = int)
-parser_analyze.add_argument('--frameHop', required=False, default = 750, type = int)
+parser_analyze.add_argument('--frameLength', required=False, default = 960, type = int)
+parser_analyze.add_argument('--frameHop', required=False, default = 480, type = int)
 
 # train
 parser_train = subparsers.add_parser('train', help = 'train a new model')
