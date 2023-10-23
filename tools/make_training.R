@@ -35,7 +35,7 @@
       
       mp3_dir = path_annotation %>% 
         str_replace("combined annotations", "mp3 snips") %>% 
-        # lazy way to kill the filenames off the end of the path
+        # lazy way to kill the basenames off the end of the path
         str_split("/", simplify = F) %>% 
         lapply(function(str){str[1:(length(str)-1)]}) %>% 
         sapply(function(str) paste0(str, collapse = "/")),
@@ -55,17 +55,18 @@
         read.table() %>% 
         rename("start" = V1, "end" = V2, "classification" = V3) %>% 
         mutate(
-          filename = paste0(
+          path_raw = path_raw,
+          
+          basename = paste0(
             annotations$name_raw[ann] %>% 
               str_remove(fixed(".mp3")),
             "_s",
             floor(start),
             "_",
-            classification,
-            ".mp3"
+            classification
           ),
           
-          mp3_out = paste0(mp3_dir, "/", filename),
+          mp3_out = paste0(mp3_dir, "/", basename, ".mp3"),
           wav_out = str_replace_all(mp3_out, "mp3", "wav"),
           
           snip_command = paste0(
@@ -164,7 +165,7 @@
   
   wav_subset <- ffcommands %>% 
   filter(mp3_out %in% mp3_processed, !(wav_out %in% wav_processed)) %>%
-  filter(classification == "bee") %>%
+  # filter(classification == "bee") %>%
   slice(sample(1:n())) # shuffles data frame
   
 
@@ -172,3 +173,49 @@
     .$wav_command %>%
     mclapply(system, mc.cores = threads)
     
+  
+#
+# Save full metadata
+#
+  annotations$fold <- rep(1:5, times = ceiling(nrow(annotations)/5)) %>% 
+    sample() %>% 
+    .[1:nrow(annotations)] # this assigns folds completely at random, but with a close-to-equal number of each fold number in total
+  
+  annotations <- bind_cols(
+    annotations,
+    annotations$path_raw %>% 
+      str_split(pattern = "/", simplify = F) %>% 
+      lapply(
+        X = .,
+        FUN = function(splitpath){data.frame(
+          experiment = splitpath[length(splitpath) - 4],
+          site = splitpath[length(splitpath) - 2],
+          recorder = splitpath[length(splitpath) - 1],
+          file = splitpath[length(splitpath) - 0]
+        )}
+      ) %>% 
+      bind_rows()
+  )
+  
+  
+  metadata <- ffcommands %>% 
+    select(start, end, classification, path_raw, basename) %>% 
+    left_join(
+      y = annotations %>% 
+        select(path_raw, fold, experiment, site, recorder)
+    ) %>% 
+    mutate(
+      duration = end-start,
+      filename = paste0(basename, ".mp3")
+    ) %>% 
+    rename("category" = classification) %>% 
+    select(
+      experiment, site, recorder, filename, category, fold, duration
+    )
+  
+  write.csv(
+    metadata,
+    "./training/metadata_HPF200_weighted.csv",
+    row.names = F
+  )
+  
