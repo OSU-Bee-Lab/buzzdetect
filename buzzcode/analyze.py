@@ -7,7 +7,7 @@ from buzzcode.preprocess import *
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
 
-def analyze_wav(model, classes, wav_path, frameLength = 500, frameHop = 250):
+def analyze_wav(model, classes, wav_path, frameLength = 960, frameHop = 480):
     audio_data = load_wav_16k_mono(wav_path)
     audio_data_split = tf.signal.frame(audio_data, frameLength*16, frameHop*16, pad_end=True, pad_value=0)
 
@@ -73,7 +73,7 @@ def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength_
         # delete chunkfile
         os.remove(chunk_path)
 
-def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./output", chunklength_hr = 1, frameLength = 1000, frameHop = 500):
+def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./output", chunklength_hr = 1, frameLength = 960, frameHop = 480):
     model = loadUp(modelname)
 
     if not os.path.exists(directory_out):
