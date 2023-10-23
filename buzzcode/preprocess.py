@@ -19,20 +19,20 @@ def make_chunklist(audio_length, chunk_length):
     chunklist = []
 
     if chunk_length > audio_length:
-        chunk_length = audio_length
+        return (0, audio_length)
 
     start_time = 0
     end_time = start_time + chunk_length
-    while end_time < audio_length:
-        end_time = min(start_time + chunk_length, audio_length) # end at the end of the chunk or end of the file, whichever comes first
-        time_remaining = audio_length - end_time
 
-        if time_remaining < 30: # if the remaining time is <30 seconds, combine it into the current chunk (avoids miniscule chunks)
+    while end_time < audio_length:
+        time_remaining = audio_length - end_time
+        if time_remaining < 30:  # if the remaining time is <30 seconds, combine it into the current chunk (avoids miniscule chunks)
             end_time = audio_length
 
         chunklist.append((start_time, end_time))
 
         start_time = end_time
+        end_time = start_time+chunk_length
 
     return chunklist
 
