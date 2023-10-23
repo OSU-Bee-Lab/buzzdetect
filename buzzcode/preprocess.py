@@ -19,7 +19,7 @@ def make_chunklist(audio_length, chunk_length):
     chunklist = []
 
     if chunk_length > audio_length:
-        return (0, audio_length)
+        return [(0, audio_length)]
 
     start_time = 0
     end_time = start_time + chunk_length
