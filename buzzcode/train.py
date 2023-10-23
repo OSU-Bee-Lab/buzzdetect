@@ -19,21 +19,32 @@ def generate_model(modelName, trainingSet, epochs_in):
 
     os.makedirs(model_path)
 
-    # # Load the class mapping
-    # #
-    #
-    # class_map_path = yamnet_model.class_map_path().numpy().decode('utf-8')
-    # class_names =list(pd.read_csv(class_map_path)['display_name'])
-
     # Acquiring and filtering training data
     #
-    training_metadata = os.path.join('./training/', "metadata_" + trainingSet + ".csv")
     training_data = './training/audio'
 
-    metadata = pd.read_csv(training_metadata)
+    metadata = pd.read_csv(os.path.join('./training/', "metadata_" + trainingSet + ".csv"))
+
     metadata.to_csv(model_path + "/metadata.csv")
 
     classes = metadata.category.unique()
+
+    durations = []
+    for cat in classes:
+        snip_duration = metadata[metadata.category == cat]["duration"]
+        total_duration = sum(snip_duration)
+
+        durations.append(total_duration)
+
+    weight_raw=[] # gah this is so hacky
+    for dur in durations:
+        weight_raw.append(sum(durations)/dur)
+
+    weights=[]
+    for raw in weight_raw:
+        weights.append(raw/sum(weight_raw))
+
+    map_class_to_weight = {index: weight for index, weight in enumerate(weights)}
 
     class_path = os.path.join(model_path, "classes.txt")
 
@@ -95,16 +106,14 @@ def generate_model(modelName, trainingSet, epochs_in):
     # Create your model
     #
 
-    my_model = tf.keras.Sequential([
+    model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(1024), dtype=tf.float32,
                               name='input_embedding'),
         tf.keras.layers.Dense(512, activation='relu'),
         tf.keras.layers.Dense(len(classes))
-    ], name='my_model')
+    ], name=modelName)
 
-    #my_model.summary()
-
-    my_model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+    model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                      optimizer="adam",
                      metrics=['accuracy'])
 
@@ -112,10 +121,11 @@ def generate_model(modelName, trainingSet, epochs_in):
                                                 patience=3,
                                                 restore_best_weights=True)
 
-    history = my_model.fit(train_ds,
+    history = model.fit(train_ds,
                            epochs=epochs_in,
                            validation_data=val_ds,
-                           callbacks=callback)
+                           callbacks=callback,
+                           class_weight=map_class_to_weight)
 
 
-    my_model.save(os.path.join("models", modelName), include_optimizer=True)
+    model.save(os.path.join("models", modelName), include_optimizer=True)
