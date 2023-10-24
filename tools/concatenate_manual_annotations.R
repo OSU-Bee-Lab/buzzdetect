@@ -4,7 +4,7 @@ library(stringr)
 #
 # Setup ----
 #
-  project_root <- "./localData"
+  project_root <- "./localValidation"
   
   regex_chunk <- c(
       "Bee Audio 2022 Original" = "^.*_(\\d+)_(\\d+)_manual.*$",
@@ -16,13 +16,6 @@ library(stringr)
 #
   
   alignmentDF <- read.csv(paste0(project_root, "/correction.csv"))
-  
-  # hmm...these buffers should really be applied during the snipping; this script is meant only to combine annotations, not change them
-  default_buffer <- 0.50
-  
-  buffers <- c(
-    "bee" = 1.75
-  )
 
 #
 # Pull annotation data ----
@@ -157,12 +150,10 @@ library(stringr)
               as.numeric() %>%
               {. + alignment_correction},
             
-            class_buffer = buffers[classification] %>% 
-              ifelse(is.na(.), default_buffer, .),
             
-            start_adjusted = ((difftime_chunk_raw + start) - class_buffer) %>% 
-              ifelse(. < 0, 0, .), # expand the annotation by 1s on either side;
-            end_adjusted = (difftime_chunk_raw + end) + class_buffer, # the south charleston annotations do not accurately capture the entire bee sound
+            start_adjusted = (difftime_chunk_raw + start) %>% 
+              ifelse(. < 0, 0, .),
+            end_adjusted = (difftime_chunk_raw + end),
             raw_file = obs$filepath,
             distance_from_end = duration_total - end_adjusted
           )

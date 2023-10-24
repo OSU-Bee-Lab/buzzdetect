@@ -6,7 +6,7 @@
   library(stringr)
   library(parallel)
   
-  project_root = "./localData"
+  project_root = "./localValidation"
   
   threads <- 7
   
@@ -16,6 +16,13 @@
   # My suspicion is that ffmpeg is converting a large portion of the file to wav first, then snipping.
   # It's been taking about 1 minute to snip-and-convert 1 file. It's much faster to snip first (~2.6 thread-seconds/file),
   # then convert (negligible/file)
+  
+  # hmm...these buffers should really be applied during the snipping; this script is meant only to combine annotations, not change them
+  default_buffer <- 0.50
+  
+  buffers <- c(
+    "bee" = 1.25
+  )
   
 #
 # Master ----
@@ -53,8 +60,14 @@
       
       ffannotations <- annotations$path_annotation[ann] %>% 
         read.table() %>% 
-        rename("start" = V1, "end" = V2, "classification" = V3) %>% 
+        rename("start_raw" = V1, "end_raw" = V2, "classification" = V3) %>% 
         mutate(
+          class_buffer = buffers[classification] %>% 
+            ifelse(is.na(.), default_buffer, .),
+          
+          start = start_raw - class_buffer,
+          end = end_raw + class_buffer,
+          
           path_raw = path_raw,
           
           basename = paste0(
