@@ -1,5 +1,6 @@
 library(dplyr)
 library(stringr)
+library(lubridate)
 
 #
 # Setup ----
@@ -37,7 +38,7 @@ library(stringr)
   
   names(annotation_files)[c(1, 4, ncol(annotation_files) - c(2, 1, 0))] <- c("filepath", "experiment", "site", "recorder", "filename")
   
-  annotation_data <- sapply(
+  annotations_all <- sapply(
     simplify = F,
     1:nrow(annotation_files),
     FUN = function(f){
@@ -190,10 +191,55 @@ library(stringr)
         data_collapsed %>% 
           filter(raw_file == fp) %>% 
           arrange(start_adjusted) %>% 
-          select(start_adjusted, end_adjusted,  classification)
+          select(start_adjusted, end_adjusted, classification, start_realtime_approximate, end_realtime_approximate) %>% 
+          rename("start" = start_adjusted, "end" = end_adjusted)
       }
     )
-
+  
+#
+# Add ambient observations ----
+#
+  day_hours <- 5:21
+  ambient_day_buffer <- 150 # the ambient sound has to be at least 5 minutes separated from other sounds
+  ambient_length <- 3 # total time of ambiance snip
+  
+  find_ambient_day <- function(annotations_in){
+    ambient_day <- annotations_in %>% 
+      mutate(
+        gap_before = start - lag(start),
+        gap_after = lead(start) - start # redundant (same as lead(gap_before)), but easier to think about
+      ) %>% 
+      filter(hour(start_realtime_approximate) %in% day_hours, gap_before > ambient_day_buffer, gap_after > ambient_day_buffer) %>% 
+      mutate(
+        start_next = lead(start)
+      )
+    
+    ambient_day$halfway <- select(ambient_day, end, start_next) %>%  # dunno why row-wise operation is being a pain in the butt, but here's a kludge solution
+      apply(1, mean)
+    
+    output <- ambient_day %>% 
+      filter(!is.na(halfway)) %>% 
+      mutate(
+        start_ambient = halfway - ambient_length/2,
+        end_ambient = halfway + ambient_length/2,
+        classification = "ambient_day"
+      ) %>% 
+      select(start_ambient, end_ambient, classification) %>% 
+      rename("start" = start_ambient, "end" = end_ambient)
+    
+    return(output)
+  }
+  
+  
+  annotations_final <- sapply(
+    annotations,
+    simplify = F,
+    FUN = function(annotation){
+      bind_rows(annotation, find_ambient_day(annotation)) %>% 
+        arrange(start) %>% 
+        select(start, end, classification)
+    }
+  )
 #  
 # write ----
 # 
@@ -210,10 +256,10 @@ library(stringr)
         str_replace(fixed(".mp3"), "_combinedAnnotations.txt") %>% 
         str_replace("raw audio", "combined annotations")
       
-      if(nrow(annotations[[fp]]) == 0){return(NULL)}
+      if(nrow(annotations_final[[fp]]) == 0){return(NULL)}
       
       names(annotations[[fp]]) <- NULL
-      write.table(x = annotations[[fp]], file = path_annotation, sep = "\t", row.names = F, col.names = F, quote = F)
+      write.table(x = annotations_final[[fp]], file = path_annotation, sep = "\t", row.names = F, col.names = F, quote = F)
     }
   )
   
