@@ -222,7 +222,7 @@ library(lubridate)
       mutate(
         start_ambient = halfway - ambient_length/2,
         end_ambient = halfway + ambient_length/2,
-        classification = "ambient_day"
+        classification = "ambient-day"
       ) %>% 
       select(start_ambient, end_ambient, classification) %>% 
       rename("start" = start_ambient, "end" = end_ambient)
