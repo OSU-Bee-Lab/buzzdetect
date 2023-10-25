@@ -2,6 +2,8 @@ import os
 import re
 import subprocess
 import librosa
+from subprocess import Popen
+from subprocess import list2cmdline
 
 def chunk_directory(directory_raw):
     rawFiles = []
@@ -53,6 +55,33 @@ def take_chunk(chunktuple, audio_path, path_out, band_low = 200):
         "-c:a", "pcm_s16le",  # Audio codec
         path_out  # Output path
     ])
+
+    def take_chunk_multi(chunklist, path_in_list, path_out_list, band_low=200):
+        commands = []
+        for chunk, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
+            command = list2cmdline(
+                [
+                    "ffmpeg",
+                    "-i", path_in,  # Input file
+                    "-y",  # overwrite any chunks that didn't get deleted (from early interrupts)
+                    "-ar", "16000",  # Audio sample rate
+                    "-ac", "1",  # Audio channels
+                    "-af", "highpass = f = " + str(band_low),
+                    "-ss", str(chunk[0]),  # Start time
+                    "-to", str(chunk[1]),  # End time
+                    "-c:a", "pcm_s16le",  # Audio codec
+                    path_out  # Output path
+                ]
+            )
+
+            commands.append(command)
+
+            processes = [Popen(cmd, shell = True) for cmd in commands]
+
+            for p in processes:
+                p.wait()
+
+
 
 def chunk_raw(audio_path, path_out_base, chunklength = 1, chunks_to_process ="all"):
     chunklist = make_chunklist(audio_path, chunklength)
