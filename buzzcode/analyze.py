@@ -41,25 +41,35 @@ def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength 
         result_dir = os.path.dirname(mp3_in)
 
     # make chunk list
-    chunk_length = int(60 * 60 * chunklength)  # in seconds
-    chunklist = make_chunklist(mp3_in, chunk_length)
+    chunklist = make_chunklist(mp3_in, chunklength)
+    batches = len(chunklist)/threads
+    batches = batches.__ceil__()
 
+    for batch in range(0, batches):
+        batchstart = batch*threads
+        if batch != (batches - 1):
+            chunknums = list(range(batchstart, batchstart + threads))
+        else:
+            chunknums = list(range(batchstart, len(chunklist)))
 
-    batches = len(chunklist)
+        print(chunknums)
 
+        chunklist_sub = [chunklist[i] for i in chunknums]
+        paths_in = mp3_in*threads
+        paths_out = []
+        for chunk in chunklist_sub:
+            chunk_start = chunk[0]
+            chunk_path = re.sub("\.mp3$", "_s" + chunk_start.__str__() + ".wav", mp3_in)
 
+            paths_out.append(chunk_path)
 
-    for chunk in chunklist:
-        chunk_start = chunk[0]
-        chunk_path = re.sub("\.mp3$", "_s" + chunk_start.__str__() + ".wav", mp3_in)
-        chunk_name = os.path.basename(chunk_path)
-
-        # if the result already exists, return None early
-        result_name = re.sub(string=chunk_name, pattern="\.wav$", repl="_results.txt")
-        result_path = os.path.join(result_dir, result_name)
-
-        if os.path.exists(result_path): # if this chunk has already been analyzed, skip!
-            continue
+        # hmmm this won't work anymore, but I really should find a way to make it work.
+        # # if the result already exists, return None early
+        # result_name = re.sub(string=chunk_name, pattern="\.wav$", repl="_results.txt")
+        # result_path = os.path.join(result_dir, result_name)
+        #
+        # if os.path.exists(result_path): # if this chunk has already been analyzed, skip!
+        #     continue
 
         # generate chunk
         take_chunk(chunk, mp3_in, chunk_path)
