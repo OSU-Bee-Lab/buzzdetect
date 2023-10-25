@@ -58,7 +58,7 @@ def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength_
         if os.path.exists(result_path): # if this chunk has already been analyzed, skip!
             continue
 
-        # generate chunk and store path
+        # generate chunk
         take_chunk(chunk, mp3_in, chunk_path)
 
         # analyze chunkfile
