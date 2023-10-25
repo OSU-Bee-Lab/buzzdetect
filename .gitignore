@@ -12,6 +12,7 @@ condaenv.l8rr463d.requirements.txt
 .idea/
 
 # directories for local execution
+processing/
 audio_in/
 local*/
 models/
