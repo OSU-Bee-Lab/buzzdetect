@@ -7,6 +7,7 @@
   library(parallel)
   
   project_root = "./localValidation"
+  modelname = "OSBA"
   
   threads <- 7
   
@@ -21,7 +22,8 @@
   default_buffer <- 0.50
   
   buffers <- c(
-    "bee" = 1.25
+    bee = 1.25,
+    ambient_day = 0
   )
   
 #
@@ -229,7 +231,9 @@
   
   write.csv(
     metadata,
-    "./training/metadata_HPF200_weighted.csv",
+    paste0("./training/metadata_", modelname, ".csv"),
     row.names = F
   )
+  
+  
   
