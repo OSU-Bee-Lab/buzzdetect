@@ -2,7 +2,7 @@ import os.path
 import shutil
 import re
 import pandas as pd
-from buzzcode.preprocess import make_chunklist
+from buzzcode.process import make_chunklist
 # 1. ~List all mp3s~
 # 2. Make chunklists for all mp3s
 # 3. Write all chunklists into one text file
@@ -89,6 +89,6 @@ def analyze_multi_worker(dir_proc, dir_in, dir_out, dir_chunk):
 
     chunklist_master['processable'] = chunklist_master['path_chunk'].apply(check_chunk_processable)
 
-    chunk_to_process=chunklist_master[chunklist_master.processable == True].iloc[0]
+    chunk_to_process = chunklist_master[chunklist_master.processable == True].iloc[0]
 
     # then process one chunk (think I need to make this a function in analyze.py

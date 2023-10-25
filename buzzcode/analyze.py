@@ -2,7 +2,7 @@ import os.path
 import tensorflow_hub as hub
 import pandas as pd
 from buzzcode.tools import *
-from buzzcode.preprocess import *
+from buzzcode.process import *
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
@@ -36,15 +36,18 @@ def analyze_wav(model, classes, wav_path, frameLength = 960, frameHop = 480):
 
     return(output_df)
 
-def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength_hr = 1, frameLength = 1500, frameHop = 750):
-    # make chunk list
-    audio_length = librosa.get_duration(path=mp3_in)
-    chunk_length = int(60 * 60 * chunklength_hr)  # in seconds
-    chunklist = make_chunklist(audio_length, chunk_length)
-
-
+def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength = 1, frameLength = 1500, frameHop = 750, threads = 5):
     if result_dir is None:
         result_dir = os.path.dirname(mp3_in)
+
+    # make chunk list
+    chunk_length = int(60 * 60 * chunklength)  # in seconds
+    chunklist = make_chunklist(mp3_in, chunk_length)
+
+
+    batches = len(chunklist)
+
+
 
     for chunk in chunklist:
         chunk_start = chunk[0]
@@ -106,4 +109,4 @@ def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./o
 
     for file in raw_files:
         dir_out = os.path.dirname(re.sub(string = file, pattern=directory_in, repl=directory_out))
-        analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, result_dir = dir_out, frameLength = frameLength, frameHop = frameHop, chunklength_hr = chunklength_hr)
+        analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, result_dir = dir_out, frameLength = frameLength, frameHop = frameHop, chunklength= chunklength_hr)
