@@ -80,14 +80,3 @@ def take_chunk(chunktuple, audio_path, path_out, band_low = 200):
 
             for p in processes:
                 p.wait()
-
-
-
-def chunk_raw(audio_path, path_out_base, chunklength = 1, chunks_to_process ="all"):
-    chunklist = make_chunklist(audio_path, chunklength)
-
-    if chunks_to_process == "all":
-        chunks_to_process = list(range(0, len(chunklist)))
-
-    for c in chunks_to_process:
-        take_chunk(chunktuple = chunklist[c], audio_path = audio_path, dir_out= path_out_base)
