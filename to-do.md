@@ -2,6 +2,10 @@
 ## Preprocessing pipeline
 
 ## Code
+### Multithreading
+* Well shoot, it looks like tensorflow is already multithreaded? When runing an analysis, on the ML step all cores are equally loaded (though only to ~50%) on my machine and there are 10 processes running with the command `python buzzdetect.py analyze --modelname [model]`. When a chunking step is running, one core is utilized with the ffmpeg command. So maybe the approach is to multithread-chunk files up to a storage limit, then run ML one chunk at a time. I think there are significant performance gains to be had here, because the ffmpeg step does take a long time to run with 1h chunks.
+   - This kinda invaldiates the multithreading script I started last night (though that would still work for a distributed compute, just saying).
+
 ### train.py
 * Store training history as python object in model directory (see the pickle package for python)
 * Allow to read from different directories
