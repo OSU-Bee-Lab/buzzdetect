@@ -1,9 +1,16 @@
 import tensorflow as tf
 import os
-from pydub import AudioSegment
 
 def loadUp(modelname):
-    return tf.keras.models.load_model(os.path.join("./models/", modelname))
+    model = tf.keras.models.load_model(os.path.join("./models/", modelname))
+
+    classes = []
+    with open(os.path.join("models/", modelname, "classes.txt"), "r") as file:
+        # Use a for loop to read each line from the file and append it to the list
+        for line in file:
+            # Remove the newline character and append the item to the list
+            classes.append(line.strip())
+    return model, classes
 
 def load_wav_16k_mono(filename):
     """ Load a WAV file, convert it to a float tensor """ # I removed resampling as this should be done in preprocessing

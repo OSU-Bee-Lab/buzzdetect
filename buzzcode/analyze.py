@@ -36,9 +36,9 @@ def analyze_wav(model, classes, wav_path, frameLength = 960, frameHop = 480):
 
     return(output_df)
 
-def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength = 1, frameLength = 1500, frameHop = 750, threads = 5):
-    if result_dir is None:
-        result_dir = os.path.dirname(mp3_in)
+def analyze_mp3_in_place(model, classes, mp3_in, dir_out = None, chunklength = 1, frameLength = 1500, frameHop = 750, threads = 5):
+    if dir_out is None:
+        dir_out = os.path.dirname(mp3_in)
 
     # make chunk list
     chunklist = make_chunklist(mp3_in, chunklength)
@@ -46,22 +46,22 @@ def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength 
     batches = batches.__ceil__()
 
     for batch in range(0, batches):
+        # for this batch, which chunks need to be calculated?
         batchstart = batch*threads
         if batch != (batches - 1):
             chunknums = list(range(batchstart, batchstart + threads))
         else:
             chunknums = list(range(batchstart, len(chunklist)))
 
-        print(chunknums)
-
         chunklist_sub = [chunklist[i] for i in chunknums]
         paths_in = mp3_in*threads
-        paths_out = []
+
         for chunk in chunklist_sub:
             chunk_start = chunk[0]
             chunk_path = re.sub("\.mp3$", "_s" + chunk_start.__str__() + ".wav", mp3_in)
 
-            paths_out.append(chunk_path)
+
+
 
         # hmmm this won't work anymore, but I really should find a way to make it work.
         # # if the result already exists, return None early
@@ -87,18 +87,10 @@ def analyze_mp3_in_place(model, classes, mp3_in, result_dir = None, chunklength 
         os.remove(chunk_path)
 
 def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./output", chunklength_hr = 1, frameLength = 960, frameHop = 480):
-    model = loadUp(modelname)
+    model, classes = loadUp(modelname)
 
     if not os.path.exists(directory_out):
         os.makedirs(directory_out)
-
-    classes = []
-
-    with open(os.path.join("models/", modelname, "classes.txt"), "r") as file:
-        # Use a for loop to read each line from the file and append it to the list
-        for line in file:
-            # Remove the newline character and append the item to the list
-            classes.append(line.strip())
 
     raw_files = []
     for root, dirs, files in os.walk(directory_in):
@@ -119,4 +111,4 @@ def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./o
 
     for file in raw_files:
         dir_out = os.path.dirname(re.sub(string = file, pattern=directory_in, repl=directory_out))
-        analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, result_dir = dir_out, frameLength = frameLength, frameHop = frameHop, chunklength= chunklength_hr)
+        analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, dir_out= dir_out, frameLength = frameLength, frameHop = frameHop, chunklength= chunklength_hr)
