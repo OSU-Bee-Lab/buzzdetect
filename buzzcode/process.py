@@ -4,6 +4,8 @@ import subprocess
 import librosa
 from subprocess import Popen
 from subprocess import list2cmdline
+import pandas as pd
+import numpy as np
 
 def chunk_directory(directory_raw):
     rawFiles = []
@@ -40,26 +42,7 @@ def make_chunklist(audio_path, chunklength, audio_length=None):
 
     return chunklist
 
-def take_chunk(chunktuple, audio_path, path_out, band_low = 200):
-    chunk_start = chunktuple[0]
-    chunk_end = chunktuple[1]
-
-    os.makedirs(os.path.dirname(path_out), exist_ok=True)
-
-    subprocess.call([
-        "ffmpeg",
-        "-i", audio_path,  # Input file
-        "-y",  # overwrite any chunks that didn't get deleted (from early interrupts)
-        "-ar", "16000",  # Audio sample rate
-        "-ac", "1",  # Audio channels
-        "-af", "highpass = f = " + str(band_low),
-        "-ss", str(chunk_start),  # Start time
-        "-to", str(chunk_end),  # End time
-        "-c:a", "pcm_s16le",  # Audio codec
-        path_out  # Output path
-    ])
-
-def take_chunk_multi(chunklist, path_in_list, path_out_list, band_low=200):
+def take_chunk(chunklist, path_in_list, path_out_list, band_low=200):
     commands = []
     for chunk, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
         command = list2cmdline(
@@ -83,3 +66,36 @@ def take_chunk_multi(chunklist, path_in_list, path_out_list, band_low=200):
 
     for p in processes:
         p.wait()
+
+
+def batch_conversion(paths_in, threads, storage_allot, memory_allot):
+    kbps = 256
+    # Pitzer cores, standard compute: 48
+    # Pitzer RAM, standard compute: 192GB
+
+    # Step One: Convert files to WAV
+
+    control = pd.DataFrame(paths_in, columns = ["path_raw"])
+
+    runtimes = []
+    wavsizes = []
+    for path in control['path_raw']:
+        runtime = librosa.get_duration(path=path)
+        runtimes.append(runtime)
+
+        wavsize = (runtime*kbps)*(1/8)*(1/(10**6))
+        wavsizes.append(wavsize)
+
+    control['runtime'] = runtimes
+    control["wavsize"] = wavsizes
+
+    control["running_size"] = pd.Series.cumsum(control["wavsize"])
+    control['batch'] = np.floor(control['running_size']/storage_allot)
+
+
+
+
+
+    # Step Two: Chunk
+    chunk_runtime_limit =  (memory_allot*8*(10**6))/(256)
+
