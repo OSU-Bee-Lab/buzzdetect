@@ -36,7 +36,7 @@ def analyze_wav(model, classes, wav_path, frameLength = 960, frameHop = 480):
 
     return(output_df)
 
-def analyze_mp3_in_place(model, classes, mp3_in, dir_out = None, chunklength = 1, frameLength = 1500, frameHop = 750, threads = 5):
+def analyze_mp3_in_place(model, classes, mp3_in, dir_out = None, chunklength = 1, frameLength = 960, frameHop = 480, threads = 5):
     if dir_out is None:
         dir_out = os.path.dirname(mp3_in)
 
