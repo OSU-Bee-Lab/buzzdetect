@@ -21,3 +21,12 @@ def load_wav_16k_mono(filename):
     wav = tf.squeeze(wav, axis=-1)
     return wav
 
+# given a list of paths, create the directories necessary to hold the files
+def make_unique_dirs(paths):
+    path_dirs = []
+    for path in paths:
+        path_dir = os.path.dirname(path)
+        path_dirs.append(path_dir)
+
+    for path_dir in list(set(path_dirs)):
+        os.makedirs(path_dir, exist_ok=True)
