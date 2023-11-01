@@ -16,8 +16,9 @@ def chunk_directory(directory_raw):
         chunk_out = re.sub(pattern = "raw audio", repl = "chunked audio", string = raw)
         chunk_raw(raw, chunk_out)
 
-def make_chunklist(audio_path, chunklength):
-    audio_length = librosa.get_duration(path = audio_path)
+def make_chunklist(audio_path, chunklength, audio_length=None):
+    if audio_length is None:
+        audio_length = librosa.get_duration(path = audio_path)
     chunklength_s = int(60 * 60 * chunklength) # in seconds
 
     chunklist = []
@@ -43,6 +44,8 @@ def take_chunk(chunktuple, audio_path, path_out, band_low = 200):
     chunk_start = chunktuple[0]
     chunk_end = chunktuple[1]
 
+    os.makedirs(os.path.dirname(path_out), exist_ok=True)
+
     subprocess.call([
         "ffmpeg",
         "-i", audio_path,  # Input file
@@ -56,27 +59,27 @@ def take_chunk(chunktuple, audio_path, path_out, band_low = 200):
         path_out  # Output path
     ])
 
-    def take_chunk_multi(chunklist, path_in_list, path_out_list, band_low=200):
-        commands = []
-        for chunk, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
-            command = list2cmdline(
-                [
-                    "ffmpeg",
-                    "-i", path_in,  # Input file
-                    "-y",  # overwrite any chunks that didn't get deleted (from early interrupts)
-                    "-ar", "16000",  # Audio sample rate
-                    "-ac", "1",  # Audio channels
-                    "-af", "highpass = f = " + str(band_low),
-                    "-ss", str(chunk[0]),  # Start time
-                    "-to", str(chunk[1]),  # End time
-                    "-c:a", "pcm_s16le",  # Audio codec
-                    path_out  # Output path
-                ]
-            )
+def take_chunk_multi(chunklist, path_in_list, path_out_list, band_low=200):
+    commands = []
+    for chunk, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
+        command = list2cmdline(
+            [
+                "ffmpeg",
+                "-i", path_in,  # Input file
+                "-y",  # overwrite any chunks that didn't get deleted (from early interrupts)
+                "-ar", "16000",  # Audio sample rate
+                "-ac", "1",  # Audio channels
+                "-af", "highpass = f = " + str(band_low),
+                "-ss", str(chunk[0]),  # Start time
+                "-to", str(chunk[1]),  # End time
+                "-c:a", "pcm_s16le",  # Audio codec
+                path_out  # Output path
+            ]
+        )
 
-            commands.append(command)
+        commands.append(command)
 
-            processes = [Popen(cmd, shell = True) for cmd in commands]
+    processes = [Popen(cmd, shell = True) for cmd in commands]
 
-            for p in processes:
-                p.wait()
+    for p in processes:
+        p.wait()
