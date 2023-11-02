@@ -22,11 +22,16 @@ def load_wav_16k_mono(filename):
     return wav
 
 # given a list of paths, create the directories necessary to hold the files
-def make_unique_dirs(paths):
+def get_unique_dirs(paths, make=True):
     path_dirs = []
     for path in paths:
         path_dir = os.path.dirname(path)
         path_dirs.append(path_dir)
 
-    for path_dir in list(set(path_dirs)):
-        os.makedirs(path_dir, exist_ok=True)
+    unique_dirs = list(set(path_dirs))
+
+    if make = True:
+        for path_dir in unique_dirs:
+            os.makedirs(path_dir, exist_ok=True)
+
+    return(unique_dirs)
