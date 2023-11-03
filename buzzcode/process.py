@@ -67,35 +67,13 @@ def take_chunk(chunklist, path_in_list, path_out_list, band_low=200):
     for p in processes:
         p.wait()
 
+def make_chunk_from_control(control, band_low = 200):
+    commands = []
+    for r in list(range(0, len(control))):
+        row = control.iloc[r]
+        commands.append(make_chunk_command(row['path_in'], row['path_chunk'], (row['start'], row['end']), band_low))
 
-def batch_conversion(paths_in, threads, storage_allot, memory_allot):
-    kbps = 256
-    # Pitzer cores, standard compute: 48
-    # Pitzer RAM, standard compute: 192GB
+    processes = [Popen(cmd, shell=True) for cmd in commands]
 
-    # Step One: Convert files to WAV
-
-    control = pd.DataFrame(paths_in, columns = ["path_raw"])
-
-    runtimes = []
-    wavsizes = []
-    for path in control['path_raw']:
-        runtime = librosa.get_duration(path=path)
-        runtimes.append(runtime)
-
-        wavsize = (runtime*kbps)*(1/8)*(1/(10**6))
-        wavsizes.append(wavsize)
-
-    control['runtime'] = runtimes
-    control["wavsize"] = wavsizes
-
-    control["running_size"] = pd.Series.cumsum(control["wavsize"])
-    control['batch'] = np.floor(control['running_size']/storage_allot)
-
-
-
-
-
-    # Step Two: Chunk
-    chunk_runtime_limit =  (memory_allot*8*(10**6))/(256)
-
+    for p in processes:
+        p.wait()
