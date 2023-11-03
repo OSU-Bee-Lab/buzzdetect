@@ -223,10 +223,13 @@ def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_i
 
     for b in list(range(0, max(control['batch']) + 1)):
         control_sub = control[control['batch'] == b]
+        print("chunking files: \n" + str(control_sub['path_chunk']))
         make_chunk_from_control(control_sub)
 
         for r in list(range(0, len(control_sub))):
             row = control_sub.iloc[r]
+
+            print("analyzing chunk " + row['path_chunk'])
             analysis = analyze_wav(
                 model,
                 classes,
