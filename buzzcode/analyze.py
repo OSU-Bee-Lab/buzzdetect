@@ -1,15 +1,18 @@
 import os.path
+import re
+import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
-from buzzcode.tools import *
-from buzzcode.process import *
+from buzzcode.tools import get_unique_dirs, loadUp, load_wav_16k_mono
+from buzzcode.process import make_chunklist, make_chunk_from_control
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
 
-def analyze_wav(model, classes, wav_path, frameLength = 960, frameHop = 480):
+
+def analyze_wav(model, classes, wav_path, frameLength=960, frameHop=480):
     audio_data = load_wav_16k_mono(wav_path)
-    audio_data_split = tf.signal.frame(audio_data, frameLength*16, frameHop*16, pad_end=True, pad_value=0)
+    audio_data_split = tf.signal.frame(audio_data, frameLength * 16, frameHop * 16, pad_end=True, pad_value=0)
 
     results = []
 
