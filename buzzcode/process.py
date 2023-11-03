@@ -1,44 +1,37 @@
 import os
 import re
-import subprocess
 import librosa
 from subprocess import Popen
 from subprocess import list2cmdline
 import pandas as pd
 import numpy as np
 
-def chunk_directory(directory_raw):
-    rawFiles = []
-    for root, dirs, files in os.walk(directory_raw):
-        for file in files:
-            if file.endswith('.mp3'):
-                rawFiles.append(os.path.join(root, file))
-
-    for raw in rawFiles:
-        chunk_out = re.sub(pattern = "raw audio", repl = "chunked audio", string = raw)
-        chunk_raw(raw, chunk_out)
-
-def make_chunklist(audio_path, chunklength, audio_length=None):
+def make_chunklist(audio_path, chunklength=None, audio_length=None):
     if audio_length is None:
-        audio_length = librosa.get_duration(path = audio_path)
-    chunklength_s = int(60 * 60 * chunklength) # in seconds
+        audio_length = librosa.get_duration(path=audio_path)
 
-    chunklist = []
-    if chunklength_s > audio_length:
+    if chunklength is None:
+        chunklength_s = audio_length
+    else:
+        chunklength_s = int(60 * 60 * chunklength)  # in seconds
+
+    if chunklength_s >= audio_length:
         return [(0, audio_length)]
 
-    start_time = 0
+    start_time = 0 - chunklength_s # a bit odd, but makes the while loop an easier read
     end_time = start_time + chunklength_s
 
+    chunklist = []
+
     while end_time < audio_length:
-        time_remaining = audio_length - end_time
-        if time_remaining < 30:  # if the remaining time is <30 seconds, combine it into the current chunk (avoids miniscule chunks)
+        start_time += chunklength_s
+        end_time += chunklength_s
+
+        # avoids miniscule chunks
+        if ((audio_length - end_time) < 30):
             end_time = audio_length
 
         chunklist.append((start_time, end_time))
-
-        start_time = end_time
-        end_time = start_time+chunklength_s
 
     return chunklist
 
