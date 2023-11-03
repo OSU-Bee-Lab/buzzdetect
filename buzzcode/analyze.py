@@ -3,6 +3,7 @@ import re
 import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
+import numpy as np
 from buzzcode.tools import get_unique_dirs, loadUp, load_wav_16k_mono
 from buzzcode.process import make_chunklist, make_chunk_from_control, make_chunk
 
@@ -122,8 +123,7 @@ def analyze_mp3_batch(modelname, directory_in="./audio_in", directory_out="./out
 
 
 # change path in to dir in, read files automatically; change chunking dir to processing
-def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_in="./audio_in", dir_out="./output",
-                        dir_proc="./processing", chunklength=None):
+def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_in="./audio_in", dir_out="./output", dir_proc="./processing", chunklength=None):
     model, classes = loadUp(modelname)
 
     if memory_allot > 16:
@@ -133,7 +133,7 @@ def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_i
     kbps = 256  # audio bit rate
 
     chunk_limit = (
-            min(memory_allot, storage_allot) *  # desired memory utilization in gigabytes
+            min(memory_allot, storage_allot/threads) *  # desired memory utilization in gigabytes
             (1 / 8) *  # expansion factor; convert memory gigabytes to wav gigabytes
             8 *  # convert to gigabits
             (10 ** 6) *  # convert to kilobits
@@ -141,18 +141,16 @@ def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_i
             (1 / 3600)  # convert to hours
     )  # in hours
 
-    # but should chunklength just be raw size/threads?
     if chunklength is None:
         chunklength = chunk_limit
+        print("Automatically setting chunk length to maximum: " + str(chunk_limit.__round__(1)) + " hours")
     else:
         if chunklength > chunk_limit:
             chunklength = chunk_limit
-            if memory_allot < storage_allot:
-                limiting_mem = "RAM"
+            if memory_allot < (storage_allot/threads):
+                print("Warning: desired chunk length exceeds memory allotment; reducing chunk length to " + str(chunk_limit.__round__(1)) + " hours")
             else:
-                limiting_mem = "storage"
-            print("Warning: desired chunk length exceeds " + limiting_mem + " allotment; reducing chunk length to " + str(
-                chunk_limit.__round__(1)) + " hours")
+                print("Warning: sum of chunks in batch exceeds storage allotment; reducing chunk length to " + str(chunk_limit.__round__(1)) + " hours")
 
     paths_raw = []
     for root, dirs, files in os.walk(dir_in):
@@ -169,65 +167,70 @@ def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_i
     chunkdf_list = []
     for path in paths_raw:
         chunkdf = pd.DataFrame(make_chunklist(path, chunklength=chunklength), columns=["start", "end"])
-        chunkdf.insert(0, "path_in", path)
+        chunkdf['path_in'] = path
+        chunkdf['chunknum'] = chunkdf.reset_index().index # returns row numbers
         chunkdf_list.append(chunkdf)
 
     control = pd.concat(chunkdf_list)
-    # PROBLEM: this assumes a 3 char file extension! e.g. .aiff won't work
-    control['filetype'] = control['path_in'].apply(lambda x: re.search(".{4}$", x).group(0))
 
-    paths_chunk = []
-    paths_out = []
-    for filetype, start, path in zip(control['filetype'], control['start'], control['path_in']):
-        path_chunk = re.sub(pattern=filetype, repl="_s" + str(start) + ".wav", string=path)
+    control['filetype'] = control['path_in'].apply(lambda x: os.path.splitext(x)[1]) # should allow analysis with any filetype ffmpeg supports
+
+    def get_path_chunk(path_raw, filetype, start):
+        path_chunk = re.sub(pattern=filetype, repl="_s" + str(start) + ".wav", string=path_raw)
         path_chunk = re.sub(pattern=dir_in, repl=dir_chunk, string=path_chunk)
-        paths_chunk.append(path_chunk)
+        return path_chunk
 
+    def get_path_out(path_chunk):
         path_out = re.sub(pattern=".wav$", repl="_buzzdetect.txt", string=path_chunk)
         path_out = re.sub(pattern=dir_chunk, repl=dir_out, string=path_out)
-        paths_out.append(path_out)
+        return path_out
 
-    control['path_chunk'] = paths_chunk
-    control['runtime'] = control['end'] - control['start']
-    control['wavsize'] = (control['runtime'] * kbps) * (1 / 8) * (1 / (10 ** 6))
-    control['path_out'] = paths_out
+    control['path_chunk'] = control.apply(lambda x: get_path_chunk(x.path_in, x.filetype, x.start), axis = 1)
+    control['path_out'] = control['path_chunk'].apply(lambda x: get_path_out(x))
 
-    batches = []
-    batch_storage = 0
-    batch = 0
-    thread_current = 1
-    for i in list(range(0, len(control))):
-        wav_size = control["wavsize"].iloc[i]
+    control = control.sort_values(by = ["chunknum", "path_in"])
+    # threadcount = list(range(0, threads)) * ((len(control)/threads).__ceil__())
+    # control['thread'] = threadcount[:len(control)]
 
-        if wav_size > storage_allot:
-            # to do: make this error list _all_ files that exceed storage allotment (also...add option to chunk in place?)
-            errmess = "Error: predicted size of wav file generated from " + control['path_raw'][
-                i] + " exceeds storage allotment"
-            sys.exit(errmess)
+    # control['runtime'] = control['end'] - control['start']
+    # control['wavsize'] = (control['runtime'] * kbps) * (1 / 8) * (1 / (10 ** 6))
 
-        if ((batch_storage + wav_size) > storage_allot) or (thread_current > threads):
-            batch += 1
-            batches.append(batch)
-            thread_current = 1
-            batch_storage = wav_size
-        else:
-            batches.append(batch)
-            batch_storage += wav_size
-
-        # for testing purposes
-        # print(
-        #     "thread " + str(thread_current) + " batch size " + str(batch_storage)
-        # )
-
-        thread_current += 1
-
-    control['batch'] = batches
+    # batches = []
+    # batch_storage = 0
+    # batch = 0
+    # thread_current = 1
+    # for i in list(range(0, len(control))):
+    #     wav_size = control["wavsize"].iloc[i]
+    #
+    #     if ((batch_storage + wav_size) > storage_allot) or (thread_current > threads):
+    #         batch += 1
+    #         batches.append(batch)
+    #         thread_current = 1
+    #         batch_storage = wav_size
+    #     else:
+    #         batches.append(batch)
+    #         batch_storage += wav_size
+    #
+    #     # for testing purposes
+    #     # print(
+    #     #     "thread " + str(thread_current) + " batch size " + str(batch_storage)
+    #     # )
+    #
+    #     thread_current += 1
+    #
+    # control['batch'] = batches
 
     get_unique_dirs(control['path_chunk'])
     get_unique_dirs(control['path_out'])
 
-    for b in list(range(0, max(control['batch']) + 1)):
-        control_sub = control[control['batch'] == b]
+    batches = list(range(0, (len(control)/threads).__ceil__()))
+
+    for batch in batches:
+        batch_start = batch * threads
+        batch_end = (batch_start + threads) - 1
+
+        control_sub = control[batch_start:batch_end]
+
         print("chunking files: \n" + str(control_sub['path_chunk']))
         make_chunk_from_control(control_sub)
 
