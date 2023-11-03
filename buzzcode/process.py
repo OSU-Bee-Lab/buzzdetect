@@ -42,6 +42,8 @@ def make_chunk_command(path_in, path_out, chunktuple, band_low=200):
         "ffmpeg",
         "-i", path_in,
         '-y',
+        "-v", "quiet",
+        "-stats",
         "-ss", str(chunktuple[0]),
         "-to", str(chunktuple[1]),
     ]
