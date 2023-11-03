@@ -28,43 +28,41 @@ def analyze_wav(model, classes, wav_path, frameLength=960, frameHop=480):
 
         results.append(
             {
-                "start" : (i*frameHop)/1000,
-                "end" : ((i*frameHop)+frameLength)/1000,
-                "classification" : inferred_class,
-                "confidence" : confidence_score
+                "start": (i * frameHop) / 1000,
+                "end": ((i * frameHop) + frameLength) / 1000,
+                "classification": inferred_class,
+                "confidence": confidence_score
             }
         )
 
     output_df = pd.DataFrame(results)
 
-    return(output_df)
+    return output_df
 
-def analyze_mp3_in_place(model, classes, mp3_in, dir_out = None, chunklength = 1, frameLength = 960, frameHop = 480, threads = 5):
+
+def analyze_mp3_in_place(model, classes, mp3_in, dir_out=None, chunklength=1, frameLength=960, frameHop=480, threads=5):
     if dir_out is None:
         dir_out = os.path.dirname(mp3_in)
 
     # make chunk list
     chunklist = make_chunklist(mp3_in, chunklength)
-    batches = len(chunklist)/threads
+    batches = len(chunklist) / threads
     batches = batches.__ceil__()
 
     for batch in range(0, batches):
         # for this batch, which chunks need to be calculated?
-        batchstart = batch*threads
+        batchstart = batch * threads
         if batch != (batches - 1):
             chunknums = list(range(batchstart, batchstart + threads))
         else:
             chunknums = list(range(batchstart, len(chunklist)))
 
         chunklist_sub = [chunklist[i] for i in chunknums]
-        paths_in = mp3_in*threads
+        paths_in = mp3_in * threads
 
         for chunk in chunklist_sub:
             chunk_start = chunk[0]
             chunk_path = re.sub("\.mp3$", "_s" + chunk_start.__str__() + ".wav", mp3_in)
-
-
-
 
         # hmmm this won't work anymore, but I really should find a way to make it work.
         # # if the result already exists, return None early
@@ -78,7 +76,8 @@ def analyze_mp3_in_place(model, classes, mp3_in, dir_out = None, chunklength = 1
         take_chunk(chunk, mp3_in, chunk_path)
 
         # analyze chunkfile
-        chunk_analysis = analyze_wav(model = model, classes = classes, wav_path= chunk_path, frameLength = frameLength, frameHop = frameHop)
+        chunk_analysis = analyze_wav(model=model, classes=classes, wav_path=chunk_path, frameLength=frameLength,
+                                     frameHop=frameHop)
         chunk_analysis["start"] = chunk_analysis["start"] + chunk_start
         chunk_analysis["end"] = chunk_analysis["end"] + chunk_start
         # delete where frame out-runs file? chunk with one frame overlaps?
