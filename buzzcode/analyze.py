@@ -25,13 +25,15 @@ def analyze_wav(model, classes, wav_path, frameLength=960, frameHop=480):
         inferred_class = classes[predicted_class_index]
 
         confidence_score = class_means[predicted_class_index]
+        bee_score = class_means[classes.index("bee")]
 
         results.append(
             {
                 "start": (i * frameHop) / 1000,
                 "end": ((i * frameHop) + frameLength) / 1000,
                 "classification": inferred_class,
-                "confidence": confidence_score
+                "confidence": confidence_score,
+                "confidence_bee": bee_score
             }
         )
 
