@@ -4,6 +4,7 @@ import librosa
 from subprocess import Popen
 from subprocess import list2cmdline
 import pandas as pd
+import sys
 import numpy as np
 
 def make_chunklist(audio_path, chunklength=None, audio_length=None):
@@ -35,27 +36,37 @@ def make_chunklist(audio_path, chunklength=None, audio_length=None):
 
     return chunklist
 
-def take_chunk(chunklist, path_in_list, path_out_list, band_low=200):
-    commands = []
-    for chunk, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
-        command = list2cmdline(
+# currently assumes wavs fed in have already been preprocessed
+def make_chunk_command(path_in, path_out, chunktuple, band_low=200):
+    cmdlist = [
+        "ffmpeg",
+        "-i", path_in,
+        '-y',
+        "-ss", str(chunktuple[0]),
+        "-to", str(chunktuple[1]),
+    ]
+
+    if re.search(r"mp3$", path_in):
+        cmdlist.extend(
             [
-                "ffmpeg",
-                "-i", path_in,  # Input file
-                "-y",  # overwrite any chunks that didn't get deleted (from early interrupts)
                 "-ar", "16000",  # Audio sample rate
                 "-ac", "1",  # Audio channels
                 "-af", "highpass = f = " + str(band_low),
-                "-ss", str(chunk[0]),  # Start time
-                "-to", str(chunk[1]),  # End time
-                "-c:a", "pcm_s16le",  # Audio codec
-                path_out  # Output path
+                "-c:a", "pcm_s16le"  # Audio codec
             ]
         )
 
-        commands.append(command)
+    cmdlist.extend([path_out])
 
-    processes = [Popen(cmd, shell = True) for cmd in commands]
+    return (list2cmdline(cmdlist))
+
+
+def make_chunk(chunklist, path_in_list, path_out_list, band_low=200):
+    commands = []
+    for chunktuple, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
+        commands.append(make_chunk_command(path_in, path_out, chunktuple, band_low))
+
+    processes = [Popen(cmd, shell=True) for cmd in commands]
 
     for p in processes:
         p.wait()
