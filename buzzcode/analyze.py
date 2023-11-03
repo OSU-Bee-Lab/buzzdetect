@@ -114,5 +114,6 @@ def analyze_mp3_batch(modelname, directory_in="./audio_in", directory_out="./out
             os.makedirs(dir_out)
 
     for file in raw_files:
-        dir_out = os.path.dirname(re.sub(string = file, pattern=directory_in, repl=directory_out))
-        analyze_mp3_in_place(model = model, classes=classes, mp3_in = file, dir_out= dir_out, frameLength = frameLength, frameHop = frameHop, chunklength= chunklength_hr)
+        dir_out = os.path.dirname(re.sub(string=file, pattern=directory_in, repl=directory_out))
+        analyze_mp3_in_place(model=model, classes=classes, mp3_in=file, dir_out=dir_out, frameLength=frameLength,
+                             frameHop=frameHop, chunklength=chunklength_hr)
