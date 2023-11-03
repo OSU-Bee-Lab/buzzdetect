@@ -88,7 +88,9 @@ def analyze_mp3_in_place(model, classes, mp3_in, dir_out=None, chunklength=1, fr
         # delete chunkfile
         os.remove(chunk_path)
 
-def analyze_mp3_batch(modelname, directory_in ="./audio_in", directory_out ="./output", chunklength_hr = 1, frameLength = 960, frameHop = 480):
+
+def analyze_mp3_batch(modelname, directory_in="./audio_in", directory_out="./output", chunklength_hr=1, frameLength=960,
+                      frameHop=480, threads=6, ):
     model, classes = loadUp(modelname)
 
     if not os.path.exists(directory_out):
