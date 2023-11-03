@@ -15,7 +15,7 @@
 * Detect whether output file conflicts ahead of time instead of just appending (maybe just if the dir already exists, make a new dir with a timestamp)
 * Output analysis metadata (what model was used? When was the analysis run? Framerate? Framehop? Other things?)
 * Add verbosity (change ffmpeg default to "converting [chunk]", add "analyzing [chunk]")
-* Check memory usage [(this stack overflow article proposes a good tool)](https://stackoverflow.com/questions/131303/how-can-i-measure-the-actual-memory-usage-of-an-application-or-process)
+* Figure out if the 8x expansion of wav size → memory utilization is the result of multithreading (I have 8 threads); does supercomputer see larger expansion?
 
 ### To build
 * MAKE script to create directory structure
