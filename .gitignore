@@ -16,5 +16,5 @@ processing/
 audio_in/
 local*/
 models/
-output/
+output*/
 training/
