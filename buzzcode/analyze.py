@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
 from buzzcode.tools import get_unique_dirs, loadUp, load_wav_16k_mono
-from buzzcode.process import make_chunklist, make_chunk_from_control
+from buzzcode.process import make_chunklist, make_chunk_from_control, make_chunk
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
@@ -73,7 +73,7 @@ def analyze_mp3_in_place(model, classes, mp3_in, dir_out=None, chunklength=1, fr
         #     continue
 
         # generate chunk
-        take_chunk(chunk, mp3_in, chunk_path)
+        make_chunk(chunk, mp3_in, chunk_path)
 
         # analyze chunkfile
         chunk_analysis = analyze_wav(model=model, classes=classes, wav_path=chunk_path, frameLength=frameLength,
