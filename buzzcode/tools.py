@@ -34,4 +34,4 @@ def get_unique_dirs(paths, make=True):
         for path_dir in unique_dirs:
             os.makedirs(path_dir, exist_ok=True)
 
-    return(unique_dirs)
+    return unique_dirs
