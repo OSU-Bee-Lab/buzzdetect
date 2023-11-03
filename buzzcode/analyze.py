@@ -131,8 +131,9 @@ def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_i
         print("Warning: chosen memory allotment causes overflow errors; memory allotment reduced to 16GB")
 
     kbps = 256  # audio bit rate
+
     chunk_limit = (
-            memory_allot *  # desired memory utilization in gigabytes
+            min(memory_allot, storage_allot) *  # desired memory utilization in gigabytes
             (1 / 8) *  # expansion factor; convert memory gigabytes to wav gigabytes
             8 *  # convert to gigabits
             (10 ** 6) *  # convert to kilobits
@@ -146,7 +147,11 @@ def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_i
     else:
         if chunklength > chunk_limit:
             chunklength = chunk_limit
-            print("Warning: desired chunk length exceeds memory allotment; reducing chunk length to " + str(
+            if memory_allot < storage_allot:
+                limiting_mem = "RAM"
+            else:
+                limiting_mem = "storage"
+            print("Warning: desired chunk length exceeds " + limiting_mem + " allotment; reducing chunk length to " + str(
                 chunk_limit.__round__(1)) + " hours")
 
     paths_raw = []
