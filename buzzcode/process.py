@@ -41,6 +41,7 @@ def make_chunk_command_single(path_in, path_out, chunktuple, band_low=200):
         '-y',
         "-v", "quiet",
         "-stats",
+        "-rf64", "always",
         "-ss", str(chunktuple[0]),
         "-to", str(chunktuple[1]),
     ]
@@ -73,6 +74,7 @@ def make_chunk_command(path_in, stub_out, chunklist):
         path_out = stub_out + "_s" + str(chunktuple[0]) + ".wav"
 
         cmdlet = [
+            "-rf64", "always",
             "-ss", str(chunktuple[0]),
             "-to", str(chunktuple[1]),
             path_out
