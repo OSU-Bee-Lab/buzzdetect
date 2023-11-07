@@ -1,27 +1,24 @@
 # So much to do...
-## Preprocessing pipeline
+## Retraining cycle
+* Figure out retraining cycle!
 
 ## Code
-### Multithreading
-* Well shoot, it looks like tensorflow is already multithreaded? When runing an analysis, on the ML step all cores are equally loaded (though only to ~50%) on my machine and there are 10 processes running with the command `python buzzdetect.py analyze --modelname [model]`. When a chunking step is running, one core is utilized with the ffmpeg command. So maybe the approach is to multithread-chunk files up to a storage limit, then run ML one chunk at a time. I think there are significant performance gains to be had here, because the ffmpeg step does take a long time to run with 1h chunks.
-   - This kinda invaldiates the multithreading script I started last night (though that would still work for a distributed compute, just saying).
-
 ### train.py
 * Store training history as python object in model directory (see the pickle package for python)
 * Allow to read from different directories
 
 ### analyze.py
-* Throw out last frame that overruns audio file
-* Detect whether output file conflicts ahead of time instead of just appending (maybe just if the dir already exists, make a new dir with a timestamp)
+* Throw out last frame that overruns audio file?
+     - This seems less important now that we're using full length data and long frames
+* Make system for smart-detecting what data have already been analyzed
+    - Read in all available buzzdetect outputs, chunk around those times
+    - Or, have user specify overwrite or new file
 * Output analysis metadata (what model was used? When was the analysis run? Framerate? Framehop? Other things?)
-* Add verbosity (change ffmpeg default to "converting [chunk]", add "analyzing [chunk]")
+* Set default output dir to a dir within the model
 * Figure out if the 8x expansion of wav size → memory utilization is the result of multithreading (I have 8 threads); does supercomputer see larger expansion?
 
-### To build
-* MAKE script to create directory structure
-
 ## Machine Learning Design
-* Make "none"/"ambient" audio in training set
+* Make ambient_night classification?
 
 ## Supercomputing
 ### Figure out supercomputing
@@ -29,19 +26,9 @@
 * Parallelize
 * Learn about scheduling
 
-### Figure out Teams → OSC file transfer
-* Should be able to transfer files directly from Teams (SharePoint Azure Blobs) to the supercomputer. This would be much better in every way.
-  - Send as single archive?
-  - Send in multiple batches so that processing can start even as more files are arriving?
-  - How do you move files from the scratch space to the local storage on the node?
-* Could also send files back right to SharePoint?
-
 ## Documentation
 ### README.md
 * CLI commands and flags will need to change once we update buzzdetect.py
-
-
-
 
 # So much done!
 ## Preprocessing pipeline
