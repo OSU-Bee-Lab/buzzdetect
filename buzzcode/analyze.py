@@ -5,7 +5,7 @@ import tensorflow_hub as hub
 import pandas as pd
 import numpy as np
 from buzzcode.tools import get_unique_dirs, loadUp, load_audio, load_flac
-from buzzcode.process import make_chunklist, make_chunk_from_control, make_chunk
+from buzzcode.process import make_chunklist, take_chunks_from_control, take_chunks
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
@@ -75,7 +75,7 @@ def analyze_mp3_in_place(model, classes, mp3_in, dir_out=None, chunklength=1, fr
         #     continue
 
         # generate chunk
-        make_chunk(chunk, mp3_in, chunk_path)
+        take_chunks(chunk, mp3_in, chunk_path)
 
         # analyze chunkfile
         chunk_analysis = analyze_wav(model=model, classes=classes, wav_path=chunk_path, frameLength=frameLength,
@@ -231,7 +231,7 @@ def analyze_multithread(modelname, threads, storage_allot, memory_allot=4, dir_i
         control_sub = control[batch_start:batch_end]
 
         print("chunking files: \n" + str(control_sub['path_chunk']))
-        make_chunk_from_control(control_sub)
+        take_chunks_from_control(control_sub)
 
         for r in list(range(0, len(control_sub))):
             row = control_sub.iloc[r]

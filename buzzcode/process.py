@@ -37,7 +37,7 @@ def make_chunklist(audio_path, chunklength=None, audio_length=None):
     return chunklist
 
 # currently assumes wavs fed in have already been preprocessed
-def make_chunk_command(path_in, path_out, chunktuple, band_low=200):
+def make_chunk_command_single(path_in, path_out, chunktuple, band_low=200):
     cmdlist = [
         "ffmpeg",
         "-i", path_in,
@@ -63,21 +63,44 @@ def make_chunk_command(path_in, path_out, chunktuple, band_low=200):
     return (list2cmdline(cmdlist))
 
 
-def make_chunk(chunklist, path_in_list, path_out_list, band_low=200):
+def make_chunk_command(path_in, stub_out, chunklist):
+    cmdlist = [
+        "ffmpeg",
+        "-i", path_in,
+        '-y',
+        "-v", "quiet",
+        "-stats"
+    ]
+
+    for chunktuple in chunklist:
+        path_out = stub_out + "_s" + str(chunktuple[0]) + ".wav"
+
+        cmdlet = [
+            "-ss", str(chunktuple[0]),
+            "-to", str(chunktuple[1]),
+            path_out
+        ]
+
+        cmdlist.extend(cmdlet)
+
+    return list2cmdline(cmdlist)
+
+
+def take_chunks(chunklist, path_in_list, path_out_list, band_low=200):
     commands = []
     for chunktuple, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
-        commands.append(make_chunk_command(path_in, path_out, chunktuple, band_low))
+        commands.append(make_chunk_command_single(path_in, path_out, chunktuple, band_low))
 
     processes = [Popen(cmd, shell=True) for cmd in commands]
 
     for p in processes:
         p.wait()
 
-def make_chunk_from_control(control, band_low = 200):
+def take_chunks_from_control(control, band_low = 200):
     commands = []
     for r in list(range(0, len(control))):
         row = control.iloc[r]
-        commands.append(make_chunk_command(row['path_in'], row['path_chunk'], (row['start'], row['end']), band_low))
+        commands.append(make_chunk_command_single(row['path_in'], row['path_chunk'], (row['start'], row['end']), band_low))
 
     processes = [Popen(cmd, shell=True) for cmd in commands]
 
