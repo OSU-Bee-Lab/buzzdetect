@@ -2,6 +2,7 @@ import tensorflow as tf
 import tensorflow_io as tfio
 import os
 
+
 def loadUp(modelname):
     model = tf.keras.models.load_model(os.path.join("./models/", modelname))
 
@@ -13,22 +14,38 @@ def loadUp(modelname):
             classes.append(line.strip())
     return model, classes
 
-def load_flac(flac_path):
-    """ Load a FLAC file, convert it to a float tensor """ # I removed resampling as this should be done in preprocessing
-    flac_contents = tf.io.read_file(flac_path)
-    flac = tfio.audio.decode_flac(flac_contents, dtype=tf.int16)
-    return flac
+def load_flac(filepath):
+    """ Load a FLAC file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
+    flac_contents = tf.io.read_file(filepath)
+    flac_tensor = tfio.audio.decode_flac(flac_contents, dtype=tf.int16)
+    flac_tensor = tf.squeeze(flac_tensor, axis=-1)
+    flac_32 = tf.cast(flac_tensor, tf.float32)
+    flac_normalized = (flac_32 + 1)/(65536/2) # I think this is the right operation; tf.audio.decode_wav says:
+                                              # "-32768 to 32767 signed 16-bit values will be scaled to -1.0 to 1.0 in float"
+                                              # dividing by (65536/2) makes the max 1.0 and the min a rounding error from 0
 
+    return flac_normalized
 
-
-def load_wav_16k_mono(wav_path):
-    """ Load a WAV file, convert it to a float tensor """ # I removed resampling as this should be done in preprocessing
-    wav_contents = tf.io.read_file(wav_path)
+def load_wav(filepath):
+    """ Load a WAV file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
+    wav_contents = tf.io.read_file(filepath)
     wav, sample_rate = tf.audio.decode_wav(
-          wav_contents,
-          desired_channels=1)
+        wav_contents,
+        desired_channels=1)
     wav = tf.squeeze(wav, axis=-1)
     return wav
+
+def load_audio(filepath):
+    extension = os.path.splitext(filepath)[1].lower()
+
+    if extension == ".wav":
+        load_wav(filepath)
+    elif extension == ".flac":
+        load_flac(filepath)
+    else:
+        quit("buzzdetect only supports .wav and .flac files for analysis")
+
+
 
 # given a list of paths, create the directories necessary to hold the files
 def get_unique_dirs(paths, make=True):

@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
 import numpy as np
-from buzzcode.tools import get_unique_dirs, loadUp, load_wav_16k_mono
+from buzzcode.tools import get_unique_dirs, loadUp, load_audio, load_flac
 from buzzcode.process import make_chunklist, make_chunk_from_control, make_chunk
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
@@ -12,7 +12,7 @@ yamnet_model = hub.load(yamnet_model_handle)
 
 
 def analyze_wav(model, classes, wav_path, frameLength=960, frameHop=480):
-    audio_data = load_wav_16k_mono(wav_path)
+    audio_data = load_audio(wav_path)
     audio_data_split = tf.signal.frame(audio_data, frameLength * 16, frameHop * 16, pad_end=True, pad_value=0)
 
     results = []
@@ -41,7 +41,6 @@ def analyze_wav(model, classes, wav_path, frameLength=960, frameHop=480):
     output_df = pd.DataFrame(results)
 
     return output_df
-
 
 def analyze_mp3_in_place(model, classes, mp3_in, dir_out=None, chunklength=1, frameLength=960, frameHop=480, threads=5):
     if dir_out is None:
