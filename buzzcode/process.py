@@ -1,11 +1,8 @@
-import os
 import re
 import librosa
 from subprocess import Popen
 from subprocess import list2cmdline
-import pandas as pd
-import sys
-import numpy as np
+
 
 def make_chunklist(audio_path, chunklength=None, audio_length=None):
     if audio_length is None:
