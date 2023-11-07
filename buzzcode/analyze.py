@@ -3,8 +3,7 @@ import re
 import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
-import numpy as np
-from buzzcode.tools import get_unique_dirs, loadUp, load_audio, load_flac
+from buzzcode.tools import get_unique_dirs, loadUp, load_audio
 from buzzcode.process import make_chunklist, take_chunks_from_control, take_chunks
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
