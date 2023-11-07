@@ -49,7 +49,7 @@ def make_chunk_command_single(path_in, path_out, chunktuple, band_low=200):
     if re.search(r"mp3$", path_in):
         cmdlist.extend(
             [
-                "-ar", "16000",  # Audio sample rate
+                "-sample_rate", "16000",  # Audio sample rate
                 "-ac", "1",  # Audio channels
                 "-af", "highpass = f = " + str(band_low),
                 "-c:a", "pcm_s16le"  # Audio codec
