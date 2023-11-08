@@ -1,4 +1,4 @@
-import re
+import os
 import librosa
 from subprocess import Popen
 from subprocess import list2cmdline
@@ -33,34 +33,15 @@ def make_chunklist(audio_path, chunklength=None, audio_length=None):
 
     return chunklist
 
-# currently assumes wavs fed in have already been preprocessed
-def make_chunk_command_single(path_in, path_out, chunktuple, band_low=200):
-    cmdlist = [
-        "ffmpeg",
-        "-i", path_in,
-        '-y',
-        "-v", "quiet",
-        "-stats",
-        "-rf64", "always",
-        "-ss", str(chunktuple[0]),
-        "-to", str(chunktuple[1]),
-    ]
+def cmd_chunk(path_in, stub_out, chunklist, convert = False, band_low=200):
+    extension = os.path.splitext(path_in)[1].lower()
+    if extension == ".mp3":
+        print("input file is mp3, adding conversion options to ffmpeg call")
+        convert = True
 
-    if re.search(r"mp3$", path_in):
-        cmdlist.extend(
-            [
-                "-sample_rate", "16000",  # Audio sample rate
-                "-ac", "1",  # Audio channels
-                "-af", "highpass = f = " + str(band_low),
-                "-c:a", "pcm_s16le"  # Audio codec
-            ]
-        )
+        # improvement: automatically detect which conditions are not satisfied
+        # also...is there penalty in redundant options? Why not always set them?
 
-    cmdlist.extend([path_out])
-
-    return (list2cmdline(cmdlist))
-
-def make_chunk_command(path_in, stub_out, chunklist):
     cmdlist = [
         "ffmpeg",
         "-i", path_in,
@@ -75,16 +56,27 @@ def make_chunk_command(path_in, stub_out, chunklist):
         cmdlet = [
             "-rf64", "always",
             "-ss", str(chunktuple[0]),
-            "-to", str(chunktuple[1]),
-            path_out
+            "-to", str(chunktuple[1])
         ]
+
+        if convert is True:
+            cmdlet.extend(
+                [
+                    "-sample_rate", "16000",  # Audio sample rate
+                    "-ac", "1",  # Audio channels
+                    "-af", "highpass = f = " + str(band_low),
+                    "-c:a", "pcm_s16le"  # Audio codec
+                ]
+            )
+
+        cmdlet.append(path_out)
 
         cmdlist.extend(cmdlet)
 
     return list2cmdline(cmdlist)
 
 
-def make_conversion_command(path_in, path_out, band_low=200):
+def cmd_convert(path_in, path_out, band_low=200):
     cmdlist = [
         "ffmpeg",
         "-i", path_in,
@@ -105,7 +97,7 @@ def take_chunks(control, band_low = 200):
     commands = []
     for r in list(range(0, len(control))):
         row = control.iloc[r]
-        commands.append(make_chunk_command_single(row['path_in'], row['path_chunk'], (row['start'], row['end']), band_low))
+        commands.append(cmd_chunk(row['path_in'], row['path_chunk'], (row['start'], row['end']), band_low))
 
     processes = [Popen(cmd, shell=True) for cmd in commands]
 
