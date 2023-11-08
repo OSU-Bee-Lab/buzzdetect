@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
 from buzzcode.tools import unique_dirs, loadUp, load_audio, size_to_runtime
-from buzzcode.process import make_chunklist, take_chunks_from_control, take_chunks, make_conversion_command
+from buzzcode.process import make_chunklist, take_chunks, take_chunks, make_conversion_command
 from subprocess import Popen
 
 # change path in to dir in, read files automatically; change chunking dir to processing
@@ -85,7 +85,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out="./out
         control_sub = control_chunk[batch_start:batch_end]
 
         print("chunking files: \n" + str(control_sub['path_chunk']))
-        take_chunks_from_control(control_sub)
+        take_chunks(control_sub)
 
         for r in list(range(0, len(control_sub))):
             row = control_sub.iloc[r]

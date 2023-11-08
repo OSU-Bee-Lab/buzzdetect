@@ -101,17 +101,7 @@ def make_conversion_command(path_in, path_out, band_low=200):
 
     return list2cmdline(cmdlist)
 
-def take_chunks(chunklist, path_in_list, path_out_list, band_low=200):
-    commands = []
-    for chunktuple, path_in, path_out in zip(chunklist, path_in_list, path_out_list):
-        commands.append(make_chunk_command_single(path_in, path_out, chunktuple, band_low))
-
-    processes = [Popen(cmd, shell=True) for cmd in commands]
-
-    for p in processes:
-        p.wait()
-
-def take_chunks_from_control(control, band_low = 200):
+def take_chunks(control, band_low = 200):
     commands = []
     for r in list(range(0, len(control))):
         row = control.iloc[r]
