@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import tensorflow as tf
 import tensorflow_hub as hub
-from buzzcode.tools import load_wav_16k_mono
+from buzzcode.tools import load_audio
 
 # Loading YAMNet from TensorFlow Hub
 #
@@ -67,7 +67,7 @@ def generate_model(modelName, trainingSet, epochs_in):
     main_ds = tf.data.Dataset.from_tensor_slices((filenames, targets, folds))
 
     def load_wav_for_map(filename, label, fold):
-      return load_wav_16k_mono(filename), label, fold
+      return load_audio(filename), label, fold
 
     main_ds = main_ds.map(load_wav_for_map)
 
