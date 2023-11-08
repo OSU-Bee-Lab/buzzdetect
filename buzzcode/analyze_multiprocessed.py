@@ -3,7 +3,7 @@ import re
 import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
-from buzzcode.tools import get_unique_dirs, loadUp, load_audio, size_to_runtime
+from buzzcode.tools import unique_dirs, loadUp, load_audio, size_to_runtime
 from buzzcode.process import make_chunklist, take_chunks_from_control, take_chunks, make_conversion_command
 from subprocess import Popen
 
@@ -30,7 +30,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out="./out
         return path_conv
 
     control['path_conv'] = control['path_raw'].apply(lambda x: raw_to_conv(x))
-    get_unique_dirs(control['path_conv'])
+    unique_dirs(control['path_conv'])
 
     control['command_conv'] = list(map(make_conversion_command, control['path_raw'], control['path_conv']))
 
@@ -73,8 +73,8 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out="./out
     control['chunk_stub'], control['chunk_cmd'] = control['path_raw'].apply(lambda x: raw_to_chunkcmd(x))
 
     # make chunk dirs
-    get_unique_dirs(re.sub(dir_raw,dir_chunk,control['path_raw']))
-    get_unique_dirs(control_chunk['path_out'])
+    unique_dirs(re.sub(dir_raw, dir_chunk, control['path_raw']))
+    unique_dirs(control_chunk['path_out'])
 
     batches = list(range(0, (len(control_chunk)/threads).__ceil__()))
 

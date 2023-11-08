@@ -48,19 +48,19 @@ def load_audio(filepath):
 
 
 # given a list of paths, create the directories necessary to hold the files
-def get_unique_dirs(paths, make=True):
+def unique_dirs(paths, make=False):
     path_dirs = []
     for path in paths:
         path_dir = os.path.dirname(path)
         path_dirs.append(path_dir)
 
-    unique_dirs = list(set(path_dirs))
+    dirs_unique = list(set(path_dirs))
 
     if make == True:
-        for path_dir in unique_dirs:
+        for path_dir in dirs_unique:
             os.makedirs(path_dir, exist_ok=True)
 
-    return unique_dirs
+    return dirs_unique
 
 def size_to_runtime(size_GB, kbps=256):
     runtime = (
