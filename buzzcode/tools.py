@@ -61,3 +61,23 @@ def get_unique_dirs(paths, make=True):
             os.makedirs(path_dir, exist_ok=True)
 
     return unique_dirs
+
+def size_to_runtime(size_GB, kbps=256):
+    runtime = (
+        size_GB *  # gigabytes
+        8 *  # convert to gigabits
+        (10 ** 6) *  # convert to kilobits
+        (1 / kbps)
+    )  # convert to seconds
+
+    return runtime
+
+def runtime_to_size(runtime, kbps=256):
+    size_GB = (
+        runtime *  # seconds
+        kbps * # kilobits
+        (1/8) *  # kilobytes
+        (10 ** -6) # gigabytes
+    )
+
+    return size_GB
