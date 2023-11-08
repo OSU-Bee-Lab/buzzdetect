@@ -3,7 +3,6 @@ import librosa
 from subprocess import Popen
 from subprocess import list2cmdline
 
-
 def make_chunklist(filepath, chunklength=None, audio_length=None):
     if audio_length is None:
         audio_length = librosa.get_duration(path=filepath)
@@ -73,24 +72,6 @@ def cmd_chunk(path_in, stub_out, chunklist, convert = False, band_low=200):
         cmdlet.append(path_out)
 
         cmdlist.extend(cmdlet)
-
-    return list2cmdline(cmdlist)
-
-
-def cmd_convert(path_in, path_out, band_low=200):
-    cmdlist = [
-        "ffmpeg",
-        "-i", path_in,
-        '-n', # don't overwrite
-        "-v", "quiet", # low verbosity
-        "-stats",
-        "-sample_rate", "16000",  # Audio sample rate
-        "-ac", "1",  # Audio channels
-        "-af", "highpass = f = " + str(band_low),
-        "-c:a", "pcm_s16le"  # Audio codec
-        "-rf64", "always",  # use riff64 to allow large files
-        path_out
-    ]
 
     return list2cmdline(cmdlist)
 

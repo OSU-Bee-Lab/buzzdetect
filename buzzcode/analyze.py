@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
 from buzzcode.tools import loadUp, load_audio
-from buzzcode.process import make_chunklist, take_chunks
+from buzzcode.chunk import make_chunklist, take_chunks
 
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
