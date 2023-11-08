@@ -10,9 +10,9 @@ yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
 
 
-def analyze_wav(model, classes, wav_path, framlength=960, framehop=480):
+def analyze_wav(model, classes, wav_path, framelength=960, framehop=480):
     audio_data = load_audio(wav_path)
-    audio_data_split = tf.signal.frame(audio_data, framlength * 16, framehop * 16, pad_end=True, pad_value=0)
+    audio_data_split = tf.signal.frame(audio_data, framelength * 16, framehop * 16, pad_end=True, pad_value=0)
 
     results = []
 
@@ -30,7 +30,7 @@ def analyze_wav(model, classes, wav_path, framlength=960, framehop=480):
         results.append(
             {
                 "start": (i * framehop) / 1000,
-                "end": ((i * framehop) + framlength) / 1000,
+                "end": ((i * framehop) + framelength) / 1000,
                 "classification": inferred_class,
                 "confidence": confidence_score,
                 "confidence_bee": bee_score
@@ -77,7 +77,7 @@ def analyze_mp3_in_place(model, classes, mp3_in, dir_out=None, chunklength=1, fr
         take_chunks(chunk, mp3_in, chunk_path)
 
         # analyze chunkfile
-        chunk_analysis = analyze_wav(model=model, classes=classes, wav_path=chunk_path, framlength=frameLength,
+        chunk_analysis = analyze_wav(model=model, classes=classes, wav_path=chunk_path, framelength=frameLength,
                                      framehop=frameHop)
         chunk_analysis["start"] = chunk_analysis["start"] + chunk_start
         chunk_analysis["end"] = chunk_analysis["end"] + chunk_start
