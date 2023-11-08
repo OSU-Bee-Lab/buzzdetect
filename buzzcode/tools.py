@@ -14,17 +14,19 @@ def loadUp(modelname):
             classes.append(line.strip())
     return model, classes
 
+
 def load_flac(filepath):
     """ Load a FLAC file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
     flac_contents = tf.io.read_file(filepath)
     flac_tensor = tfio.audio.decode_flac(flac_contents, dtype=tf.int16)
     flac_tensor = tf.squeeze(flac_tensor, axis=-1)
     flac_32 = tf.cast(flac_tensor, tf.float32)
-    flac_normalized = (flac_32 + 1)/(65536/2) # I think this is the right operation; tf.audio.decode_wav says:
-                                              # "-32768 to 32767 signed 16-bit values will be scaled to -1.0 to 1.0 in float"
-                                              # dividing by (65536/2) makes the max 1.0 and the min a rounding error from 0
+    flac_normalized = (flac_32 + 1) / (65536 / 2)  # I think this is the right operation; tf.audio.decode_wav says:
+    # "-32768 to 32767 signed 16-bit values will be scaled to -1.0 to 1.0 in float"
+    # dividing by (65536/2) makes the max 1.0 and the min a rounding error from 0
 
     return flac_normalized
+
 
 def load_wav(filepath):
     """ Load a WAV file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
@@ -35,6 +37,7 @@ def load_wav(filepath):
     wav = tf.squeeze(wav, axis=-1)
     return wav
 
+
 def load_audio(filepath):
     extension = os.path.splitext(filepath)[1].lower()
 
@@ -44,7 +47,6 @@ def load_audio(filepath):
         load_flac(filepath)
     else:
         quit("buzzdetect only supports .wav and .flac files for analysis")
-
 
 
 # given a list of paths, create the directories necessary to hold the files
@@ -62,22 +64,24 @@ def unique_dirs(paths, make=False):
 
     return dirs_unique
 
+
 def size_to_runtime(size_GB, kbps=256):
     runtime = (
-        size_GB *  # gigabytes
-        8 *  # convert to gigabits
-        (10 ** 6) *  # convert to kilobits
-        (1 / kbps)
+            size_GB *  # gigabytes
+            8 *  # convert to gigabits
+            (10 ** 6) *  # convert to kilobits
+            (1 / kbps)
     )  # convert to seconds
 
     return runtime
 
+
 def runtime_to_size(runtime, kbps=256):
     size_GB = (
-        runtime *  # seconds
-        kbps * # kilobits
-        (1/8) *  # kilobytes
-        (10 ** -6) # gigabytes
+            runtime *  # seconds
+            kbps *  # kilobits
+            (1 / 8) *  # kilobytes
+            (10 ** -6)  # gigabytes
     )
 
     return size_GB

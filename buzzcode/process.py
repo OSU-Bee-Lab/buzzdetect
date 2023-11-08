@@ -4,9 +4,9 @@ from subprocess import Popen
 from subprocess import list2cmdline
 
 
-def make_chunklist(audio_path, chunklength=None, audio_length=None):
+def make_chunklist(filepath, chunklength=None, audio_length=None):
     if audio_length is None:
-        audio_length = librosa.get_duration(path=audio_path)
+        audio_length = librosa.get_duration(path=filepath)
 
     if chunklength is None:
         chunklength_s = audio_length
@@ -32,6 +32,7 @@ def make_chunklist(audio_path, chunklength=None, audio_length=None):
         chunklist.append((start_time, end_time))
 
     return chunklist
+
 
 def cmd_chunk(path_in, stub_out, chunklist, convert = False, band_low=200):
     extension = os.path.splitext(path_in)[1].lower()

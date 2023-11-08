@@ -64,7 +64,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out="./out
         chunk_stub = re.sub(pattern=".mp3", repl="",string=path_raw)
         chunk_stub = re.sub(pattern=dir_raw, repl=dir_chunk,string=chunk_stub)
 
-        chunklist = make_chunklist(audio_path=path_raw, chunklength=chunklength)
+        chunklist = make_chunklist(filepath=path_raw, chunklength=chunklength)
         cmd = make_chunk_command(path_in=path_raw, stub_out=chunk_stub, chunklist=chunklist)
 
         return cmd
