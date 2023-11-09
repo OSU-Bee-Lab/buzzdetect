@@ -57,7 +57,7 @@ def cmd_chunk(path_in, chunklist, convert = False, band_low=200):
     cmdlist = [
         "ffmpeg",
         "-i", path_in,
-        '-y',
+        '-n',
         "-v", "quiet",
         "-stats"
     ]
