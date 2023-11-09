@@ -42,11 +42,13 @@ def load_audio(filepath):
     extension = os.path.splitext(filepath)[1].lower()
 
     if extension == ".wav":
-        load_wav(filepath)
+        data = load_wav(filepath)
     elif extension == ".flac":
-        load_flac(filepath)
+        data = load_flac(filepath)
     else:
         quit("buzzdetect only supports .wav and .flac files for analysis")
+
+    return data
 
 
 # given a list of paths, create the directories necessary to hold the files
