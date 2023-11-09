@@ -12,7 +12,10 @@ def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_length=Non
         chunklength_s = int(60 * 60 * chunklength)  # in seconds
 
     if chunklength_s >= audio_length:
-        return [(0, audio_length)]
+        if chunk_stub is None:
+            return [(0, audio_length)]
+        else:
+            return [(0, audio_length, chunk_stub)]
 
     start_time = 0 - chunklength_s # a bit odd, but makes the while loop an easier read
     end_time = start_time + chunklength_s
