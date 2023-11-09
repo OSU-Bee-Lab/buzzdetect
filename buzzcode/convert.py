@@ -10,7 +10,7 @@ def cmd_convert(path_in, path_out, quiet = True, band_low=200):
 
     cmdlist.extend(
         [
-            "-sample_rate", "16000",  # Audio sample rate
+            "-ar", "16000",  # Audio sample rate
             "-ac", "1",  # Audio channels
             "-af", "highpass = f = " + str(band_low),
             "-c:a", "pcm_s16le",  # Audio codec
