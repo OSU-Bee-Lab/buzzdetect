@@ -3,7 +3,7 @@ import librosa
 from subprocess import Popen
 from subprocess import list2cmdline
 
-def make_chunklist(filepath, chunklength=None, audio_length=None):
+def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_length=None):
     if audio_length is None:
         audio_length = librosa.get_duration(path=filepath)
 
@@ -28,19 +28,32 @@ def make_chunklist(filepath, chunklength=None, audio_length=None):
         if ((audio_length - end_time) < 30):
             end_time = audio_length
 
-        chunklist.append((start_time, end_time))
+        chunktuple = (start_time, end_time)
+        if chunk_stub is not None:
+            chunk_path = chunk_stub + "_s" + start_time.__floor__().__str__() + ".wav"
+            chunktuple += (chunk_path,)
+
+        chunklist.append(chunktuple)
 
     return chunklist
 
+def make_chunk_paths(chunklist, chunk_stub):
+    chunk_paths = []
 
-def cmd_chunk(path_in, stub_out, chunklist, convert = False, band_low=200):
+    for chunktuple in chunklist:
+        chunk_path = chunk_stub + "_s" + str(chunktuple[0]) + ".wav"
+        chunk_paths.append(chunk_path)
+
+    return chunk_paths
+
+def cmd_chunk(path_in, chunklist, convert = False, band_low=200):
     extension = os.path.splitext(path_in)[1].lower()
     if extension == ".mp3":
         print("input file is mp3, adding conversion options to ffmpeg call")
         convert = True
 
         # improvement: automatically detect which conditions are not satisfied
-        # also...is there penalty in redundant options? Why not always set them?
+        # also...is there penalty in redundant ffmpeg options? Why not always set them?
 
     cmdlist = [
         "ffmpeg",
@@ -51,8 +64,6 @@ def cmd_chunk(path_in, stub_out, chunklist, convert = False, band_low=200):
     ]
 
     for chunktuple in chunklist:
-        path_out = stub_out + "_s" + str(chunktuple[0]) + ".wav"
-
         cmdlet = [
             "-rf64", "always",
             "-ss", str(chunktuple[0]),
@@ -69,7 +80,7 @@ def cmd_chunk(path_in, stub_out, chunklist, convert = False, band_low=200):
                 ]
             )
 
-        cmdlet.append(path_out)
+        cmdlet.append(chunktuple[2])
 
         cmdlist.extend(cmdlet)
 
