@@ -1,5 +1,3 @@
-from subprocess import list2cmdline
-
 def cmd_convert(path_in, path_out, band_low=200):
     cmdlist = [
         "ffmpeg",
@@ -15,4 +13,4 @@ def cmd_convert(path_in, path_out, band_low=200):
         path_out
     ]
 
-    return list2cmdline(cmdlist)
+    return cmdlist

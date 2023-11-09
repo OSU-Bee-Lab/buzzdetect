@@ -1,7 +1,6 @@
 import os
 import librosa
 from subprocess import Popen
-from subprocess import list2cmdline
 
 def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_length=None):
     if audio_length is None:
@@ -84,7 +83,7 @@ def cmd_chunk(path_in, chunklist, convert = False, band_low=200):
 
         cmdlist.extend(cmdlet)
 
-    return list2cmdline(cmdlist)
+    return cmdlist
 
 def take_chunks(control, band_low = 200):
     commands = []
