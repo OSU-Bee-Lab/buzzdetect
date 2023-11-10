@@ -143,8 +143,6 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
                 start_analysis.set()
 
 
-            time.sleep(5)
-
     def worker_analyze(start_analysis):
         tid = threading.get_ident()
         print(f"analyzer {tid}: waiting for threads")
@@ -158,6 +156,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
             except queue.Empty:
                 if q_raw.qsize() > 0:
                     print(f"analyzer {tid}: analysis caught up to chunking; waiting for more chunks")
+                    start_analysis.clear() # for some reason, you have to clear before waiting
                     start_analysis.wait()  # Wait for the event to be set again
                     continue  # re-start the while loop
                 else:
