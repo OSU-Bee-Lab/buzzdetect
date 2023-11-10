@@ -7,13 +7,12 @@ import re
 import subprocess
 import shutil
 from buzzcode.analyze import analyze_wav
-from buzzcode.tools import loadUp, size_to_runtime
+from buzzcode.tools import loadUp, size_to_runtime, clip_name
 from buzzcode.chunk import make_chunklist, cmd_chunk
 from buzzcode.convert import cmd_convert
 
-# multiprocessing.set_start_method('spawn') # needed for tensorflow
-
 # test params:
+# os.chdir("..")
 # modelname="OSBA"; threads=4; dir_raw="./audio_in"; dir_out=None; chunklength=None; quiet=False; cleanup=False; chunklength=0.05; pid=1
 # analyze_multithread("OSBA", 4, cleanup=False)
 def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, chunklength=None, quiet=True, cleanup=True):
@@ -55,8 +54,8 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
 
     tf_threads = 4
 
-    if tf_threads < threads:
-        quit("at least 4 available threads are recommended for tensorflow analysis")
+    if tf_threads > threads:
+        quit(f"at least {tf_threads} available threads are recommended for tensorflow analysis")
 
     queue_try_tolerance = 3
 
@@ -74,8 +73,8 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
     #
     def worker_convert():
         process_sema.acquire()
-        pid = os.getpid()
-        print(f"converter {pid}: launching; remaining process semaphores: {process_sema._value}")
+        tid = threading.get_ident()
+        print(f"converter {tid}: launching; remaining process semaphores: {process_sema._value}")
 
         queue_tries = 0
 
@@ -85,7 +84,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
             except queue.Empty:
                 queue_tries += 1
                 if queue_tries <= queue_try_tolerance:
-                    print(f"converter {pid}: queue appears empty; retrying...")
+                    print(f"converter {tid}: queue appears empty; retrying {(queue_try_tolerance - queue_tries) + 1} more time")
                     time.sleep(0.05)
                     continue
                     # ^ explanation for the retry:
@@ -93,27 +92,28 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
                     # even though printing queue size in the except block gives a non-zero size;
                     # it must be that my workers are firing up before the queue fills, for some reason?
                 else:
-                    print(f"converter {pid}: all raws processed; exiting ")
                     process_sema.release()
-                    print(f"converter {pid}: exiting; updated process semaphores: {process_sema._value}")
+                    print(f"converter {tid}: exiting")
 
                     if process_sema._value >= tf_threads:
-                        print(f"converter {pid}: sufficient threads for analyzer")
+                        print(f"converter {tid}: sufficient threads for analyzer")
                         start_analysis.set()
                     break
+            name_clip = clip_name(path_raw, dir_raw)
 
             # convert
             #
             path_conv = re.sub(pattern=".mp3$", repl=".wav", string=path_raw)
             path_conv = re.sub(pattern=dir_raw, repl=dir_conv, string=path_conv)
+            path_conv_clip = clip_name(path_conv, dir_conv)
 
             os.makedirs(os.path.dirname(path_conv), exist_ok=True)
 
             conv_cmd = cmd_convert(path_raw, path_conv, quiet=quiet)
 
-            print(f"converter {pid}: converting {path_raw}")
+            print(f"converter {tid}: converting raw for {name_clip}")
             subprocess.run(conv_cmd)
-            print(f"converter {pid}: conversion finished at {path_conv}")
+            print(f"converter {tid}: conversion finished at {path_conv}")
 
             # chunk
             #
@@ -126,62 +126,65 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
 
             chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, quiet=quiet)
 
-            print(f"converter {pid}: chunking {path_conv}")
+            print(f"converter {tid}: making chunks for {name_clip}")
             subprocess.run(chunk_cmd)
-            print(f"converter {pid}: chunking finished for {path_conv}")
+            print(f"converter {tid}: chunking finished for {name_clip}")
 
             for c in chunklist:
                 q_chunk.put(c[2])
 
             if cleanup is True:
-                print(f"converter {pid}: deleting {path_conv}")
+                print(f"converter {tid}: deleting {path_conv}")
                 os.remove(path_conv)
 
             # Signal the analysis worker to start when the last file is processed
             if process_sema._value >= tf_threads:
-                print(f"converter {pid}: sufficient threads for analyzer")
+                print(f"converter {tid}: sufficient threads for analyzer")
                 start_analysis.set()
 
+
+            time.sleep(5)
+
     def worker_analyze(start_analysis):
-        pid = os.getpid()
-        print(f"analyzer {pid}: waiting for threads")
+        tid = threading.get_ident()
+        print(f"analyzer {tid}: waiting for threads")
 
         start_analysis.wait()
-        print(f"analyzer {pid}: threads and chunks available; launching analysis")
+        print(f"analyzer {tid}: threads and chunks available; launching analysis")
 
         while True:
             try:
                 path_chunk = q_chunk.get_nowait()
             except queue.Empty:
                 if q_raw.qsize() > 0:
-                    print(f"analyzer {pid}: analysis caught up to chunking; waiting for more chunks")
+                    print(f"analyzer {tid}: analysis caught up to chunking; waiting for more chunks")
                     start_analysis.wait()  # Wait for the event to be set again
                     continue  # re-start the while loop
                 else:
-                    print(f"analyzer {pid}: analysis completed")
+                    print(f"analyzer {tid}: analysis completed")
                     break
+
+            name_clip = clip_name(path_chunk, dir_chunk)
 
             # analyze
             #
-            print(f"analyzer {pid}: analyzing {path_chunk}")
+            print(f"analyzer {tid}: analyzing {name_clip}")
             results = analyze_wav(model=model, classes=classes, wav_path=path_chunk)
-            print(f"analyzer {pid}: analysis completed")
+
             # write
             #
-            print(f"analyzer {pid}: building path_out")
             path_out = re.sub(pattern=dir_chunk, repl=dir_out,string=path_chunk)
             path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
-            print(f"analyzer {pid}: making directory")
             os.makedirs(os.path.dirname(path_out), exist_ok=True)
 
-            print(f"analyzer {pid}: writing results to {path_out}")
+            print(f"analyzer {tid}: writing results to {path_out}")
             results.to_csv(path_out)
 
             # cleanup
             #
             if cleanup is True:
-                print(f"analyzer {pid}: deleting {path_chunk}")
+                print(f"analyzer {tid}: deleting {path_chunk}")
                 os.remove(path_chunk)
 
     # Launch analysis
@@ -202,5 +205,5 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
     if cleanup:
         shutil.rmtree(dir_proc)
 
-if __name__ == "__main__":
-    analyze_multithread("OSBA", 4, cleanup=True, quiet=False, chunklength = 1)
+# if __name__ == "__main__":
+#     analyze_multithread("OSBA", 8, cleanup=False, quiet=True, chunklength = 1)
