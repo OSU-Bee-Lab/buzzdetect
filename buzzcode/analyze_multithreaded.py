@@ -15,7 +15,7 @@ from buzzcode.convert import cmd_convert
 # os.chdir("..")
 # modelname="OSBA"; threads=4; dir_raw="./audio_in"; dir_out=None; chunklength=None; quiet=False; cleanup=False; chunklength=0.05; pid=1
 # analyze_multithread("OSBA", 4, cleanup=False)
-def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, chunklength=None, quiet=True, cleanup=True):
+def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, chunklength=None, quiet=True, cleanup=True, overwrite="n"):
     # ready model
     #
     model, classes = loadUp("OSBA")
@@ -30,7 +30,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
 
-    if os.path.isdir(dir_out):
+    if os.path.isdir(dir_out) and overwrite.lower != "y":
         overwrite = input("Output directory already exists; overwrite results? [y/n]")
         if overwrite.lower() != "y":
             quit("user chose not to overwrite; quitting analysis")

@@ -11,11 +11,13 @@ subparsers = parser.add_subparsers(help='sub-command help', dest='action', requi
 # analyze
 parser_analyze = subparsers.add_parser('analyze', help='analyze something')
 parser_analyze.add_argument('--modelname', required=True, type=str)
-parser_analyze.add_argument('--dir_in', required=False, default="./audio_in", type=str)
-parser_analyze.add_argument('--dir_out', required=False, default="./output", type=str)
+parser_analyze.add_argument('--threads', required=True, type=int)
+parser_analyze.add_argument('--dir_raw', required=False, default="./audio_in", type=str)
+parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
 parser_analyze.add_argument('--chunklength', required=False, default=1, type=float)
-parser_analyze.add_argument('--framelength', required=False, default=960, type=int)
-parser_analyze.add_argument('--framehop', required=False, default=480, type=int)
+parser_analyze.add_argument('--quiet', required=False, default=True, type=bool)
+parser_analyze.add_argument('--cleanup', required=False, default=480, type=bool)
+parser_analyze.add_argument('--overwrite', required=False, default="n", type=str)
 
 # train
 parser_train = subparsers.add_parser('train', help='train a new model')
@@ -23,21 +25,25 @@ parser_train.add_argument('--modelname', required=True, type=str)
 parser_train.add_argument('--epochs', required=False, default=30, type=int)
 parser_train.add_argument('--trainingset', required=True, type=str)
 
-# preprocess; work in progress
-# parser_preprocess = subparsers.add_parser('preprocess', help = 'convert audio files into the proper format')
-# parser_preprocess.add_argument('--preprocesspath', required=False, type = str)
-
 args = parser.parse_args()
 
 if (args.action == "train"):
-    print("Training new model " + args.modelname + " with set " + args.trainingset)
+    print(f"training new model {args.modelname} with set {args.trainingset}")
     from buzzcode.train import *
 
     generate_model(args.modelname, args.trainingset, args.epochs)
 
 elif (args.action == "analyze"):
-    from buzzcode.analyze import *
+    print(f"analyzing audio in {args.dir_raw} with model {args.modelname}")
+    from buzzcode.analyze_multithreaded import analyze_multithread
 
-    print("analyzing audio in " + args.dir_in + " with model " + args.modelname)
-    analyze_mp3_batch(modelname=args.modelname, directory_in=args.dir_in, directory_out=args.dir_out,
-                      frameLength=args.framelength, frameHop=args.framehop, chunklength_hr=args.chunklength)
+    analyze_multithread(
+        modelname=args.modelname,
+        threads=args.threads,
+        dir_raw=args.dir_raw,
+        dir_out=args.dir_out,
+        chunklength=args.chunklength,
+        quiet=args.quiet,
+        cleanup=args.cleanup,
+        overwrite=args.overwrite
+    )
