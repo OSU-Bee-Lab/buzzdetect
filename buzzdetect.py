@@ -35,7 +35,7 @@ if (args.action == "train"):
 
 elif (args.action == "analyze"):
     print(f"analyzing audio in {args.dir_raw} with model {args.modelname}")
-    from buzzcode.analyze_multithreaded import analyze_multithread
+    from buzzcode.analyze import analyze_multithread
 
     analyze_multithread(
         modelname=args.modelname,

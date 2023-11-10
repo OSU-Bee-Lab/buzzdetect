@@ -11,6 +11,7 @@ from buzzcode.tools import load_audio
 yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
 yamnet_model = hub.load(yamnet_model_handle)
 
+
 def generate_model(modelName, trainingSet, epochs_in):
     model_path = os.path.join("models/", modelName)
 
@@ -36,13 +37,13 @@ def generate_model(modelName, trainingSet, epochs_in):
 
         durations.append(total_duration)
 
-    weight_raw=[] # gah this is so hacky
+    weight_raw = []  # gah this is so hacky
     for dur in durations:
-        weight_raw.append(sum(durations)/dur)
+        weight_raw.append(sum(durations) / dur)
 
-    weights=[]
+    weights = []
     for raw in weight_raw:
-        weights.append(raw/sum(weight_raw))
+        weights.append(raw / sum(weight_raw))
 
     map_class_to_weight = {index: weight for index, weight in enumerate(weights)}
 
@@ -67,16 +68,16 @@ def generate_model(modelName, trainingSet, epochs_in):
     main_ds = tf.data.Dataset.from_tensor_slices((filenames, targets, folds))
 
     def load_wav_for_map(filename, label, fold):
-      return load_audio(filename), label, fold
+        return load_audio(filename), label, fold
 
     main_ds = main_ds.map(load_wav_for_map)
 
     # applies the embedding extraction model to a wav data
     def extract_embedding(wav_data, label, fold):
-      ''' run YAMNet to extract embedding from the wav data '''
-      scores, embeddings, spectrogram = yamnet_model(wav_data)
-      num_embeddings = tf.shape(embeddings)[0]
-      return (embeddings,
+        ''' run YAMNet to extract embedding from the wav data '''
+        scores, embeddings, spectrogram = yamnet_model(wav_data)
+        num_embeddings = tf.shape(embeddings)[0]
+        return (embeddings,
                 tf.repeat(label, num_embeddings),
                 tf.repeat(fold, num_embeddings))
 
@@ -114,18 +115,17 @@ def generate_model(modelName, trainingSet, epochs_in):
     ], name=modelName)
 
     model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                     optimizer="adam",
-                     metrics=['accuracy'])
+                  optimizer="adam",
+                  metrics=['accuracy'])
 
     callback = tf.keras.callbacks.EarlyStopping(monitor='loss',
                                                 patience=3,
                                                 restore_best_weights=True)
 
     history = model.fit(train_ds,
-                           epochs=epochs_in,
-                           validation_data=val_ds,
-                           callbacks=callback,
-                           class_weight=map_class_to_weight)
-
+                        epochs=epochs_in,
+                        validation_data=val_ds,
+                        callbacks=callback,
+                        class_weight=map_class_to_weight)
 
     model.save(os.path.join("models", modelName), include_optimizer=True)

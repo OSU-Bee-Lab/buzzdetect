@@ -1,8 +1,8 @@
-def cmd_convert(path_in, path_out, quiet = True, band_low=200):
+def cmd_convert(path_in, path_out, quiet=True, band_low=200):
     cmdlist = [
         "ffmpeg",
         "-i", path_in,
-        '-n' # don't overwrite
+        '-n'  # don't overwrite
     ]
 
     if quiet:

@@ -4,7 +4,7 @@ import os
 import re
 
 
-def loadUp(modelname):
+def loadup(modelname):
     model = tf.keras.models.load_model(os.path.join("./models/", modelname))
 
     classes = []
@@ -17,7 +17,7 @@ def loadUp(modelname):
 
 
 def load_flac(filepath):
-    """ Load a FLAC file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
+    """ Load a FLAC file, convert it to a float tensor """
     flac_contents = tf.io.read_file(filepath)
     flac_tensor = tfio.audio.decode_flac(flac_contents, dtype=tf.int16)
     flac_tensor = tf.squeeze(flac_tensor, axis=-1)
@@ -30,7 +30,7 @@ def load_flac(filepath):
 
 
 def load_wav(filepath):
-    """ Load a WAV file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
+    """ Load a WAV file, convert it to a float tensor """
     wav_contents = tf.io.read_file(filepath)
     wav, sample_rate = tf.audio.decode_wav(
         wav_contents,

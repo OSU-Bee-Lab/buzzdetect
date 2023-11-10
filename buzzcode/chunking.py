@@ -2,6 +2,7 @@ import os
 import librosa
 from subprocess import Popen
 
+
 def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_length=None):
     if audio_length is None:
         audio_length = librosa.get_duration(path=filepath)
@@ -17,7 +18,7 @@ def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_length=Non
         else:
             return [(0, audio_length, chunk_stub + "_s0.wav")]
 
-    start_time = 0 - chunklength_s # a bit odd, but makes the while loop an easier read
+    start_time = 0 - chunklength_s  # a bit odd, but makes the while loop an easier read
     end_time = start_time + chunklength_s
 
     chunklist = []
@@ -39,6 +40,7 @@ def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_length=Non
 
     return chunklist
 
+
 def make_chunk_paths(chunklist, chunk_stub):
     chunk_paths = []
 
@@ -48,7 +50,8 @@ def make_chunk_paths(chunklist, chunk_stub):
 
     return chunk_paths
 
-def cmd_chunk(path_in, chunklist, convert = False, quiet = True, band_low=200):
+
+def cmd_chunk(path_in, chunklist, convert=False, quiet=True, band_low=200):
     extension = os.path.splitext(path_in)[1].lower()
     if extension == ".mp3":
         print("input file is mp3, adding conversion options to ffmpeg call")
@@ -89,7 +92,8 @@ def cmd_chunk(path_in, chunklist, convert = False, quiet = True, band_low=200):
 
     return cmdlist
 
-def take_chunks(control, band_low = 200):
+
+def take_chunks(control, band_low=200):
     commands = []
     for r in list(range(0, len(control))):
         row = control.iloc[r]
