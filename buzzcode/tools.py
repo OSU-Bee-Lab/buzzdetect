@@ -1,6 +1,7 @@
 import tensorflow as tf
 import tensorflow_io as tfio
 import os
+import re
 
 
 def loadUp(modelname):
@@ -87,3 +88,8 @@ def runtime_to_size(runtime, kbps=256):
     )
 
     return size_GB
+
+
+def clip_name(filepath, clippath):
+    clip = re.sub(clippath, "", filepath)
+    return clip
