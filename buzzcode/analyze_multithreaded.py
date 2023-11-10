@@ -1,185 +1,206 @@
+import threading
+import time
+import queue  # for queue.Empty()
+import os
 import os.path
 import re
-import pandas as pd
-from buzzcode.process import make_chunklist, take_chunk_multi_sox
+import subprocess
+import shutil
 from buzzcode.analyze import analyze_wav
-from buzzcode.tools import loadUp
-from buzzcode.tools import make_unique_dirs
+from buzzcode.tools import loadUp, size_to_runtime
+from buzzcode.chunk import make_chunklist, cmd_chunk
+from buzzcode.convert import cmd_convert
 
+# multiprocessing.set_start_method('spawn') # needed for tensorflow
 
-def analyze_multi(modelname, threads, chunklength=1, dir_in="./audio_in", dir_out="./output", keep_chunks = False, storage_GB = 32):
-    dir_proc = "./processing"
-    model, classes = loadUp(modelname)
-    os.makedirs(dir_proc, exist_ok=True)
+# test params:
+# modelname="OSBA"; threads=4; dir_raw="./audio_in"; dir_out=None; chunklength=None; quiet=False; cleanup=False; chunklength=0.05; pid=1
+# analyze_multithread("OSBA", 4, cleanup=False)
+def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, chunklength=None, quiet=True, cleanup=True):
+    # ready model
+    #
+    model, classes = loadUp("OSBA")
 
-    dir_chunk = os.path.join(dir_proc, "chunks")
-    os.makedirs(dir_chunk, exist_ok=True)
+    # filesystem preparation
+    #
+    dir_model = os.path.join("models", modelname)
+    dir_proc = os.path.join(dir_model, "processing")
+    dir_conv = os.path.join(dir_proc, "conv")
+    dir_chunk = os.path.join(dir_proc, "chunk")
 
-    raw_paths = []
-    for root, dirs, files in os.walk(dir_in):
+    if dir_out is None:
+        dir_out = os.path.join(dir_model, "output")
+
+    if os.path.isdir(dir_out):
+        overwrite = input("Output directory already exists; overwrite results? [y/n]")
+        if overwrite.lower() != "y":
+            quit("user chose not to overwrite; quitting analysis")
+
+    paths_raw = []
+    for root, dirs, files in os.walk(dir_raw):
         for file in files:
             if file.endswith('.mp3'):
-                raw_paths.append(os.path.join(root, file))
+                paths_raw.append(os.path.join(root, file))
 
-    chunkdf_list=[]
-    for path in raw_paths:
-        chunklist = make_chunklist(path, chunklength)
+    # process control
+    #
+    chunk_limit = size_to_runtime(3.9)/3600
 
-        paths_chunk = []
-        chunk_exists = []
+    if chunklength is None:
+        print("setting chunk length to maximum, " + chunk_limit.__round__(1).__str__() + " hours")
+        chunklength = chunk_limit
+    elif chunklength > chunk_limit:
+        print("desired chunk length produce overflow errors, setting to maximum, " + chunk_limit.__round__(1).__str__() + " hours")
+        chunklength = chunk_limit
 
-        paths_out = []
-        out_exists = []
+    tf_threads = 4
 
-        for chunktuple in chunklist:
-            chunktag = "_s"+str(chunktuple[0])+".wav"
+    if tf_threads < threads:
+        quit("at least 4 available threads are recommended for tensorflow analysis")
 
-            path_chunk = re.sub(".mp3", repl=chunktag, string=path)
-            path_chunk = re.sub(dir_in, dir_chunk, path_chunk)
-            path_chunk_exists = os.path.exists(path_chunk)
+    queue_try_tolerance = 3
 
-            paths_chunk.append(path_chunk)
-            chunk_exists.append(path_chunk_exists)
+    q_raw = queue.Queue()
+    for path in paths_raw:
+        q_raw.put(path)
 
-            path_out = re.sub(pattern=dir_chunk,repl=dir_out,string=path_chunk)
-            path_out=re.sub(pattern=".mp3",repl=".csv",string=path_out)
-            path_out_exists = os.path.exists(path_out)
+    q_chunk = queue.Queue()
 
-            paths_out.append(path_out)
-            out_exists.append(path_out_exists)
+    process_sema = threading.BoundedSemaphore(value=threads)
 
+    start_analysis = threading.Event()
 
-        chunkdf = pd.DataFrame(chunklist, columns=("start", "end"))
-        chunkdf.insert(0, "path_raw", path)
-        chunkdf.insert(1, "path_chunk", paths_chunk)
-        chunkdf.insert(2, "chunk_exists", chunk_exists)
-        chunkdf.insert(2, "path_out", paths_out)
-        chunkdf.insert(1, "out_exists", out_exists)
+    # worker definition
+    #
+    def worker_convert():
+        process_sema.acquire()
+        pid = os.getpid()
+        print(f"converter {pid}: launching; remaining process semaphores: {process_sema._value}")
 
-        chunkdf_list.append(chunkdf)
+        queue_tries = 0
 
-    control_master=pd.concat(chunkdf_list)
+        while True:
+            try:
+                path_raw = q_raw.get_nowait()
+            except queue.Empty:
+                queue_tries += 1
+                if queue_tries <= queue_try_tolerance:
+                    print(f"converter {pid}: queue appears empty; retrying...")
+                    time.sleep(0.05)
+                    continue
+                    # ^ explanation for the retry:
+                    # I'm getting unexpected exceptions right at the start of the script where the queue appears empty on the first pop,
+                    # even though printing queue size in the except block gives a non-zero size;
+                    # it must be that my workers are firing up before the queue fills, for some reason?
+                else:
+                    print(f"converter {pid}: all raws processed; exiting ")
+                    process_sema.release()
+                    print(f"converter {pid}: exiting; updated process semaphores: {process_sema._value}")
 
-    make_unique_dirs(control_master['path_chunk'])
-    make_unique_dirs(control_master['path_out'])
+                    if process_sema._value >= tf_threads:
+                        print(f"converter {pid}: sufficient threads for analyzer")
+                        start_analysis.set()
+                    break
 
-    batches = list(range(0,(len(control_master)/threads).__ceil__()))
+            # convert
+            #
+            path_conv = re.sub(pattern=".mp3$", repl=".wav", string=path_raw)
+            path_conv = re.sub(pattern=dir_raw, repl=dir_conv, string=path_conv)
 
-    for batch in batches:
-        batch_start = batch * threads
-        batch_end = batch_start + threads
-        if batch == (len(batches) - 1):
-            batch_end = len(control_master)
-        chunknums = list(range(batch_start, batch_end))
+            os.makedirs(os.path.dirname(path_conv), exist_ok=True)
 
-        control_sub = control_master.iloc[chunknums]
+            conv_cmd = cmd_convert(path_raw, path_conv, quiet=quiet)
 
-        take_chunk_multi_sox(
-            chunklist = list(zip(control_sub['start'], control_sub['end'])),
-            path_in_list=control_sub['path_raw'],
-            path_out_list=control_sub['path_chunk']
-        )
+            print(f"converter {pid}: converting {path_raw}")
+            subprocess.run(conv_cmd)
+            print(f"converter {pid}: conversion finished at {path_conv}")
 
-    # shutil.rmtree(dir_proc) # delete the whole shebang when processing is finished!
+            # chunk
+            #
+            chunk_stub = re.sub(pattern=".wav$", repl="", string=path_conv)
+            chunk_stub = re.sub(pattern=dir_conv, repl=dir_chunk, string=chunk_stub)
 
-def worker_chunk():
-    # as with R, it's usually bad practice to iterate over pandas rows;
-    # I'm going to do it, because I have a stop condition;
-    # I don't want to use an apply statement because I don't want to process the whole file
-    for i in iterations:
-        chunk = master_control.iloc[i]
-        output_exists = os.path.exists(chunk['path_out'])
-        if output_exists:
-            continue
+            os.makedirs(os.path.dirname(chunk_stub), exist_ok=True)
 
-        chunk_exists = os.path.exists(chunk['path_chunk'])
-        if chunk_exists:
-            continue
+            chunklist = make_chunklist(filepath=path_conv, chunk_stub=chunk_stub, chunklength=chunklength)
 
-        chunking_locked = os.path.exists(chunk['lock_chunking'])
-        if chunking_locked:
-            continue
+            chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, quiet=quiet)
 
-        # lock that bad boy
-        os.makedirs(chunk['lock_chunking'])
+            print(f"converter {pid}: chunking {path_conv}")
+            subprocess.run(chunk_cmd)
+            print(f"converter {pid}: chunking finished for {path_conv}")
 
-        # chunk that bad boy
-        take_chunk(
-            chunktuple=(chunk['start'], chunk['end']),
-            audio_path=chunk['path_raw'],
-            path_out=chunk['path_chunk']
-        )
+            for c in chunklist:
+                q_chunk.put(c[2])
 
-        os.rmdir(chunk['lock_chunking'])
+            if cleanup is True:
+                print(f"converter {pid}: deleting {path_conv}")
+                os.remove(path_conv)
 
-def worker_analyze_cpu():
-    for i in iterations:
-        chunk = master_control.iloc[i]
-        output_exists = os.path.exists(chunk['path_out'])
-        if output_exists:
-            continue
+            # Signal the analysis worker to start when the last file is processed
+            if process_sema._value >= tf_threads:
+                print(f"converter {pid}: sufficient threads for analyzer")
+                start_analysis.set()
 
-        chunk_exists = os.path.exists(chunk['path_chunk'])
-        if not chunk_exists:
-            continue
+    def worker_analyze(start_analysis):
+        pid = os.getpid()
+        print(f"analyzer {pid}: waiting for threads")
 
-        analyzing_locked = os.path.exists(chunk['lock_analyzing'])
-        if analyzing_locked:
-            continue
+        start_analysis.wait()
+        print(f"analyzer {pid}: threads and chunks available; launching analysis")
 
-        # lock!
-        os.makedirs(chunk['lock_analyzing'])
+        while True:
+            try:
+                path_chunk = q_chunk.get_nowait()
+            except queue.Empty:
+                if q_raw.qsize() > 0:
+                    print(f"analyzer {pid}: analysis caught up to chunking; waiting for more chunks")
+                    start_analysis.wait()  # Wait for the event to be set again
+                    continue  # re-start the while loop
+                else:
+                    print(f"analyzer {pid}: analysis completed")
+                    break
 
-        analysis = analyze_wav(
-            model=model,
-            classes=classes,
-            wav_path=chunk['path_chunk']
-        )
+            # analyze
+            #
+            print(f"analyzer {pid}: analyzing {path_chunk}")
+            results = analyze_wav(model=model, classes=classes, wav_path=path_chunk)
+            print(f"analyzer {pid}: analysis completed")
+            # write
+            #
+            print(f"analyzer {pid}: building path_out")
+            path_out = re.sub(pattern=dir_chunk, repl=dir_out,string=path_chunk)
+            path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
-        analysis.
+            print(f"analyzer {pid}: making directory")
+            os.makedirs(os.path.dirname(path_out), exist_ok=True)
 
-def worker_analyze_gpu():
+            print(f"analyzer {pid}: writing results to {path_out}")
+            results.to_csv(path_out)
 
-def analyze_multi_worker(path_control):
-    master_control = pd.read_csv(path_control)
-    nchunks = len(master_control)
+            # cleanup
+            #
+            if cleanup is True:
+                print(f"analyzer {pid}: deleting {path_chunk}")
+                os.remove(path_chunk)
 
-    # as with R, it's usually bad practice to iterate over pandas rows;
-    # I'm going to do it, because I have a stop condition;
-    # I don't want to use an apply statement because I don't want to process the whole file
-    for i in list(range(0, nchunks)):
-        chunk = master_control.iloc[i]
-        lock_exists = os.path.exists(chunk['path_lock'])
-        output_exists = os.path.exists(chunk['path_out'])
+    # Launch analysis
+    #
 
-        # if the file is locked or the output already exists, skip
-        if lock_exists | output_exists:
-            continue
+    # launch worker_converts
+    for i in range(threads):
+        threading.Thread(target=worker_convert).start()
 
-        # lock that bad boy
-        os.makedirs(chunk['path_lock'])
+    # launch analysis in a waiting process
+    analysis_process = threading.Thread(target=worker_analyze, args=(start_analysis,))
+    analysis_process.start()
 
-        # then process one chunk (think I need to make this a function in analyze.py
-        chunk_and_analyze(
-            chunktuple=(chunk['start'], chunk['end']),
-            path_raw=chunk['path_raw'],
-            path_chunk=chunk['path_chunk'],
-            path_out=chunk['path_out']
-        )
+    # wait for analysis to finish
+    analysis_process.join()
 
-    # then delete lockdir
-    os.rmdir(chunk['path_lock'])
+    # still need to remove processing dir!
+    if cleanup:
+        shutil.rmtree(dir_proc)
 
-def chunk_and_analyze(chunktuple, path_raw, path_chunk, path_out):
-    chunk_start = chunktuple[0]
-    take_chunk(chunktuple, path_raw, path_chunk, band_low=200)
-    chunk_analysis = analyze_wav(model=model, classes=classes, wav_path=path_chunk)
-    chunk_analysis["start"] = chunk_analysis["start"] + chunk_start
-    chunk_analysis["end"] = chunk_analysis["end"] + chunk_start
-    # delete where frame out-runs file? chunk with one frame overlaps?
-
-    # write results
-    chunk_analysis.to_csv(path_or_buf=result_path, sep="\t", index=False)
-
-    # delete chunkfile
-    os.remove(path_chunk)
+if __name__ == "__main__":
+    analyze_multithread("OSBA", 4, cleanup=True, quiet=False, chunklength = 1)
