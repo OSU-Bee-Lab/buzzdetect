@@ -68,7 +68,7 @@ def cmd_chunk(path_in, chunklist, convert = False, quiet = True, band_low=200):
 
     for chunktuple in chunklist:
         cmdlet = [
-            "-rf64", "always",
+            "-rf64", "never",
             "-ss", str(chunktuple[0]),
             "-to", str(chunktuple[1])
         ]
