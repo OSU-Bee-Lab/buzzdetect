@@ -7,6 +7,7 @@ import queue
 import os
 import subprocess
 import shutil
+import re
 from buzzcode.tools import loadup, size_to_runtime, clip_name, load_audio
 from buzzcode.chunking import make_chunklist, cmd_chunk
 from buzzcode.conversion import cmd_convert
