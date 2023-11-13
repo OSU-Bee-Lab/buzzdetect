@@ -66,7 +66,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
 
-    if os.path.isdir(dir_out) and overwrite.lower != "y":
+    if os.path.isdir(dir_out) and overwrite.lower() != "y":
         overwrite = input("Output directory already exists; overwrite results? [y/n]")
         if overwrite.lower() != "y":
             quit("user chose not to overwrite; quitting analysis")
