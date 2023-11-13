@@ -3,33 +3,33 @@ import librosa
 from subprocess import Popen
 
 
-def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_length=None):
-    if audio_length is None:
-        audio_length = librosa.get_duration(path=filepath)
+def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_duration=None):
+    if audio_duration is None:
+        audio_duration = librosa.get_duration(path=filepath)
 
     if chunklength is None:
-        chunklength_s = audio_length
+        chunklength_s = audio_duration
     else:
         chunklength_s = int(60 * 60 * chunklength)  # in seconds
 
-    if chunklength_s >= audio_length:
+    if chunklength_s >= audio_duration:
         if chunk_stub is None:
-            return [(0, audio_length)]
+            return [(0, audio_duration)]
         else:
-            return [(0, audio_length, chunk_stub + "_s0.wav")]
+            return [(0, audio_duration, chunk_stub + "_s0.wav")]
 
     start_time = 0 - chunklength_s  # a bit odd, but makes the while loop an easier read
     end_time = start_time + chunklength_s
 
     chunklist = []
 
-    while end_time < audio_length:
+    while end_time < audio_duration:
         start_time += chunklength_s
         end_time += chunklength_s
 
         # avoids miniscule chunks
-        if ((audio_length - end_time) < 30):
-            end_time = audio_length
+        if ((audio_duration - end_time) < 30):
+            end_time = audio_duration
 
         chunktuple = (start_time, end_time)
         if chunk_stub is not None:
