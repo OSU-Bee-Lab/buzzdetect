@@ -5,7 +5,7 @@ def cmd_convert(path_in, path_out, verbosity=1, band_low=200):
         '-n'  # don't overwrite
     ]
 
-    if verbosity == 0:
+    if verbosity <= 1:
         cmdlist.extend(["-v", "quiet"])
 
     if verbosity == 1:

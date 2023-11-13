@@ -66,7 +66,7 @@ def cmd_chunk(path_in, chunklist, convert=False, verbosity=1, band_low=200):
         '-n'
     ]
 
-    if verbosity == 0:
+    if verbosity <= 1:
         cmdlist.extend(["-v", "quiet"])
 
     if verbosity == 1:
