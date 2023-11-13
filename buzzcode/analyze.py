@@ -49,7 +49,7 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
 
     return output_df
 
-def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, chunklength=None, verbosity=1,
+def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", dir_out=None, verbosity=1,
                         cleanup=True, overwrite="n"):
     # ready model
     #
@@ -83,10 +83,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
     #
     chunk_limit = size_to_runtime(3.9) / 3600
 
-    if chunklength is None:
-        print("setting chunk length to maximum, " + chunk_limit.__round__(1).__str__() + " hours")
-        chunklength = chunk_limit
-    elif chunklength > chunk_limit:
+    if chunklength > chunk_limit:
         print("desired chunk length produce overflow errors, setting to maximum, " + chunk_limit.__round__(
             1).__str__() + " hours")
         chunklength = chunk_limit
@@ -143,6 +140,7 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
             print("logger: item received")
 
             if not os.path.exists(path_log):
+                os.makedirs(os.path.dirname(path_log), exist_ok=True)
                 open(path_log, "x")
 
             log = open(path_log, "a")
