@@ -12,9 +12,10 @@ from buzzcode.tools import loadup, size_to_runtime, clip_name, load_audio
 from buzzcode.chunking import make_chunklist, cmd_chunk
 from buzzcode.conversion import cmd_convert
 
-yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
-yamnet_model = hub.load(yamnet_model_handle)
 
+def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop=480):
+    if yamnet is None:
+        yamnet = hub.load('https://tfhub.dev/google/yamnet/1')
 
 def analyze_wav(model, classes, wav_path, framelength=960, framehop=480):
     audio_data = load_audio(wav_path)
@@ -23,7 +24,7 @@ def analyze_wav(model, classes, wav_path, framelength=960, framehop=480):
     results = []
 
     for i, data in enumerate(audio_data_split):
-        scores, embeddings, spectrogram = yamnet_model(data)
+        scores, embeddings, spectrogram = yamnet(data)
         result = model(embeddings).numpy()
 
         class_means = result.mean(axis=0)
@@ -52,7 +53,8 @@ def analyze_multithread(modelname, threads, dir_raw="./audio_in", dir_out=None, 
                         cleanup=True, overwrite="n"):
     # ready model
     #
-    model, classes = loadup("OSBA")
+    model, classes = loadup(modelname)
+    yamnet = hub.load('https://tfhub.dev/google/yamnet/1') # hmmm can I cache this? Write a function to load from cache?
 
     # filesystem preparation
     #
