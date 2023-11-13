@@ -8,23 +8,17 @@
 * Allow to read from different directories
 
 ### analyze.py
-* Throw out last frame that overruns audio file?
-     - This seems less important now that we're using full length data and long frames
 * Make system for smart-detecting what data have already been analyzed
     - Read in all available buzzdetect outputs, chunk around those times
     - Or, have user specify overwrite or new file
-* Output analysis metadata (what model was used? When was the analysis run? Framerate? Framehop? Other things?)
-* Set default output dir to a dir within the model
 * Figure out if the 8x expansion of wav size → memory utilization is the result of multithreading (I have 8 threads); does supercomputer see larger expansion?
 
 ## Machine Learning Design
-* Make ambient_night classification?
+* Make ambient_night classification
 
 ## Supercomputing
 ### Figure out supercomputing
 * Run on GPU
-* Parallelize
-* Learn about scheduling
 
 ## Documentation
 ### README.md
