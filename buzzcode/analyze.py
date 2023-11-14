@@ -110,7 +110,8 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     # worker definition
     #
     def printlog(item, item_verb=0):
-        q_log.put(f"{item} \n")
+        time_current = datetime.now()
+        q_log.put(f"{time_current} - {item} \n")
         event_log.set()
 
         if item_verb <= verbosity:
@@ -166,15 +167,15 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
                     # even though printing queue size in the except block gives a non-zero size;
                     # it must be that my workers are firing up before the queue fills, for some reason?
                 else:
-                    process_sema.release()
-                    printlog(f"converter {tid}: exiting", 1)
+                    process_sema.release()w2
+                    printlog(f"converter {tid}: no files in raw queue exiting", 1)
 
                     if process_sema._value >= tf_threads:
                         printlog(f"converter {tid}: sufficient threads for analyzer", 2)
                         event_analysis.set()
                     break
 
-            name_clip = clip_name(path_raw, dir_raw)
+            clipname_raw = clip_name(path_raw, dir_raw)
 
             # convert
             #
@@ -187,15 +188,17 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
 
             conv_cmd = cmd_convert(path_raw, path_conv, verbosity=verbosity)
 
-            printlog(f"converter {tid}: converting raw for {name_clip}", 1)
+            printlog(f"converter {tid}: converting {clipname_raw}", 1)
             conv_t_start = datetime.now()
             subprocess.run(conv_cmd)
             conv_t_end = datetime.now()
             conv_t_delta = conv_t_end - conv_t_start
-            printlog(f"converter {tid}: converted {audio_duration.__round__(1)}s of audio from {name_clip} in {conv_t_delta.total_seconds().__round__(2)}s", 2)
+            printlog(f"converter {tid}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s", 2)
 
             # chunk
             #
+            clipname_conv = clip_name(path_conv, dir_conv)
+
             chunk_stub = re.sub(pattern=".wav$", repl="", string=path_conv)
             chunk_stub = re.sub(pattern=dir_conv, repl=dir_chunk, string=chunk_stub)
 
@@ -205,19 +208,19 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
 
             chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, verbosity=verbosity)
 
-            printlog(f"converter {tid}: making chunks for {name_clip}", 1)
+            printlog(f"converter {tid}: chunking {clipname_conv}", 1)
             chunk_t_start = datetime.now()
             subprocess.run(chunk_cmd)
             chunk_t_end = datetime.now()
             chunk_t_delta = chunk_t_end-chunk_t_start
-            printlog(f"converter {tid}: made {len(chunklist)} chunks for {name_clip} in {chunk_t_delta.total_seconds().__round__(2)}s", 2)
+            printlog(f"converter {tid}: chunked {len(chunklist)} chunks for {clipname_conv} in {chunk_t_delta.total_seconds().__round__(2)}s", 2)
 
 
             for c in chunklist:
                 q_chunk.put(c[2])
 
             if cleanup is True:
-                printlog(f"converter {tid}: deleting {path_conv}", 2)
+                printlog(f"converter {tid}: deleting converted audio {path_conv}", 2)
                 os.remove(path_conv)
 
             # wake worker_analyze when enough threads are available (and, de-facto, there are chunks available)
@@ -244,18 +247,18 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
                     printlog(f"analyzer: all analyses completed", 0)
                     break
 
-            shortname = clip_name(path_chunk, dir_chunk)
+            clipname_chunk = clip_name(path_chunk, dir_chunk)
 
             chunk_duration = librosa.get_duration(path=path_chunk)
 
             # analyze
             #
-            printlog(f"analyzer: analyzing {shortname}", 1)
+            printlog(f"analyzer: analyzing {clipname_chunk}", 1)
             analysis_t_start = datetime.now()
             results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
             analysis_t_end = datetime.now()
             analysis_t_delta = analysis_t_end - analysis_t_start
-            printlog(f"analyzer: analyzed {chunk_duration.__round__(1)}s of audio from {shortname} in {analysis_t_delta.total_seconds().__round__(2)}s",1)
+            printlog(f"analyzer: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",1)
 
             # write
             #
@@ -270,7 +273,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
             # cleanup
             #
             if cleanup is True:
-                printlog(f"analyzer: deleting chunk {shortname}", 2)
+                printlog(f"analyzer: deleting chunk {clipname_chunk}", 2)
                 os.remove(path_chunk)
 
     # Go!
@@ -296,4 +299,5 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     thread_log.join()
 
     if cleanup:
+        print("deleting processing directory")
         shutil.rmtree(dir_proc)
