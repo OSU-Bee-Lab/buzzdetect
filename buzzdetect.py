@@ -1,4 +1,5 @@
 import argparse
+from buzzcode.tools import str2bool
 
 parser = argparse.ArgumentParser(
     prog='buzzdetect.py',
@@ -7,16 +8,6 @@ parser = argparse.ArgumentParser(
 )
 
 subparsers = parser.add_subparsers(help='sub-command help', dest='action', required=True)
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 # analyze
@@ -28,7 +19,8 @@ parser_analyze.add_argument('--dir_raw', required=False, default="./audio_in", t
 parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
 parser_analyze.add_argument('--verbosity', required=False, default=1, type=int)
 parser_analyze.add_argument('--cleanup', required=False, default=True, type=str2bool)
-parser_analyze.add_argument('--overwrite', required=False, default="n", type=str)
+parser_analyze.add_argument('--conflict_proc', required=False, default="quit", type=str)
+parser_analyze.add_argument('--conflict_out', required=False, default="quit", type=str)
 
 # train
 parser_train = subparsers.add_parser('train', help='train a new model')
@@ -56,5 +48,6 @@ elif (args.action == "analyze"):
         chunklength=args.chunklength,
         verbosity=args.verbosity,
         cleanup=args.cleanup,
-        overwrite=args.overwrite
+        conflict_proc=args.conflict_proc,
+        conflict_out=args.conflict_out
     )

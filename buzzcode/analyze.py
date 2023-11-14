@@ -49,8 +49,8 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
 
     return output_df
 
-def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", dir_out=None, verbosity=1,
-                        cleanup=True, overwrite="n"):
+def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", dir_proc = None, dir_out=None, verbosity=1,
+                        cleanup=True, conflict_proc="quit", conflict_out="quit"):
     # ready model
     #
     model, classes = loadup(modelname)
@@ -59,17 +59,25 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     # filesystem preparation
     #
     dir_model = os.path.join("models", modelname)
-    dir_proc = os.path.join(dir_model, "processing")
-    dir_conv = os.path.join(dir_proc, "conv")
-    dir_chunk = os.path.join(dir_proc, "chunk")
+
+    if dir_proc is None:
+        dir_proc = os.path.join(dir_model, "processing")
 
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
 
-    if os.path.isdir(dir_out) and overwrite.lower() != "y":
-        overwrite = input("Output directory already exists; overwrite results? [y/n]")
-        if overwrite.lower() != "y":
-            quit("user chose not to overwrite; quitting analysis")
+    dir_conv = os.path.join(dir_proc, "conv")
+    dir_chunk = os.path.join(dir_proc, "chunk")
+
+    if conflict_proc == "quit" and os.path.isdir(dir_proc):
+        conflict_proc = input("processing directory already exists; how would you like to proceed? [skip/overwrite/quit]")
+        if conflict_proc == "quit":
+            quit("user chose to quit; exiting analysis")
+
+    if conflict_out == "quit" and os.path.isdir(dir_out):
+        resolve_out = input("output directory already exists; how would you like to proceed? [skip/overwrite/quit]")
+        if resolve_out == "quit":
+            quit("user chose to quit; exiting analysis")
 
     paths_raw = []
     for root, dirs, files in os.walk(dir_raw):
@@ -77,8 +85,8 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
             if file.endswith('.mp3'):
                 paths_raw.append(os.path.join(root, file))
 
-
     path_log = os.path.join(dir_out, "log.txt")
+
     # process control
     #
     chunk_limit = size_to_runtime(3.9) / 3600
@@ -93,7 +101,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     if tf_threads > threads:
         quit(f"at least {tf_threads} available threads are recommended for tensorflow analysis")
 
-    queue_try_tolerance = 3
+    queue_try_tolerance = 2
 
     q_raw = queue.Queue()
     for path in paths_raw:
@@ -107,8 +115,6 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     event_analysis = threading.Event()
     event_log = threading.Event()
 
-    # worker definition
-    #
     def printlog(item, item_verb=0):
         time_current = datetime.now()
         q_log.put(f"{time_current} - {item} \n")
@@ -117,6 +123,8 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
         if item_verb <= verbosity:
             print(item)
 
+    # worker definition
+    #
     def worker_logger(event_log):
         printlog(f"logger initialized", 2)
         event_log.wait()
@@ -158,9 +166,8 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
             except queue.Empty:
                 queue_tries += 1
                 if queue_tries <= queue_try_tolerance:
-                    print(
-                        f"converter {tid}: queue appears empty; retrying {(queue_try_tolerance - queue_tries) + 1} more time", 1)
-                    time.sleep(0.05)
+                    printlog(f"converter {tid}: queue appears empty; retrying {(queue_try_tolerance - queue_tries) + 1} more time", 2)
+                    time.sleep(0.1)
                     continue
                     # ^ explanation for the retry:
                     # I'm getting unexpected exceptions right at the start of the script where the queue appears empty on the first pop,
@@ -175,51 +182,59 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
                         event_analysis.set()
                     break
 
-            clipname_raw = clip_name(path_raw, dir_raw)
+            audio_duration = librosa.get_duration(path=path_raw)
 
             # convert
             #
-            audio_duration = librosa.get_duration(path=path_raw)
-
             path_conv = re.sub(pattern=".mp3$", repl=".wav", string=path_raw)
             path_conv = re.sub(pattern=dir_raw, repl=dir_conv, string=path_conv)
+            clipname_conv = clip_name(path_conv, dir_conv)
 
-            os.makedirs(os.path.dirname(path_conv), exist_ok=True)
+            if os.path.exists(path_conv) and conflict_proc == "skip":
+                printlog(f"converter {tid}: {clipname_conv} already exists; skipping conversion", 1)
+            else:
+                clipname_raw = clip_name(path_raw, dir_raw)
 
-            conv_cmd = cmd_convert(path_raw, path_conv, verbosity=verbosity)
+                os.makedirs(os.path.dirname(path_conv), exist_ok=True)
 
-            printlog(f"converter {tid}: converting {clipname_raw}", 1)
-            conv_t_start = datetime.now()
-            subprocess.run(conv_cmd)
-            conv_t_end = datetime.now()
-            conv_t_delta = conv_t_end - conv_t_start
-            printlog(f"converter {tid}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s", 2)
+                conv_cmd = cmd_convert(path_raw, path_conv, verbosity=verbosity)
+
+                printlog(f"converter {tid}: converting {clipname_raw}", 1)
+                conv_t_start = datetime.now()
+                subprocess.run(conv_cmd)
+                conv_t_end = datetime.now()
+                conv_t_delta = conv_t_end - conv_t_start
+                printlog(f"converter {tid}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s", 2)
 
             # chunk
             #
-            clipname_conv = clip_name(path_conv, dir_conv)
-
             chunk_stub = re.sub(pattern=".wav$", repl="", string=path_conv)
             chunk_stub = re.sub(pattern=dir_conv, repl=dir_chunk, string=chunk_stub)
 
-            os.makedirs(os.path.dirname(chunk_stub), exist_ok=True)
-
             chunklist = make_chunklist(filepath=path_conv, chunk_stub=chunk_stub, chunklength=chunklength, audio_duration=audio_duration)
 
-            chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, verbosity=verbosity)
+            for chunk in chunklist:
+                path_chunk = chunk[2]
+                if os.path.exists(path_chunk) and conflict_proc == "skip":
+                    printlog(f"converter {tid}: {clip_name(path_chunk, dir_chunk)} already exists, skipping chunk", 1)
+                    q_chunk.put(chunk[2])
+                    chunklist.remove(chunk)
 
-            printlog(f"converter {tid}: chunking {clipname_conv}", 1)
-            chunk_t_start = datetime.now()
-            subprocess.run(chunk_cmd)
-            chunk_t_end = datetime.now()
-            chunk_t_delta = chunk_t_end-chunk_t_start
-            printlog(f"converter {tid}: chunked {len(chunklist)} chunks for {clipname_conv} in {chunk_t_delta.total_seconds().__round__(2)}s", 2)
+            if len(chunklist) > 0:
+                os.makedirs(os.path.dirname(chunk_stub), exist_ok=True)
+                chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, verbosity=verbosity)
 
+                printlog(f"converter {tid}: chunking {clipname_conv}", 1)
+                chunk_t_start = datetime.now()
+                subprocess.run(chunk_cmd)
+                chunk_t_end = datetime.now()
+                chunk_t_delta = chunk_t_end-chunk_t_start
+                printlog(f"converter {tid}: chunked {len(chunklist)} chunks for {clipname_conv} in {chunk_t_delta.total_seconds().__round__(2)}s", 2)
 
-            for c in chunklist:
-                q_chunk.put(c[2])
+            for chunk in chunklist:
+                q_chunk.put(chunk[2])
 
-            if cleanup is True:
+            if cleanup:
                 printlog(f"converter {tid}: deleting converted audio {path_conv}", 2)
                 os.remove(path_conv)
 
@@ -247,32 +262,34 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
                     printlog(f"analyzer: all analyses completed", 0)
                     break
 
-            clipname_chunk = clip_name(path_chunk, dir_chunk)
-
-            chunk_duration = librosa.get_duration(path=path_chunk)
-
-            # analyze
-            #
-            printlog(f"analyzer: analyzing {clipname_chunk}", 1)
-            analysis_t_start = datetime.now()
-            results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
-            analysis_t_end = datetime.now()
-            analysis_t_delta = analysis_t_end - analysis_t_start
-            printlog(f"analyzer: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",1)
-
-            # write
-            #
             path_out = re.sub(pattern=dir_chunk, repl=dir_out, string=path_chunk)
             path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
-            os.makedirs(os.path.dirname(path_out), exist_ok=True)
+            if os.path.exists(path_out) and conflict_out == "skip":
+                printlog(f"analyzer: output file {clip_name(path_out, dir_out)} already exists; skipping analysis")
+            else:
+                clipname_chunk = clip_name(path_chunk, dir_chunk)
+                chunk_duration = librosa.get_duration(path=path_chunk)
 
-            printlog(f"analyzer: writing results to {path_out}", 2)
-            results.to_csv(path_out)
+                # analyze
+                #
+                printlog(f"analyzer: analyzing {clipname_chunk}", 1)
+                analysis_t_start = datetime.now()
+                results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
+                analysis_t_end = datetime.now()
+                analysis_t_delta = analysis_t_end - analysis_t_start
+                printlog(f"analyzer: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",1)
+
+                # write
+                #
+                os.makedirs(os.path.dirname(path_out), exist_ok=True)
+
+                printlog(f"analyzer: writing results to {path_out}", 2)
+                results.to_csv(path_out)
 
             # cleanup
             #
-            if cleanup is True:
+            if cleanup:
                 printlog(f"analyzer: deleting chunk {clipname_chunk}", 2)
                 os.remove(path_chunk)
 
@@ -284,7 +301,6 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     thread_log.start()
 
     printlog(f"begin analysis on {datetime.now().strftime('%Y-%d-%m %H:%M:%S')} of {len(paths_raw)} files using model {modelname} and chunk length {chunklength.__round__(2)}h on {threads} threads", 1)
-    event_log.set()
 
     # launch worker_converts
     for i in range(threads):
@@ -295,8 +311,9 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     thread_analysis.start()
 
     # wait for analysis to finish
-    thread_analysis.join()
     thread_log.join()
+    thread_analysis.join()
+
 
     if cleanup:
         print("deleting processing directory")
