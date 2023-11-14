@@ -167,7 +167,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
                     # even though printing queue size in the except block gives a non-zero size;
                     # it must be that my workers are firing up before the queue fills, for some reason?
                 else:
-                    process_sema.release()w2
+                    process_sema.release()
                     printlog(f"converter {tid}: no files in raw queue exiting", 1)
 
                     if process_sema._value >= tf_threads:
