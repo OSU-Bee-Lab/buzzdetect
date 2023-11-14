@@ -1,9 +1,13 @@
-def cmd_convert(path_in, path_out, verbosity=1, band_low=200):
+def cmd_convert(path_in, path_out, verbosity=1, overwrite=False, band_low=200):
     cmdlist = [
         "ffmpeg",
-        "-i", path_in,
-        '-n'  # don't overwrite
+        "-i", path_in
     ]
+
+    if overwrite:
+        cmdlist.extend(['-y'])
+    else:
+        cmdlist.extend(['-n'])
 
     if verbosity <= 1:
         cmdlist.extend(["-v", "quiet"])
