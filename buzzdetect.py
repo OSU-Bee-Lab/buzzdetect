@@ -8,6 +8,17 @@ parser = argparse.ArgumentParser(
 
 subparsers = parser.add_subparsers(help='sub-command help', dest='action', required=True)
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 # analyze
 parser_analyze = subparsers.add_parser('analyze', help='analyze something')
 parser_analyze.add_argument('--modelname', required=True, type=str)
@@ -16,7 +27,7 @@ parser_analyze.add_argument('--chunklength', required=True, type=float)
 parser_analyze.add_argument('--dir_raw', required=False, default="./audio_in", type=str)
 parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
 parser_analyze.add_argument('--verbosity', required=False, default=1, type=int)
-parser_analyze.add_argument('--cleanup', required=False, default=True, type=bool)
+parser_analyze.add_argument('--cleanup', required=False, default=True, type=str2bool)
 parser_analyze.add_argument('--overwrite', required=False, default="n", type=str)
 
 # train
