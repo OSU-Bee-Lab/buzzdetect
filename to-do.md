@@ -6,12 +6,15 @@
 ### train.py
 * Store training history as python object in model directory (see the pickle package for python)
 * Allow to read from different directories
+* Move building of training to python module
 
 ### analyze.py
 * Make system for smart-detecting what data have already been analyzed
     - Read in all available buzzdetect outputs, chunk around those times
     - Or, have user specify overwrite or new file
 * Figure out if the 8x expansion of wav size → memory utilization is the result of multithreading (I have 8 threads); does supercomputer see larger expansion?
+* Make worker_convert() figure out what files need processed before processing; e.g. if the conv file doesn't exist but all of the chunks for it do, no need to process the conv file. It's a weird case, I admit, but it's possible and would let you save only the chunks for storage consideration.
+* Pursuant to the above, change cleanup to take a list of which files should be cleaned up? Or change it to saved? So that you can save chunks but not convs
 
 ## Machine Learning Design
 * Make ambient_night classification

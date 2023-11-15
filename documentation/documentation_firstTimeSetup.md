@@ -1,24 +1,22 @@
 # Setting up buzzdetect for the first time
-
-## Directory structure
-Directory structure is still very much in flux; I'm sure as soon as I'm done I'll come right back to the document and update it. There's no chance some future researcher or grad student will come across this "under construction" note, because I'm not the kind of guy that leaves documentation half-finished. No siree.
-
-## Create the conda environment
 #### conda version
 The version of conda available on OSC is 4.12.0. For some reason related to privileges, I was not able update conda to the current version of 23.7.4. Nonetheless, I never ran into any problems
 
-### 1. Create the YAML (.yml) file to specify packages
-Create a text file with the extension `.yml` (a so-called YAML file) with contents as found in [environment.yml](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/environment.yml)
+## 1. Setup
+Clone the buzzdetect files from this github repo to the directory where you want to store buzzdetect. We'll refer to this directory as the "project directory."
 
-Note: despite specifying the environment name in the YAML file, conda doesn't appear to pick up on the name when it's installed in the project directory instead of your home directory. Thus, we'll have to activate it with the file path.
+## 2. Create the YAML (.yml) file to specify packages
+If you cloned the github repo, you will already have a file named "environment.yml" in the project directory (a so-called YAML file). If you don't have the file, the contents of the file can be seen [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/environment.yml).
 
-Save the YAML file to the project directory.
-
-### 2. Build from the YAML file
+## 3. Build from the YAML file
+You can install your conda environment wherever you wish, but in this guide, we will install it in the same directory as the buzzdetect project.
 1. Open a terminal in the same directory as your YAML file
-2. Run the command: `conda env create -f environment.yml -p /fs/ess/PAS1063/buzzdetect/environment`
+2. Run the command: `conda env create -f environment.yml -p ./environment`
   - the -p argument is the path where the conda environment will be created. I've chosen to create it as a subdirectory of the project directory. So long as the environment is accessible to all users, location doesn't matter.
 3. Conda will create the `environment` subdirectory and install an environment with all required packages there.
 
-### 3. Confirm the environment works
-Activate the conda environment with `conda activate /fs/ess/PAS1063/buzzdetect/environment` (or, if you're already in the buzzdetect directory, just: `conda activate ./environment`. If everything installed correctly, you should receive no errors and should be able to see all of the specified dependencies when you run `conda list`.
+
+## 4. Confirm proper installation
+Despite specifying the environment name in the YAML file, conda doesn't appear to associate the name with the environment when using the -p option. Because of this, we'll have to activate it with the file path.
+1. Activate the conda environment by running `conda activate ./environment`.
+2. Run `conda list`; you should be able to see all of the specified dependencies
