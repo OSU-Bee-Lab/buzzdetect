@@ -16,6 +16,7 @@ parser_analyze.add_argument('--modelname', required=True, type=str)
 parser_analyze.add_argument('--threads', required=True, type=int)
 parser_analyze.add_argument('--chunklength', required=True, type=float)
 parser_analyze.add_argument('--dir_raw', required=False, default="./audio_in", type=str)
+parser_analyze.add_argument('--dir_proc', required=False, default=None, type=str)
 parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
 parser_analyze.add_argument('--verbosity', required=False, default=1, type=int)
 parser_analyze.add_argument('--cleanup', required=False, default=True, type=str2bool)
@@ -44,6 +45,7 @@ elif (args.action == "analyze"):
         modelname=args.modelname,
         threads=args.threads,
         dir_raw=args.dir_raw,
+        dir_proc=args.dir_proc,
         dir_out=args.dir_out,
         chunklength=args.chunklength,
         verbosity=args.verbosity,
