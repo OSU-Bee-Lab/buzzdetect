@@ -109,7 +109,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     q_chunk = queue.Queue()
     q_log = queue.Queue()
 
-    process_sema = threading.BoundedSemaphore(value=threads)
+    convert_sema = threading.BoundedSemaphore(value=threads)
 
     event_analysis = threading.Event()
     event_log = threading.Event()
@@ -124,7 +124,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
 
     # worker definition
     #
-    def worker_logger(event_log):
+    def worker_log(event_log):
         printlog(f"logger initialized", 2)
         event_log.wait()
 
@@ -153,9 +153,9 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
             log.close()
 
     def worker_convert():
-        process_sema.acquire()
+        convert_sema.acquire()
         tid = threading.get_ident()
-        printlog(f"converter {tid}: launching; remaining process semaphores: {process_sema._value}", 2)
+        printlog(f"converter {tid}: launching; remaining process semaphores: {convert_sema._value}", 2)
 
         queue_tries = 0
 
@@ -173,10 +173,10 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
                     # even though printing queue size in the except block gives a non-zero size;
                     # it must be that my workers are firing up before the queue fills, for some reason?
                 else:
-                    process_sema.release()
+                    convert_sema.release()
                     printlog(f"converter {tid}: no files in raw queue exiting", 1)
 
-                    if process_sema._value >= tf_threads:
+                    if convert_sema._value >= tf_threads:
                         printlog(f"converter {tid}: sufficient threads for analyzer", 2)
                         event_analysis.set()
                     break
@@ -238,7 +238,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
                 os.remove(path_conv)
 
             # wake worker_analyze when enough threads are available (and, de-facto, there are chunks available)
-            if process_sema._value >= tf_threads:
+            if convert_sema._value >= tf_threads:
                 printlog(f"converter {tid}: sufficient threads for analyzer", 2)
                 event_analysis.set()
 
@@ -252,7 +252,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
             try:
                 path_chunk = q_chunk.get_nowait()
             except queue.Empty:
-                if q_raw.qsize() > 0:
+                if convert_sema._value < threads: # if there are still converters running
                     printlog(f"analyzer: analysis caught up to chunking; waiting for more chunks", 2)
                     event_analysis.clear()  # for some reason, you have to clear before waiting
                     event_analysis.wait()  # Wait for the event to be set again
@@ -296,7 +296,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     #
     total_t_start = datetime.now()
 
-    thread_log = threading.Thread(target=worker_logger, args=(event_log,))
+    thread_log = threading.Thread(target=worker_log, args=(event_log,))
     thread_log.start()
 
     printlog(f"begin analysis on {datetime.now().strftime('%Y-%d-%m %H:%M:%S')} of {len(paths_raw)} files using model {modelname} and chunk length {chunklength.__round__(2)}h on {threads} threads", 1)
