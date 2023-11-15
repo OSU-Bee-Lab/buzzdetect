@@ -303,7 +303,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
 
     # launch worker_converts
     for i in range(threads):
-        threading.Thread(target=worker_convert).start()
+        threading.Thread(target=worker_convert, name=f"converter_{i}").start()
 
     # launch worker_analyze; will wait immediately
     thread_analysis = threading.Thread(target=worker_analyze, args=(event_analysis,))
