@@ -4,7 +4,7 @@ from buzzcode.tools import str2bool
 parser = argparse.ArgumentParser(
     prog='buzzdetect.py',
     description='A program to detect bee buzzes using ML',
-    epilog='github.com/OSU-Bee-Lab/BuzzDetect'
+    epilog='github.com/OSU-Bee-Lab/buzzdetect'
 )
 
 subparsers = parser.add_subparsers(help='sub-command help', dest='action', required=True)

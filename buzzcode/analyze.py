@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorflow_hub as hub
 import pandas as pd
 import threading
 import time
@@ -10,14 +9,14 @@ import shutil
 import re
 import librosa
 from datetime import datetime
-from buzzcode.tools import loadup, size_to_runtime, clip_name, load_audio
+from buzzcode.tools import loadup, size_to_runtime, clip_name, load_audio, get_yamnet
 from buzzcode.conversion import cmd_convert
 from buzzcode.chunking import make_chunklist, cmd_chunk
 
 
 def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop=480):
     if yamnet is None:
-        yamnet = hub.load('https://tfhub.dev/google/yamnet/1')
+        yamnet = get_yamnet()
 
     audio_data = load_audio(wav_path)
     audio_data_split = tf.signal.frame(audio_data, framelength * 16, framehop * 16, pad_end=True, pad_value=0)
@@ -54,7 +53,7 @@ def analyze_multithread(modelname, threads, chunklength, dir_raw="./audio_in", d
     # ready model
     #
     model, classes = loadup(modelname)
-    yamnet = hub.load('https://tfhub.dev/google/yamnet/1') # hmmm can I cache this? Write a function to load from cache?
+    yamnet = get_yamnet()
 
     # filesystem preparation
     #

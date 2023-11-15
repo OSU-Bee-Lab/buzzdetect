@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tensorflow_io as tfio
+import tensorflow_hub as hub
 import os
 import re
 
@@ -14,6 +15,12 @@ def loadup(modelname):
             # Remove the newline character and append the item to the list
             classes.append(line.strip())
     return model, classes
+
+def get_yamnet():
+    os.environ["TFHUB_CACHE_DIR"]="./yamnet"
+    yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
+
+    return yamnet
 
 
 def load_flac(filepath):
