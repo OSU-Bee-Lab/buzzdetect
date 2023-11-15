@@ -3,11 +3,12 @@ channels:
   - defaults
   - conda-forge
 dependencies:
+  - ffmpeg=4.4.2
   - python=3.9
   - pip=23.2.1
   - pip:
     - tensorflow==2.13
-    - pydub==0.25.1
     - tensorflow_hub==0.14.0
     - tensorflow-io==0.34.0
     - librosa==0.10
+    - pandas==2.1.0
