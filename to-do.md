@@ -6,6 +6,7 @@
 ### train.py
 * Store training history as python object in model directory (see the pickle package for python)
 * Allow to read from different directories
+* Move building of training to python module
 
 ### analyze.py
 * Make system for smart-detecting what data have already been analyzed
