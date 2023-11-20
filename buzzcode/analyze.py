@@ -283,37 +283,40 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
             path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
             if os.path.exists(path_out) and conflict_out == "skip":
-                printlog(
-                    f"analyzer {tid} on process {pid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis")
-            else:
-                clipname_chunk = clip_name(path_chunk, dir_chunk)
-                chunk_duration = librosa.get_duration(path=path_chunk)
+                printlog(f"analyzer {tid} on process {pid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis", 1)
+                thread_sema.release()
+                sys.exit(0) # should close only this thread!
 
-                # analyze
-                #
-                printlog(f"analyzer {tid} on process {pid}: analyzing {clipname_chunk}", 1)
-                analysis_t_start = datetime.now()
-                results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
-                analysis_t_end = datetime.now()
-                analysis_t_delta = analysis_t_end - analysis_t_start
-                printlog(
-                    f"analyzer {tid} on process {pid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",
-                    1)
+            clipname_chunk = clip_name(path_chunk, dir_chunk)
+            chunk_duration = librosa.get_duration(path=path_chunk)
 
-                # write
-                #
-                os.makedirs(os.path.dirname(path_out), exist_ok=True)
+            # analyze
+            #
+            printlog(f"analyzer {tid} on process {pid}: analyzing {clipname_chunk}", 1)
+            analysis_t_start = datetime.now()
+            results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
+            analysis_t_end = datetime.now()
+            analysis_t_delta = analysis_t_end - analysis_t_start
+            printlog(
+                f"analyzer {tid} on process {pid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",
+                1)
 
-                printlog(f"analyzer {tid} on process {pid}: writing results to {path_out}", 2)
-                results.to_csv(path_out)
+            # write
+            #
+            os.makedirs(os.path.dirname(path_out), exist_ok=True)
 
-                # cleanup
-                #
-                if cleanup:
-                    printlog(f"analyzer {tid} on process {pid}: deleting chunk {clipname_chunk}", 2)
-                    os.remove(path_chunk)
+            printlog(f"analyzer {tid} on process {pid}: writing results to {path_out}", 2)
+            results.to_csv(path_out)
 
-                event_analysis.set()
+            # cleanup
+            #
+            if cleanup:
+                printlog(f"analyzer {tid} on process {pid}: deleting chunk {clipname_chunk}", 2)
+                os.remove(path_chunk)
+
+            event_analysis.set()
+
+            thread_sema.release()
 
         while True:
             if thread_sema._value == 0:
@@ -331,6 +334,7 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
                     continue  # re-start the while loop
                 else:
                     printlog(f"analyzer process {pid}: queue empty, waiting for threads to close", 1)
+
                     if threadlist:
                         for thread in threadlist:
                             thread.join()  # wait for all analyzer threads to finish before exiting
@@ -375,5 +379,5 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
 
 
 if __name__ == "__main__":
-    analyze_multithread(modelname="OSBA", threads=4, chunklength=1, n_analysis_processes=2, n_opthreads=2, n_threadsperproc=2, dir_raw="./audio_in", verbosity=1, cleanup=False,
+    analyze_multithread(modelname="OSBA", threads=4, chunklength=1, n_analysis_processes=2, n_opthreads=2, n_threadsperproc=2, dir_raw="./audio_in", verbosity=1, cleanup=True,
                         conflict_proc="overwrite", conflict_out="overwrite")
