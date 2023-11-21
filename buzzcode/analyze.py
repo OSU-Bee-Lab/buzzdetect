@@ -1,12 +1,10 @@
 import tensorflow as tf
 import pandas as pd
 import threading
-import time
 import queue
 import os
 import sys
 import subprocess
-import shutil
 import re
 import librosa
 import multiprocessing
@@ -50,10 +48,9 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
 
     return output_df
 
-
 # test params:
-# modelname="OSBA"; threads=4; chunklength=1; dir_raw="./audio_in"; dir_proc = None; dir_out=None; verbosity=2; cleanup=False; conflict_proc="quit"; conflict_out="quit"
-def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n_opthreads, n_threadsperproc,
+# modelname="OSBA"; cpus=4; chunklength=1; dir_raw="./audio_in"; dir_proc = None; dir_out=None; verbosity=2; cleanup=False; conflict_proc="overwrite"; conflict_out="overwrite"
+def analyze_multithread(modelname, cpus, chunklength,
                         dir_raw="./audio_in", dir_proc=None, dir_out=None, verbosity=1,
                         cleanup=True, conflict_proc="quit", conflict_out="quit"):
     total_t_start = datetime.now()
@@ -78,8 +75,8 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
             quit("user chose to quit; exiting analysis")
 
     if conflict_out == "quit" and os.path.isdir(dir_out):
-        resolve_out = input("output directory already exists; how would you like to proceed? [skip/overwrite/quit]")
-        if resolve_out == "quit":
+        conflict_out = input("output directory already exists; how would you like to proceed? [skip/overwrite/quit]")
+        if conflict_out == "quit":
             quit("user chose to quit; exiting analysis")
 
     paths_raw = []
@@ -100,13 +97,6 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
             1).__str__() + " hours")
         chunklength = chunk_limit
 
-    tf_threads = 4
-
-    if tf_threads > threads:
-        quit(f"at least {tf_threads} available threads are recommended for tensorflow analysis")
-
-    queue_try_tolerance = 2
-
     q_raw = multiprocessing.Queue()
     for path in paths_raw:
         q_raw.put(path)
@@ -114,8 +104,20 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
     q_chunk = multiprocessing.Queue()
     q_log = multiprocessing.Queue()
 
-    convert_sema = multiprocessing.BoundedSemaphore(value=threads)
-    analyze_sema = multiprocessing.BoundedSemaphore(value=threads)
+    n_converters = min(cpus, len(paths_raw))
+    sema_converter = multiprocessing.BoundedSemaphore(value=n_converters)
+
+    n_analysisproc = min(cpus, len(paths_raw)) # worth 1
+    sema_analysisproc = multiprocessing.BoundedSemaphore(value=n_analysisproc) # needed for logger to quit
+
+    threadsperproc = (len(paths_raw)/n_analysisproc).__ceil__()
+
+    n_analyzers = n_analysisproc*threadsperproc # always spin up double threads even if this excees
+    sema_analyzer = multiprocessing.BoundedSemaphore(value=n_analyzers)
+
+    for _ in range(n_converters):  # start with no analyzer semaphores; they will be given by converters
+        for _ in range(threadsperproc):
+            sema_analyzer.acquire()
 
     event_analysis = multiprocessing.Event()
     event_log = multiprocessing.Event()
@@ -130,19 +132,21 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
 
     # worker definition
     #
-    def worker_log(event_log):
+    def logger(event_log):
         printlog(f"logger initialized", 2)
         event_log.wait()
 
         while True:
             try:
-                log_item = q_log.get_nowait()
+                log_item = q_log.get(block=True, timeout = 0.5)
             except queue.Empty:
-                if q_raw.qsize() == 0 and analyze_sema.get_value() == threads:
+                if q_raw.qsize() == 0 and sema_analysisproc.get_value() == n_analysisproc: # race condition?
                     total_t_delta = datetime.now() - total_t_start
 
+                    closing_message = f"analysis complete; total time: {total_t_delta.total_seconds().__round__(2)}s"
+                    print(closing_message)
                     log = open(path_log, "a")
-                    log.write(f"analysis complete; total time: {total_t_delta.total_seconds().__round__(2)}s")
+                    log.write(closing_message)
                     log.close()
                     break
 
@@ -158,36 +162,22 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
             log.write(log_item)
             log.close()
 
-    def worker_convert():
-        convert_sema.acquire()
-        pid = os.getpid()
-        printlog(f"converter {pid}: launching; remaining process semaphores: {convert_sema.get_value()}", 2)
-
-        queue_tries = 0
+    def converter(ident):
+        sema_converter.acquire()
+        printlog(f"converter {ident}: launching", 2)
 
         while True:
             try:
-                path_raw = q_raw.get_nowait()
+                path_raw = q_raw.get(block=True, timeout=0.5)
             except queue.Empty:
-                queue_tries += 1
-                if queue_tries <= queue_try_tolerance:
-                    printlog(
-                        f"converter {pid}: queue appears empty; retrying {(queue_try_tolerance - queue_tries) + 1} more time",
-                        2)
-                    time.sleep(0.1)
-                    continue
-                    # ^ explanation for the retry:
-                    # I'm getting unexpected exceptions right at the start of the script where the queue appears empty on the first pop,
-                    # even though printing queue size in the except block gives a non-zero size;
-                    # it must be that my workers are firing up before the queue fills, for some reason?
-                else:
-                    convert_sema.release()
-                    printlog(f"converter {pid}: no files in raw queue exiting", 1)
+                printlog(f"converter {ident}: no files in raw queue exiting", 1)
+                sema_converter.release()
 
-                    if convert_sema.get_value() >= tf_threads:
-                        printlog(f"converter {pid}: sufficient threads for analyzer", 2)
-                        event_analysis.set()
-                    break
+                printlog(f"converter {ident}: current semaphores {sema_analyzer.get_value()}, releasing {threadsperproc}", 1)
+                for _ in range(threadsperproc):
+                    sema_analyzer.release() # documentation says I should be able to release 2 at once, but it's throwing exceptions; maybe I can't with bounded?
+                event_analysis.set()
+                break
 
             audio_duration = librosa.get_duration(path=path_raw)
 
@@ -245,15 +235,16 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
 
             for chunk in chunklist:
                 q_chunk.put(chunk[2])
+            event_analysis.set()
 
             if cleanup:
                 printlog(f"converter {ident}: deleting converted audio {path_conv}", 2)
                 os.remove(path_conv)
 
-    def worker_analyze(event_analysis):
-        analyze_sema.acquire()
-        pid = os.getpid()
-        printlog(f"analyzer process {pid}: launching")
+    def analysis_process(event_analysis, ident):
+        sema_analysisproc.acquire()
+
+        printlog(f"analysis process {ident}: launching", 1)
 
         tf.config.threading.set_inter_op_parallelism_threads(1)
         tf.config.threading.set_intra_op_parallelism_threads(1)
@@ -262,8 +253,6 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
         #
         model, classes = loadup(modelname)
         yamnet = get_yamnet()
-
-        event_thread = threading.Event()
 
         def analyzer(event_analysis, tid):
             printlog(f"analysis process {ident}, analyzer {tid}: launching and waiting for semaphores", 1)
@@ -331,8 +320,8 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
         for t in threadlist:
             t.join()
 
-        analyze_sema.release()
-        printlog(f"analyzer process {pid}: all threads finished; exiting", 1)
+        printlog(f"analysis process {ident}: all threads finished; exiting", 1)
+        sema_analysisproc.release()
         sys.exit(0)
 
     # Go!
@@ -364,10 +353,6 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
 
     # wait for analysis to finish
     proc_log.join()
-
-    # if cleanup:
-    #     print("deleting processing directory")
-    #     shutil.rmtree(dir_proc)
 
 if __name__ == "__main__":
     analyze_multithread(modelname="OSBA", cpus=4, chunklength=1, dir_raw="./audio_in", verbosity=2, cleanup=True,
