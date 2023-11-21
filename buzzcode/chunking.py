@@ -51,7 +51,7 @@ def make_chunk_paths(chunklist, chunk_stub):
     return chunk_paths
 
 
-def cmd_chunk(path_in, chunklist, convert=False, overwrite=False, verbosity=1, band_low=200):
+def cmd_chunk(path_in, chunklist, convert=False, overwrite=True, verbosity=1, band_low=200):
     extension = os.path.splitext(path_in)[1].lower()
     if extension == ".mp3":
         print("input file is mp3, adding conversion options to ffmpeg call")

@@ -1,4 +1,4 @@
-def cmd_convert(path_in, path_out, verbosity=1, overwrite=False, band_low=200):
+def cmd_convert(path_in, path_out, verbosity=1, overwrite=True, band_low=200):
     cmdlist = [
         "ffmpeg",
         "-i", path_in
