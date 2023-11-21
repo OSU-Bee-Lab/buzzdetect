@@ -255,7 +255,6 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
                 printlog(f"converter {pid}: sufficient threads for analyzer", 2)
                 event_analysis.set()
 
-
     def worker_analyze(event_analysis):
         analyze_sema.acquire()
         pid = os.getpid()
@@ -298,7 +297,9 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
                 path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
                 if os.path.exists(path_out) and conflict_out == "skip":
-                    printlog(f"analyzer {tid} on process {pid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis", 1)
+                    printlog(
+                        f"analyzer {tid} on process {pid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis",
+                        1)
 
                 chunk_duration = librosa.get_duration(path=path_chunk)
 
@@ -352,7 +353,15 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
     proc_log.start()
 
     printlog(
-        f"begin analysis on {datetime.now().strftime('%Y-%d-%m %H:%M:%S')} of {len(paths_raw)} files using model {modelname} and chunk length {chunklength.__round__(2)}h on {threads} threads",
+        f"begin analysis on {total_t_start} with model {modelname} \n"
+        f"model: {modelname}\n"
+        f"threads: {threads}\n"
+        f"chunklength: {chunklength}\n"
+        f"analysis processes: {n_analysis_processes}\n"
+        f"threads per process: {n_threadsperproc}\n"
+        f"shared threads in process: {n_opthreads}\n"
+        f"conflict resolution for process files: {conflict_proc}\n"
+        f"conflict resolution for output files: {conflict_out}\n",
         1)
 
     converters = []
