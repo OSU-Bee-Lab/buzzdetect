@@ -198,7 +198,7 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
             clipname_conv = clip_name(path_conv, dir_conv)
 
             if os.path.exists(path_conv) and conflict_proc == "skip":
-                printlog(f"converter {pid}: {clipname_conv} already exists; skipping conversion", 1)
+                printlog(f"converter {ident}: {clipname_conv} already exists; skipping conversion", 1)
             else:
                 clipname_raw = clip_name(path_raw, dir_raw)
 
@@ -206,13 +206,13 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
 
                 conv_cmd = cmd_convert(path_raw, path_conv, verbosity=verbosity)
 
-                printlog(f"converter {pid}: converting {clipname_raw}", 1)
+                printlog(f"converter {ident}: converting {clipname_raw}", 1)
                 conv_t_start = datetime.now()
                 subprocess.run(conv_cmd)
                 conv_t_end = datetime.now()
                 conv_t_delta = conv_t_end - conv_t_start
                 printlog(
-                    f"converter {pid}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s",
+                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s",
                     2)
 
             # chunk
@@ -226,7 +226,7 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
             for chunk in chunklist:
                 path_chunk = chunk[2]
                 if os.path.exists(path_chunk) and conflict_proc == "skip":
-                    printlog(f"converter {pid}: {clip_name(path_chunk, dir_chunk)} already exists, skipping chunk", 1)
+                    printlog(f"converter {ident}: {clip_name(path_chunk, dir_chunk)} already exists, skipping chunk", 1)
                     q_chunk.put(chunk[2])
                     chunklist.remove(chunk)
 
@@ -234,34 +234,29 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
                 os.makedirs(os.path.dirname(chunk_stub), exist_ok=True)
                 chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, verbosity=verbosity)
 
-                printlog(f"converter {pid}: chunking {clipname_conv}", 1)
+                printlog(f"converter {ident}: chunking {clipname_conv}", 1)
                 chunk_t_start = datetime.now()
                 subprocess.run(chunk_cmd)
                 chunk_t_end = datetime.now()
                 chunk_t_delta = chunk_t_end - chunk_t_start
                 printlog(
-                    f"converter {pid}: chunked {len(chunklist)} chunks for {clipname_conv} in {chunk_t_delta.total_seconds().__round__(2)}s",
+                    f"converter {ident}: chunked {len(chunklist)} chunks for {clipname_conv} in {chunk_t_delta.total_seconds().__round__(2)}s",
                     2)
 
             for chunk in chunklist:
                 q_chunk.put(chunk[2])
 
             if cleanup:
-                printlog(f"converter {pid}: deleting converted audio {path_conv}", 2)
+                printlog(f"converter {ident}: deleting converted audio {path_conv}", 2)
                 os.remove(path_conv)
-
-            # wake worker_analyze when enough threads are available (and, de-facto, there are chunks available)
-            if convert_sema.get_value() >= tf_threads:
-                printlog(f"converter {pid}: sufficient threads for analyzer", 2)
-                event_analysis.set()
 
     def worker_analyze(event_analysis):
         analyze_sema.acquire()
         pid = os.getpid()
         printlog(f"analyzer process {pid}: launching")
 
-        tf.config.threading.set_inter_op_parallelism_threads(n_opthreads)
-        tf.config.threading.set_intra_op_parallelism_threads(n_opthreads)
+        tf.config.threading.set_inter_op_parallelism_threads(1)
+        tf.config.threading.set_intra_op_parallelism_threads(1)
 
         # ready model
         #
@@ -271,66 +266,66 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
         event_thread = threading.Event()
 
         def analyzer(event_analysis, tid):
-            printlog(f"analyzer {tid} on process {pid}: launching and waiting", 1)
-            event_analysis.wait()
+            printlog(f"analysis process {ident}, analyzer {tid}: launching and waiting for semaphores", 1)
+            sema_analyzer.acquire()
 
-            printlog(f"analyzer {tid} on process {pid}: waking", 1)
+            printlog(f"analysis process {ident}, analyzer {tid}: waking", 2)
 
             while True:
                 try:
-                    path_chunk = q_chunk.get(block=False, timeout=1)
+                    path_chunk = q_chunk.get(block=True, timeout=0.25)
                 except queue.Empty:
-                    if convert_sema.get_value() < threads:  # if there are still converters running
-                        printlog(f"analyzer {tid} on process {pid}: waiting for more chunks", 2)
+                    if sema_converter.get_value() < n_converters:  # if there are still converters running
+                        printlog(f"analysis process {ident}, analyzer {tid}: waiting for more chunks", 2)
                         event_analysis.clear()
-                        event_analysis.wait()  # Wait for the event to be set again; I really hope this sleeps the thread, not the process...
-                        continue  # re-start the while loop
+                        event_analysis.wait()
+                        continue
                     else:
-                        printlog(f"analyzer {tid} on process {pid}: chunk queue empty, exiting", 1)
+                        printlog(f"analysis process {ident}, analyzer {tid}: chunk queue empty, exiting", 1)
+                        sema_analyzer.release()
                         sys.exit(0)
 
                 clipname_chunk = clip_name(path_chunk, dir_chunk)
 
-                printlog(f"analyzer {tid} on process {pid}: launching analysis of {clipname_chunk}", 2)
+                printlog(f"analysis process {ident}, analyzer {tid}: launching analysis of {clipname_chunk}", 2)
 
                 path_out = re.sub(pattern=dir_chunk, repl=dir_out, string=path_chunk)
                 path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
                 if os.path.exists(path_out) and conflict_out == "skip":
-                    printlog(
-                        f"analyzer {tid} on process {pid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis",
-                        1)
+                    printlog(f"analysis process {ident}, analyzer {tid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis",1)
+                    continue
 
                 chunk_duration = librosa.get_duration(path=path_chunk)
 
                 # analyze
                 #
-                printlog(f"analyzer {tid} on process {pid}: analyzing {clipname_chunk}", 1)
+                printlog(f"analysis process {ident}, analyzer {tid}: analyzing {clipname_chunk}", 1)
                 analysis_t_start = datetime.now()
                 results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
                 analysis_t_end = datetime.now()
                 analysis_t_delta = analysis_t_end - analysis_t_start
                 printlog(
-                    f"analyzer {tid} on process {pid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",
+                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",
                     1)
 
                 # write
                 #
                 os.makedirs(os.path.dirname(path_out), exist_ok=True)
 
-                printlog(f"analyzer {tid} on process {pid}: writing results to {path_out}", 2)
+                printlog(f"analysis process {ident}, analyzer {tid}: writing results to {path_out}", 2)
                 results.to_csv(path_out)
 
                 # cleanup
                 #
                 if cleanup:
-                    printlog(f"analyzer {tid} on process {pid}: deleting chunk {clipname_chunk}", 2)
+                    printlog(f"analysis process {ident}, analyzer {tid}: deleting chunk {clipname_chunk}", 2)
                     os.remove(path_chunk)
 
         threadlist = []
-        for t in range(n_threadsperproc):
-            printlog(f"analyzer process {pid}: launching analyzer {t}")
-            threadlist.append(threading.Thread(target=analyzer, args=[event_analysis, t], name=f"proc{pid}_thread{t}"))
+        for t in range(threadsperproc):
+            printlog(f"analysis process {ident}: launching analyzer {t}", 1)
+            threadlist.append(threading.Thread(target=analyzer, args=[event_analysis, t], name=f"analyzer{ident}_thread{t}"))
             threadlist[-1].start()
 
         for t in threadlist:
@@ -342,31 +337,28 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
 
     # Go!
     #
-    # launch worker_analyze; will wait immediately; need to launch for log to see
-    analyzers = []
-    for a in range(n_analysis_processes):
-        analyzers.append(multiprocessing.Process(target=worker_analyze, args=([event_analysis])))
-        analyzers[-1].start()
-        pass  # Use this loop to keep track of progress
-
-    proc_log = multiprocessing.Process(target=worker_log, args=(event_log,))
-    proc_log.start()
-
     printlog(
         f"begin analysis on {total_t_start} with model {modelname} \n"
         f"model: {modelname}\n"
-        f"threads: {threads}\n"
-        f"chunklength: {chunklength}\n"
-        f"analysis processes: {n_analysis_processes}\n"
-        f"threads per process: {n_threadsperproc}\n"
-        f"shared threads in process: {n_opthreads}\n"
+        f"CPU count: {cpus}\n"
+        f"chunk length in hours: {chunklength}\n"
         f"conflict resolution for process files: {conflict_proc}\n"
         f"conflict resolution for output files: {conflict_out}\n",
-        1)
+        0)
+
+    # launch analysis_process; will wait immediately
+    analyzers = []
+    for a in range(n_analysisproc):
+        analyzers.append(multiprocessing.Process(target=analysis_process, name=f"analysis_proc{a}", args=([event_analysis, a])))
+        analyzers[-1].start()
+        pass  # Use this loop to keep track of progress
+
+    proc_log = multiprocessing.Process(target=logger, args=(event_log,))
+    proc_log.start()
 
     converters = []
-    for c in range(threads):
-        converters.append(multiprocessing.Process(target=worker_convert))
+    for c in range(cpus):
+        converters.append(multiprocessing.Process(target=converter, name=f"converter{c}", args=([c])))
         converters[-1].start()
         pass  # Use this loop to keep track of progress
 
@@ -377,6 +369,6 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
     #     print("deleting processing directory")
     #     shutil.rmtree(dir_proc)
 
-# if __name__ == "__main__":
-#     analyze_multithread(modelname="OSBA", threads=4, chunklength=1, n_analysis_processes=3, n_opthreads=2, n_threadsperproc=1, dir_raw="./audio_in", verbosity=1, cleanup=True,
-#                         conflict_proc="overwrite", conflict_out="overwrite")
+if __name__ == "__main__":
+    analyze_multithread(modelname="OSBA", cpus=4, chunklength=1, dir_raw="./audio_in", verbosity=2, cleanup=True,
+                        conflict_proc="skip", conflict_out="skip")
