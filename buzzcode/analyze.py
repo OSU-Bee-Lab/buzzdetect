@@ -255,98 +255,89 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
                 printlog(f"converter {pid}: sufficient threads for analyzer", 2)
                 event_analysis.set()
 
+
     def worker_analyze(event_analysis):
         analyze_sema.acquire()
         pid = os.getpid()
+        printlog(f"analyzer process {pid}: launching")
 
         tf.config.threading.set_inter_op_parallelism_threads(n_opthreads)
         tf.config.threading.set_intra_op_parallelism_threads(n_opthreads)
-
-        thread_sema = threading.BoundedSemaphore(value=n_threadsperproc)
 
         # ready model
         #
         model, classes = loadup(modelname)
         yamnet = get_yamnet()
 
-        tid = 0
-        threadlist = []
+        event_thread = threading.Event()
 
-        def analyzer(path_chunk, tid):
-            thread_sema.acquire()
-            printlog(f"analyzer {tid} on process {pid}: waiting for threads", 1)
-
+        def analyzer(event_analysis, tid):
+            printlog(f"analyzer {tid} on process {pid}: launching and waiting", 1)
             event_analysis.wait()
-            printlog(f"analyzer {tid} on process {pid}: threads and chunks available; launching analysis", 1)
 
-            path_out = re.sub(pattern=dir_chunk, repl=dir_out, string=path_chunk)
-            path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
+            printlog(f"analyzer {tid} on process {pid}: waking", 1)
 
-            if os.path.exists(path_out) and conflict_out == "skip":
-                printlog(f"analyzer {tid} on process {pid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis", 1)
-                thread_sema.release()
-                sys.exit(0) # should close only this thread!
+            while True:
+                try:
+                    path_chunk = q_chunk.get(block=False, timeout=1)
+                except queue.Empty:
+                    if convert_sema.get_value() < threads:  # if there are still converters running
+                        printlog(f"analyzer {tid} on process {pid}: waiting for more chunks", 2)
+                        event_analysis.clear()
+                        event_analysis.wait()  # Wait for the event to be set again; I really hope this sleeps the thread, not the process...
+                        continue  # re-start the while loop
+                    else:
+                        printlog(f"analyzer {tid} on process {pid}: chunk queue empty, exiting", 1)
+                        sys.exit(0)
 
-            clipname_chunk = clip_name(path_chunk, dir_chunk)
-            chunk_duration = librosa.get_duration(path=path_chunk)
+                clipname_chunk = clip_name(path_chunk, dir_chunk)
 
-            # analyze
-            #
-            printlog(f"analyzer {tid} on process {pid}: analyzing {clipname_chunk}", 1)
-            analysis_t_start = datetime.now()
-            results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
-            analysis_t_end = datetime.now()
-            analysis_t_delta = analysis_t_end - analysis_t_start
-            printlog(
-                f"analyzer {tid} on process {pid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",
-                1)
+                printlog(f"analyzer {tid} on process {pid}: launching analysis of {clipname_chunk}", 2)
 
-            # write
-            #
-            os.makedirs(os.path.dirname(path_out), exist_ok=True)
+                path_out = re.sub(pattern=dir_chunk, repl=dir_out, string=path_chunk)
+                path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
-            printlog(f"analyzer {tid} on process {pid}: writing results to {path_out}", 2)
-            results.to_csv(path_out)
+                if os.path.exists(path_out) and conflict_out == "skip":
+                    printlog(f"analyzer {tid} on process {pid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis", 1)
 
-            # cleanup
-            #
-            if cleanup:
-                printlog(f"analyzer {tid} on process {pid}: deleting chunk {clipname_chunk}", 2)
-                os.remove(path_chunk)
+                chunk_duration = librosa.get_duration(path=path_chunk)
 
-            event_analysis.set()
+                # analyze
+                #
+                printlog(f"analyzer {tid} on process {pid}: analyzing {clipname_chunk}", 1)
+                analysis_t_start = datetime.now()
+                results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
+                analysis_t_end = datetime.now()
+                analysis_t_delta = analysis_t_end - analysis_t_start
+                printlog(
+                    f"analyzer {tid} on process {pid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",
+                    1)
 
-            thread_sema.release()
+                # write
+                #
+                os.makedirs(os.path.dirname(path_out), exist_ok=True)
 
-        while True:
-            if thread_sema._value == 0:
-                printlog(f"analyzer process {pid}: all threads employed; waiting", 2)
-                event_analysis.clear()
-                event_analysis.wait()
-            try:
-                path_chunk = q_chunk.get_nowait()
-            except queue.Empty:
-                if convert_sema.get_value() < n_threadsperproc:  # if there are still converters running
-                    printlog(
-                        f"analyzer process {pid}: analysis caught up to chunking; waiting for more chunks", 2)
-                    event_analysis.clear()
-                    event_analysis.wait()  # Wait for the event to be set again
-                    continue  # re-start the while loop
-                else:
-                    printlog(f"analyzer process {pid}: queue empty, waiting for threads to close", 1)
+                printlog(f"analyzer {tid} on process {pid}: writing results to {path_out}", 2)
+                results.to_csv(path_out)
 
-                    if threadlist:
-                        for thread in threadlist:
-                            thread.join()  # wait for all analyzer threads to finish before exiting
+                # cleanup
+                #
+                if cleanup:
+                    printlog(f"analyzer {tid} on process {pid}: deleting chunk {clipname_chunk}", 2)
+                    os.remove(path_chunk)
 
-                    analyze_sema.release()
-                    printlog(f"analyzer process {pid}: exiting", 1)
-                    sys.exit(0)
-
-            printlog(f"analyzer process {pid}: launching analyzer {tid}")
-            threadlist.append(threading.Thread(target=analyzer, args=[path_chunk, tid], name=f"proc{pid}_thread{tid}"))
+        threadlist = []
+        for t in range(n_threadsperproc):
+            printlog(f"analyzer process {pid}: launching analyzer {t}")
+            threadlist.append(threading.Thread(target=analyzer, args=[event_analysis, t], name=f"proc{pid}_thread{t}"))
             threadlist[-1].start()
-            tid += 1
+
+        for t in threadlist:
+            t.join()
+
+        analyze_sema.release()
+        printlog(f"analyzer process {pid}: all threads finished; exiting", 1)
+        sys.exit(0)
 
     # Go!
     #
@@ -377,7 +368,6 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
         print("deleting processing directory")
         shutil.rmtree(dir_proc)
 
-
-if __name__ == "__main__":
-    analyze_multithread(modelname="OSBA", threads=4, chunklength=1, n_analysis_processes=2, n_opthreads=2, n_threadsperproc=2, dir_raw="./audio_in", verbosity=1, cleanup=True,
-                        conflict_proc="overwrite", conflict_out="overwrite")
+# if __name__ == "__main__":
+#     analyze_multithread(modelname="OSBA", threads=4, chunklength=1, n_analysis_processes=3, n_opthreads=2, n_threadsperproc=1, dir_raw="./audio_in", verbosity=1, cleanup=True,
+#                         conflict_proc="overwrite", conflict_out="overwrite")
