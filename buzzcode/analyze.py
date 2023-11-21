@@ -364,9 +364,9 @@ def analyze_multithread(modelname, threads, chunklength, n_analysis_processes, n
     # wait for analysis to finish
     proc_log.join()
 
-    if cleanup:
-        print("deleting processing directory")
-        shutil.rmtree(dir_proc)
+    # if cleanup:
+    #     print("deleting processing directory")
+    #     shutil.rmtree(dir_proc)
 
 # if __name__ == "__main__":
 #     analyze_multithread(modelname="OSBA", threads=4, chunklength=1, n_analysis_processes=3, n_opthreads=2, n_threadsperproc=1, dir_raw="./audio_in", verbosity=1, cleanup=True,
