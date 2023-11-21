@@ -43,7 +43,7 @@ elif (args.action == "analyze"):
 
     analyze_multithread(
         modelname=args.modelname,
-        threads=args.threads,
+        cpus=args.threads,
         dir_raw=args.dir_raw,
         dir_proc=args.dir_proc,
         dir_out=args.dir_out,
