@@ -50,7 +50,7 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
 
 # test params:
 # modelname="OSBA"; cpus=4; chunklength=1; dir_raw="./audio_in"; dir_proc = None; dir_out=None; verbosity=2; cleanup=False; conflict_proc="overwrite"; conflict_out="overwrite"
-def analyze_multithread(modelname, cpus, chunklength,
+def analyze_multithread(modelname, cpus, memory_allot,
                         dir_raw="./audio_in", dir_proc=None, dir_out=None, verbosity=1,
                         cleanup=True, conflict_proc="quit", conflict_out="quit"):
     total_t_start = datetime.now()
@@ -90,12 +90,12 @@ def analyze_multithread(modelname, cpus, chunklength,
 
     # process control
     #
-    chunk_limit = size_to_runtime(3.9) / 3600
+    ram_per_cpu = memory_allot/cpus
+    chunklength_split = size_to_runtime(ram_per_cpu)/3600
+    chunklength_limit = size_to_runtime(3.9) / 3600  # sizes above 3.9 gigs produce overflow errors
 
-    if chunklength > chunk_limit:
-        print("desired chunk length produce overflow errors, setting to maximum, " + chunk_limit.__round__(
-            1).__str__() + " hours")
-        chunklength = chunk_limit
+    chunklength = min(chunklength_split, chunklength_limit)
+    print(f"splitting audio to chunks of {chunklength.__round__(2)}h")
 
     q_raw = multiprocessing.Queue()
     for path in paths_raw:
@@ -107,15 +107,15 @@ def analyze_multithread(modelname, cpus, chunklength,
     n_converters = min(cpus, len(paths_raw))
     sema_converter = multiprocessing.BoundedSemaphore(value=n_converters)
 
-    n_analysisproc = min(cpus, len(paths_raw)) # worth 1
+    n_analysisproc = cpus # NOTE: I could launch only as many analyzers as there will be chunks made
     sema_analysisproc = multiprocessing.BoundedSemaphore(value=n_analysisproc) # needed for logger to quit
 
-    threadsperproc = (len(paths_raw)/n_analysisproc).__ceil__()
+    threadsperproc = (len(paths_raw)/n_analysisproc).__ceil__() # not sure this is the best approach; should benchmark
 
-    n_analyzers = n_analysisproc*threadsperproc # always spin up double threads even if this excees
+    n_analyzers = n_analysisproc*threadsperproc
     sema_analyzer = multiprocessing.BoundedSemaphore(value=n_analyzers)
 
-    for _ in range(n_converters):  # start with no analyzer semaphores; they will be given by converters
+    for _ in range(n_converters):  # for each converter that will be running, remove a semaphore until converter finished
         for _ in range(threadsperproc):
             sema_analyzer.acquire()
 
@@ -355,5 +355,5 @@ def analyze_multithread(modelname, cpus, chunklength,
     proc_log.join()
 
 if __name__ == "__main__":
-    analyze_multithread(modelname="OSBA", cpus=4, chunklength=1, dir_raw="./audio_in", verbosity=2, cleanup=True,
-                        conflict_proc="skip", conflict_out="skip")
+    # analyze_multithread(modelname="OSBA", cpus=48, memory_allot=170, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_proc="skip", conflict_out="overwrite")
+    analyze_multithread(modelname="OSBA", cpus=6, memory_allot=6, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_proc="skip", conflict_out="overwrite")
