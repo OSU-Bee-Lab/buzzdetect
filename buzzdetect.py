@@ -50,6 +50,6 @@ elif (args.action == "analyze"):
         chunklength=args.chunklength,
         verbosity=args.verbosity,
         cleanup=args.cleanup,
-        conflict_proc=args.conflict_proc,
+        conflict_conv=args.conflict_proc,
         conflict_out=args.conflict_out
     )
