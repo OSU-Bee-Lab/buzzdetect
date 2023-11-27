@@ -60,7 +60,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
     dir_model = os.path.join("models", modelname)
 
     if dir_proc is None:
-        dir_proc = os.path.join(dir_model, "processing")
+        dir_proc = "./processing"
 
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
