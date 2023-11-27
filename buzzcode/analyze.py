@@ -49,7 +49,7 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
     return output_df
 
 # test params:
-# modelname="OSBA"; cpus=4; chunklength=1; dir_raw="./audio_in"; dir_proc = None; dir_out=None; verbosity=2; cleanup=False; conflict_proc="overwrite"; conflict_out="overwrite"
+# modelname="OSBA"; cpus=6; memory_allot=0.0192; dir_raw="./audio_in"; dir_proc = None; dir_out=None; verbosity=2; cleanup=False; conflict_chunk="skip"; conflict_conv="skip"; conflict_out="skip"
 def analyze_multithread(modelname, cpus, memory_allot,
                         dir_raw="./audio_in", dir_proc=None, dir_out=None, verbosity=1,
                         cleanup=True, conflict_conv="quit", conflict_chunk="quit", conflict_out="quit"):
@@ -220,18 +220,28 @@ def analyze_multithread(modelname, cpus, memory_allot,
             chunklist = make_chunklist(filepath=path_conv, chunk_stub=chunk_stub, chunklength=chunklength,
                                        audio_duration=audio_duration)
 
-            for chunk in chunklist:
-                path_chunk = chunk[2]
-                if os.path.exists(path_chunk) and conflict_proc == "skip":
-                    printlog(f"converter {ident}: {clip_name(path_chunk, dir_chunk)} already exists, skipping chunk", 1)
-                    q_chunk.put(chunk[2])
+            chunklist_existing = [chunk for chunk in chunklist if os.path.exists(chunk[2])]
+            if conflict_chunk == "skip" and len(chunklist_existing) > 0:
+                chunknames = [chunk[2] for chunk in chunklist_existing]
+                printlog(f"converter {ident}: skipping existing chunks: {chunknames}", 1)
+
+                for chunk in chunklist_existing:
                     chunklist.remove(chunk)
+                    q_chunk.put(chunk[2])  # queue the chunks that exist so analyzers can start on them
+
+                event_analysis.set()
 
             if len(chunklist) > 0:
                 os.makedirs(os.path.dirname(chunk_stub), exist_ok=True)
                 chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, verbosity=verbosity)
 
-                printlog(f"converter {ident}: chunking {clipname_conv}", 1)
+                chunknames = [chunk[2] for chunk in chunklist]
+
+                printlog(f"converter {ident}: chunking {chunknames}", 1)
+
+                chunks_already_exist = [os.path.exists(x) for x in chunknames]
+                printlog(f"converter {ident}: chunks {chunknames} exist: {chunks_already_exist}")
+
                 chunk_t_start = datetime.now()
                 subprocess.run(chunk_cmd)
                 chunk_t_end = datetime.now()
