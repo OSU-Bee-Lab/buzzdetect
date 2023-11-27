@@ -99,7 +99,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
     #
     ram_per_cpu = memory_allot/cpus
     chunklength_split = size_to_runtime(ram_per_cpu)/3600
-    chunklength_limit = size_to_runtime(3.9) / 3600  # sizes above 3.9 gigs produce overflow errors
+    chunklength_limit = size_to_runtime(1.9) / 3600  # sizes above 1.9 gigs produce overflow errors
 
     chunklength = min(chunklength_split, chunklength_limit)
     print(f"splitting audio to chunks of {chunklength.__round__(2)}h")
