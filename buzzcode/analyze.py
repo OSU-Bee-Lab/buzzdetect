@@ -52,7 +52,7 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
 # modelname="OSBA"; cpus=4; chunklength=1; dir_raw="./audio_in"; dir_proc = None; dir_out=None; verbosity=2; cleanup=False; conflict_proc="overwrite"; conflict_out="overwrite"
 def analyze_multithread(modelname, cpus, memory_allot,
                         dir_raw="./audio_in", dir_proc=None, dir_out=None, verbosity=1,
-                        cleanup=True, conflict_proc="quit", conflict_out="quit"):
+                        cleanup=True, conflict_conv="quit", conflict_chunk="quit", conflict_out="quit"):
     total_t_start = datetime.now()
 
     # filesystem preparation
@@ -68,10 +68,17 @@ def analyze_multithread(modelname, cpus, memory_allot,
     dir_conv = os.path.join(dir_proc, "conv")
     dir_chunk = os.path.join(dir_proc, "chunk")
 
-    if conflict_proc == "quit" and os.path.isdir(dir_proc):
-        conflict_proc = input(
-            "processing directory already exists; how would you like to proceed? [skip/overwrite/quit]")
-        if conflict_proc == "quit":
+    if conflict_conv == "quit" and os.path.isdir(dir_conv):
+        conflict_conv = input(
+            "conversion directory already exists; how would you like to proceed? [skip/overwrite/quit]")
+        if conflict_conv == "quit":
+            quit("user chose to quit; exiting analysis")
+
+
+    if conflict_chunk == "quit" and os.path.isdir(dir_chunk):
+        conflict_chunk = input(
+            "conversion directory already exists; how would you like to proceed? [skip/overwrite/quit]")
+        if conflict_chunk == "quit":
             quit("user chose to quit; exiting analysis")
 
     if conflict_out == "quit" and os.path.isdir(dir_out):
@@ -187,7 +194,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
             path_conv = re.sub(pattern=dir_raw, repl=dir_conv, string=path_conv)
             clipname_conv = clip_name(path_conv, dir_conv)
 
-            if os.path.exists(path_conv) and conflict_proc == "skip":
+            if os.path.exists(path_conv) and conflict_conv == "skip":
                 printlog(f"converter {ident}: {clipname_conv} already exists; skipping conversion", 1)
             else:
                 clipname_raw = clip_name(path_raw, dir_raw)
@@ -330,8 +337,10 @@ def analyze_multithread(modelname, cpus, memory_allot,
         f"begin analysis on {total_t_start} with model {modelname} \n"
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
+        f"memory allotment {memory_allot}\n"
         f"chunk length in hours: {chunklength}\n"
-        f"conflict resolution for process files: {conflict_proc}\n"
+        f"conflict resolution for conversion files: {conflict_conv}\n"
+        f"conflict resolution for chunk files: {conflict_chunk}\n"
         f"conflict resolution for output files: {conflict_out}\n",
         0)
 
@@ -356,4 +365,4 @@ def analyze_multithread(modelname, cpus, memory_allot,
 
 if __name__ == "__main__":
     # analyze_multithread(modelname="OSBA", cpus=48, memory_allot=170, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_proc="skip", conflict_out="overwrite")
-    analyze_multithread(modelname="OSBA", cpus=6, memory_allot=6, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_proc="skip", conflict_out="overwrite")
+    analyze_multithread(modelname="OSBA", cpus=6, memory_allot=0.0192, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_conv="skip", conflict_chunk="skip", conflict_out="skip")
