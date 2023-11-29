@@ -10,7 +10,7 @@ def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_duration=N
     if chunklength is None:
         chunklength_s = audio_duration
     else:
-        chunklength_s = int(60 * 60 * chunklength)  # in seconds
+        chunklength_s = (60 * 60 * chunklength).__ceil__()  # in seconds
 
     if chunklength_s >= audio_duration:
         if chunk_stub is None:
