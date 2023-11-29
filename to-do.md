@@ -3,18 +3,23 @@
 * Figure out retraining cycle!
 
 ## Code
+### Overall
+* Adjust useage of chunklength to always be in seconds once chunklength is automatically set from memory and cores
+
 ### train.py
 * Store training history as python object in model directory (see the pickle package for python)
 * Allow to read from different directories
 * Move building of training to python module
 
 ### analyze.py
+* Create an "analyze only" function that doesn't bother spinning up converters
+     - Or...spin this into the smart-detecting system? Look ahead to see if files need chunked, only spin up converters after, instead of having converters figure out on their own
+     - Then I could separate chunkers and converters, although I still want chunkers to take priority to let analyzers spin up if there's idle CPU
+* Re-write entire script to use classes and methods instead of functions
 * Make system for smart-detecting what data have already been analyzed
     - Read in all available buzzdetect outputs, chunk around those times
     - Or, have user specify overwrite or new file
-* Figure out if the 8x expansion of wav size → memory utilization is the result of multithreading (I have 8 threads); does supercomputer see larger expansion?
-* Make worker_convert() figure out what files need processed before processing; e.g. if the conv file doesn't exist but all of the chunks for it do, no need to process the conv file. It's a weird case, I admit, but it's possible and would let you save only the chunks for storage consideration.
-* Pursuant to the above, change cleanup to take a list of which files should be cleaned up? Or change it to saved? So that you can save chunks but not convs
+* Change cleanup to take arg list, e.g. ["conv", "chunk"]
 
 ## Machine Learning Design
 * Make ambient_night classification
