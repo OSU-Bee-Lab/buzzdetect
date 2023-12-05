@@ -9,7 +9,7 @@ import re
 import librosa
 import multiprocessing
 from datetime import datetime
-from buzzcode.tools import loadup, size_to_runtime, clip_name, load_audio, get_yamnet
+from buzzcode.tools import loadup, size_to_runtime, clip_name, load_audio, get_yamnet, search_dir
 from buzzcode.conversion import cmd_convert
 from buzzcode.chunking import make_chunklist, cmd_chunk
 
@@ -86,23 +86,13 @@ def analyze_multithread(modelname, cpus, memory_allot,
         if conflict_out == "quit":
             quit("user chose to quit; exiting analysis")
 
-    paths_raw = []
-    for root, dirs, files in os.walk(dir_raw):
-        for file in files:
-            if file.endswith('.mp3'):
-                paths_raw.append(os.path.join(root, file))
+    paths_raw = search_dir(dir_raw, "mp3")
 
     log_timestamp = total_t_start.strftime("%Y-%m-%d_%H%M%S")
     path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
 
     # process control
     #
-    ram_per_cpu = memory_allot/cpus
-    chunklength_split = size_to_runtime(ram_per_cpu)/3600
-    chunklength_limit = size_to_runtime(1.9) / 3600  # sizes above 1.9 gigs produce overflow errors
-
-    chunklength = min(chunklength_split, chunklength_limit)
-    print(f"splitting audio to chunks of {chunklength.__round__(2)}h")
 
     q_raw = multiprocessing.Queue()
     for path in paths_raw:
@@ -121,6 +111,13 @@ def analyze_multithread(modelname, cpus, memory_allot,
 
     n_analyzers = n_analysisproc*threadsperproc
     sema_analyzer = multiprocessing.BoundedSemaphore(value=n_analyzers)
+
+    ram_per_process = memory_allot/(n_converters*threadsperproc)
+    chunklength_split = size_to_runtime(ram_per_process)/3600
+    chunklength_limit = size_to_runtime(1.9) / 3600  # sizes above 1.9 gigs produce overflow errors
+
+    chunklength = min(chunklength_split, chunklength_limit)
+    print(f"splitting audio to chunks of {chunklength.__round__(2)}h")
 
     for _ in range(n_converters):  # for each converter that will be running, remove a semaphore until converter finished
         for _ in range(threadsperproc):
@@ -312,7 +309,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 analysis_t_end = datetime.now()
                 analysis_t_delta = analysis_t_end - analysis_t_start
                 printlog(
-                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s",
+                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s. {q_chunk.qsize()} files remain",
                     1)
 
                 # write
@@ -374,5 +371,5 @@ def analyze_multithread(modelname, cpus, memory_allot,
     proc_log.join()
 
 if __name__ == "__main__":
-    # analyze_multithread(modelname="OSBA", cpus=48, memory_allot=170, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_proc="skip", conflict_out="overwrite")
+    # analyze_multithread(modelname="OSBA", cpus=48, memory_allot=170*, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_proc="skip", conflict_out="overwrite")
     analyze_multithread(modelname="OSBA", cpus=6, memory_allot=0.0192, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_conv="skip", conflict_chunk="skip", conflict_out="skip")

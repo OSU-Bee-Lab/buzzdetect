@@ -110,3 +110,13 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def search_dir(dir_in, extension):
+    paths = []
+    for root, dirs, files in os.walk(dir_in):
+        for file in files:
+            if file.endswith(extension):
+                paths.append(os.path.join(root, file))
+
+    return paths
