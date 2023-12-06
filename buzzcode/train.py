@@ -3,43 +3,76 @@
 import os
 import pandas as pd
 import tensorflow as tf
-import tensorflow_hub as hub
-from buzzcode.tools import load_audio
+import re
+import numpy as np
+import librosa
+from buzzcode.tools import load_audio, search_dir, get_yamnet
 
 # Loading YAMNet from TensorFlow Hub
 #
-yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
-yamnet_model = hub.load(yamnet_model_handle)
+yamnet_model = get_yamnet()
+
+# I would rather use load_audio, but it isn't playing nice with the sliced tensorflow dataset;
+# I get: TypeError: expected str, bytes or os.PathLike object, not Tensor
+# probs because of extension line?
+def load_wav_16k_mono(filename):
+    """ Load a WAV file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
+    file_contents = tf.io.read_file(filename)
+    wav, sample_rate = tf.audio.decode_wav(
+        file_contents,
+        desired_channels=1)
+    wav = tf.squeeze(wav, axis=-1)
+    return wav
 
 
-def generate_model(modelName, trainingSet, epochs_in):
-    model_path = os.path.join("models/", modelName)
+# modelName="test"; epochs_in=80; dir_training="./audio_training"; drop_threshold = 0
+def generate_model(modelName, epochs_in, dir_training="./audio_training", drop_threshold=0):
+    dir_model = os.path.join("models/", modelName)
 
-    if os.path.exists(model_path):
+    if os.path.exists(dir_model):
         raise FileExistsError('a model folder with this name already exists; delete or rename the folder and re-run')
 
-    os.makedirs(model_path)
+    os.makedirs(dir_model)
 
     # Acquiring and filtering training data
     #
-    training_data = './training/audio'
+    audio_files = search_dir(dir_training, "wav")
 
-    metadata = pd.read_csv(os.path.join('./training/', "metadata_" + trainingSet + ".csv"))
+    metadata = pd.DataFrame()
+    metadata['path'] = audio_files
+    metadata['classification'] = [re.search(string=file, pattern="_s\\d+_(.*)\\.wav").group(1) for file in audio_files]
 
-    metadata.to_csv(model_path + "/metadata.csv")
+    if drop_threshold > 0:
+        classes = metadata.classification.unique()
 
-    classes = metadata.category.unique()
+        classes_keep = []
+        for c in classes:
+            count = len(metadata[metadata['classification'] == c])
+            if count > drop_threshold:
+                classes_keep.append(c)
 
-    durations = []
-    for cat in classes:
-        snip_duration = metadata[metadata.category == cat]["duration"]
+        metadata = metadata[metadata['classification'].isin(classes_keep)]
+
+    classes = metadata.classification.unique()
+
+    with open(os.path.join(dir_model, "classes.txt"), "w") as file:
+        for item in classes:
+            file.write(item + "\n")
+
+    metadata['fold'] = np.random.randint(low=1, high=5, size=len(metadata))
+    metadata['duration'] = [librosa.get_duration(path=file) for file in
+                            metadata['path']]  # a bit lengthy, but a fraction of the overall training time; maybe I could cache it? Split off a build_metadata function?
+
+    class_durations = []
+    for c in classes:
+        snip_duration = metadata[metadata['classification'] == c]["duration"]
         total_duration = sum(snip_duration)
 
-        durations.append(total_duration)
+        class_durations.append(total_duration)
 
     weight_raw = []  # gah this is so hacky
-    for dur in durations:
-        weight_raw.append(sum(durations) / dur)
+    for dur in class_durations:
+        weight_raw.append(sum(class_durations) / dur)
 
     weights = []
     for raw in weight_raw:
@@ -47,28 +80,21 @@ def generate_model(modelName, trainingSet, epochs_in):
 
     map_class_to_weight = {index: weight for index, weight in enumerate(weights)}
 
-    class_path = os.path.join(model_path, "classes.txt")
-
-    with open(class_path, "w") as file:
-        for item in classes:
-            file.write(item + "\n")
-
     map_class_to_id = {name: index for index, name in enumerate(classes)}
-
-    metadata = metadata.assign(target_model=metadata['category'].apply(lambda name: map_class_to_id[name]))
-    metadata = metadata.assign(filepath=metadata['filename'].apply(lambda row: os.path.join(training_data, row)))
+    metadata['target_model'] = [map_class_to_id[c] for c in metadata['classification']]
+    metadata.to_csv(path_or_buf=os.path.join(dir_model, "metadata.csv"))
 
     # Load the audio files and retrieve embeddings
     #
 
-    filenames = metadata['filepath']
+    filenames = metadata['path']
     targets = metadata['target_model']
     folds = metadata['fold']
 
     main_ds = tf.data.Dataset.from_tensor_slices((filenames, targets, folds))
 
     def load_wav_for_map(filename, label, fold):
-        return load_audio(filename), label, fold
+        return load_wav_16k_mono(filename), label, fold
 
     main_ds = main_ds.map(load_wav_for_map)
 
@@ -129,3 +155,10 @@ def generate_model(modelName, trainingSet, epochs_in):
                         class_weight=map_class_to_weight)
 
     model.save(os.path.join("models", modelName), include_optimizer=True)
+
+
+if __name__ == "__main__":
+    if os.path.exists("./models/test"):
+        import shutil
+        shutil.rmtree("./models/test")
+    generate_model("test", 10)
