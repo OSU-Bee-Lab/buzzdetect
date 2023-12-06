@@ -205,7 +205,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 conv_t_end = datetime.now()
                 conv_t_delta = conv_t_end - conv_t_start
                 printlog(
-                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s",
+                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s (rate: {audio_duration/conv_t_delta.total_seconds()})",
                     2)
 
             # chunk
@@ -308,7 +308,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 analysis_t_end = datetime.now()
                 analysis_t_delta = analysis_t_end - analysis_t_start
                 printlog(
-                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s. {q_chunk.qsize()} files remain",
+                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s (rate: {chunk_duration/analysis_t_delta.total_seconds()}). {q_chunk.qsize()} files remain",
                     1)
 
                 # write
