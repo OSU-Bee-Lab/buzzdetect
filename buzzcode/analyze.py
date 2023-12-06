@@ -49,10 +49,10 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
     return output_df
 
 # test params:
-# modelname="OSBA"; cpus=6; memory_allot=0.0192; dir_raw="./audio_in"; dir_proc = None; dir_out=None; verbosity=2; cleanup=False; conflict_chunk="skip"; conflict_conv="skip"; conflict_out="skip"
+# for supercomputer:  modelname="revision_1"; cpus=48; memory_allot=140; dir_raw="./audio_in"; dir_proc=None; dir_out=None; verbosity=1; cleanup_conv=True; cleanup_chunk=False; conflict_conv="quit"; conflict_chunk="quit"; conflict_out="quit"
 def analyze_multithread(modelname, cpus, memory_allot,
                         dir_raw="./audio_in", dir_proc=None, dir_out=None, verbosity=1,
-                        cleanup=True, conflict_conv="quit", conflict_chunk="quit", conflict_out="quit"):
+                        cleanup_conv=True, cleanup_chunk=False, conflict_conv="quit", conflict_chunk="quit", conflict_out="quit"):
     total_t_start = datetime.now()
 
     # filesystem preparation
@@ -112,8 +112,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
     n_analyzers = n_analysisproc*threadsperproc
     sema_analyzer = multiprocessing.BoundedSemaphore(value=n_analyzers)
 
-    ram_per_process = memory_allot/(n_converters*threadsperproc)
-    chunklength_split = size_to_runtime(ram_per_process)/3600
+    chunklength_split = size_to_runtime(((memory_allot/(cpus*threadsperproc)) - (1/3))/9).__floor__()/3600
     chunklength_limit = size_to_runtime(1.9) / 3600  # sizes above 1.9 gigs produce overflow errors
 
     chunklength = min(chunklength_split, chunklength_limit)
@@ -251,7 +250,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 q_chunk.put(chunk[2])
             event_analysis.set()
 
-            if cleanup:
+            if cleanup_conv:
                 printlog(f"converter {ident}: deleting converted audio {path_conv}", 2)
                 os.remove(path_conv)
 
@@ -321,7 +320,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
 
                 # cleanup
                 #
-                if cleanup:
+                if cleanup_chunk:
                     printlog(f"analysis process {ident}, analyzer {tid}: deleting chunk {clipname_chunk}", 2)
                     os.remove(path_chunk)
 
@@ -345,7 +344,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
         f"memory allotment {memory_allot}\n"
-        f"chunk length in hours: {chunklength}\n"
+        f"chunk length in seconds: {chunklength * 3600}\n"
         f"conflict resolution for conversion files: {conflict_conv}\n"
         f"conflict resolution for chunk files: {conflict_chunk}\n"
         f"conflict resolution for output files: {conflict_out}\n",
@@ -371,5 +370,4 @@ def analyze_multithread(modelname, cpus, memory_allot,
     proc_log.join()
 
 if __name__ == "__main__":
-    # analyze_multithread(modelname="OSBA", cpus=48, memory_allot=170*, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_proc="skip", conflict_out="overwrite")
-    analyze_multithread(modelname="OSBA", cpus=6, memory_allot=0.0192, dir_raw="./audio_in", verbosity=2, cleanup=False, conflict_conv="skip", conflict_chunk="skip", conflict_out="skip")
+    analyze_multithread(modelname="revision_1", cpus=48, memory_allot=140, dir_raw="./audio_in", verbosity=1, cleanup_chunk=False, cleanup_conv=True, conflict_conv="skip", conflict_chunk="skip", conflict_out="skip")
