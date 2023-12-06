@@ -77,7 +77,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
 
     if conflict_chunk == "quit" and os.path.isdir(dir_chunk):
         conflict_chunk = input(
-            "conversion directory already exists; how would you like to proceed? [skip/overwrite/quit]")
+            "chunk directory already exists; how would you like to proceed? [skip/overwrite/quit]")
         if conflict_chunk == "quit":
             quit("user chose to quit; exiting analysis")
 
