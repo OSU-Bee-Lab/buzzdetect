@@ -120,7 +120,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
     print(f"splitting audio to chunks of {chunklength.__round__(2)}h")
 
     for _ in range(n_converters):  # for each converter that will be running, remove a semaphore until converter finished
-        for _ in range(threadsperproc):
+        for _ in range(1, threadsperproc):
             sema_analyzer.acquire()
 
     event_analysis = multiprocessing.Event()
