@@ -6,7 +6,8 @@ import tensorflow as tf
 import re
 import numpy as np
 import librosa
-from buzzcode.tools import load_audio, search_dir, get_yamnet
+from buzzcode.tools import search_dir
+from buzzcode.tools_tf import load_audio, get_yamnet
 
 # Loading YAMNet from TensorFlow Hub
 #

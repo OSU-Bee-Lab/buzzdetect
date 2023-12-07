@@ -9,7 +9,8 @@ import re
 import librosa
 import multiprocessing
 from datetime import datetime
-from buzzcode.tools import loadup, size_to_runtime, clip_name, load_audio, get_yamnet, search_dir
+from buzzcode.tools import size_to_runtime, clip_name, search_dir
+from buzzcode.tools_tf import loadup, load_audio, get_yamnet
 from buzzcode.conversion import cmd_convert
 from buzzcode.chunking import make_chunklist, cmd_chunk
 
