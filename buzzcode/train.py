@@ -7,11 +7,12 @@ import re
 import numpy as np
 import librosa
 from buzzcode.tools import search_dir
-from buzzcode.tools_tf import load_audio, get_yamnet
+from buzzcode.tools_tf import get_yamnet
 
 # Loading YAMNet from TensorFlow Hub
 #
 yamnet_model = get_yamnet()
+
 
 # I would rather use load_audio, but it isn't playing nice with the sliced tensorflow dataset;
 # I get: TypeError: expected str, bytes or os.PathLike object, not Tensor
@@ -25,10 +26,35 @@ def load_wav_16k_mono(filename):
     wav = tf.squeeze(wav, axis=-1)
     return wav
 
+# dir_training="./audio_training"
+def get_snipDuration(dir_training, invalidate = False):
+    paths_audio = search_dir(dir_training, ".wav")
+    cachepath = os.path.join(dir_training, "durations.csv")
 
-# modelName="test"; epochs_in=80; dir_training="./audio_training"; drop_threshold = 0
-def generate_model(modelName, epochs_in, dir_training="./audio_training", drop_threshold=0):
-    dir_model = os.path.join("models/", modelName)
+    df = pd.DataFrame()
+    df['path'] = paths_audio
+
+    if (not os.path.exists(cachepath)) or invalidate:
+        df['duration'] = [librosa.get_duration(path=file) for file in df['path']]
+        df.to_csv(cachepath)
+        return df
+
+    df_cache = pd.read_csv(cachepath)
+
+    # drop cached values
+    df = df[-df['path'].isin(df_cache['path'])]
+    df['duration'] = [librosa.get_duration(path=file) for file in df['path']]
+
+    df_out = pd.concat([df, df_cache[df_cache['path'].isin(paths_audio)]])
+
+    return df_out
+
+
+    # modelname="test"; epochs_in=80; dir_training="./audio_training"; drop_threshold = 0
+
+
+def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_threshold=0, path_weights=None):
+    dir_model = os.path.join("models/", modelname)
 
     if os.path.exists(dir_model):
         raise FileExistsError('a model folder with this name already exists; delete or rename the folder and re-run')
@@ -37,11 +63,8 @@ def generate_model(modelName, epochs_in, dir_training="./audio_training", drop_t
 
     # Acquiring and filtering training data
     #
-    audio_files = search_dir(dir_training, "wav")
-
-    metadata = pd.DataFrame()
-    metadata['path'] = audio_files
-    metadata['classification'] = [re.search(string=file, pattern="_s\\d+_(.*)\\.wav").group(1) for file in audio_files]
+    metadata = get_snipDuration(dir_training)
+    metadata['classification'] = [re.search(string=file, pattern="_s\\d+_(.*)\\.wav").group(1) for file in metadata['path']]
 
     if drop_threshold > 0:
         classes = metadata.classification.unique()
@@ -54,36 +77,31 @@ def generate_model(modelName, epochs_in, dir_training="./audio_training", drop_t
 
         metadata = metadata[metadata['classification'].isin(classes_keep)]
 
-    classes = metadata.classification.unique()
-
-    with open(os.path.join(dir_model, "classes.txt"), "w") as file:
-        for item in classes:
-            file.write(item + "\n")
-
     metadata['fold'] = np.random.randint(low=1, high=5, size=len(metadata))
-    metadata['duration'] = [librosa.get_duration(path=file) for file in
-                            metadata['path']]  # a bit lengthy, but a fraction of the overall training time; maybe I could cache it? Split off a build_metadata function?
 
-    class_durations = []
-    for c in classes:
-        snip_duration = metadata[metadata['classification'] == c]["duration"]
-        total_duration = sum(snip_duration)
+    classes = metadata['classification'].unique()
 
-        class_durations.append(total_duration)
+    if path_weights is None:
+        weightdf = metadata[['classification', 'duration']].groupby('classification').sum()
+        weightdf['weight_raw'] = (sum(weightdf['duration'])/weightdf['duration'])
+        weightdf['weight'] = weightdf['weight_raw']/sum(weightdf['weight_raw'])
+    else:
+        weightdf = pd.read_csv(path_weights)
+        weights_new = pd.DataFrame()
 
-    weight_raw = []  # gah this is so hacky
-    for dur in class_durations:
-        weight_raw.append(sum(class_durations) / dur)
+        weights_new['classification'] = [c for c in classes if not c in weightdf['classification'].values]
+        weights_new['weight'] = 1
 
-    weights = []
-    for raw in weight_raw:
-        weights.append(raw / sum(weight_raw))
+        weightdf = pd.concat([weightdf, weights_new])
+
+    weightdf.to_csv(os.path.join(dir_model, "weights.csv"))
+
+    weights = list(weightdf['weight'])
 
     map_class_to_weight = {index: weight for index, weight in enumerate(weights)}
-
     map_class_to_id = {name: index for index, name in enumerate(classes)}
+
     metadata['target_model'] = [map_class_to_id[c] for c in metadata['classification']]
-    metadata.to_csv(path_or_buf=os.path.join(dir_model, "metadata.csv"))
 
     # Load the audio files and retrieve embeddings
     #
@@ -139,7 +157,7 @@ def generate_model(modelName, epochs_in, dir_training="./audio_training", drop_t
                               name='input_embedding'),
         tf.keras.layers.Dense(512, activation='relu'),
         tf.keras.layers.Dense(len(classes))
-    ], name=modelName)
+    ], name=modelname)
 
     model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                   optimizer="adam",
@@ -155,11 +173,16 @@ def generate_model(modelName, epochs_in, dir_training="./audio_training", drop_t
                         callbacks=callback,
                         class_weight=map_class_to_weight)
 
-    model.save(os.path.join("models", modelName), include_optimizer=True)
+    model.save(os.path.join("models", modelname), include_optimizer=True)
 
 
 if __name__ == "__main__":
-    if os.path.exists("./models/test"):
-        import shutil
-        shutil.rmtree("./models/test")
-    generate_model("test", 10)
+    modelname = input("Input model name; 'test' for test run: ")
+    if modelname == "test":
+        if os.path.exists("./models/test"):
+            import shutil
+
+            shutil.rmtree("./models/test")
+        generate_model("test", 1, path_weights="./audio_training/weights.csv")
+
+    generate_model(modelname, 50, drop_threshold=15)
