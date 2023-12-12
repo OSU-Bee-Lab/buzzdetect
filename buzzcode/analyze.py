@@ -227,8 +227,9 @@ def analyze_multithread(modelname, cpus, memory_allot=None, chunklength=None,
                 subprocess.run(conv_cmd)
                 conv_t_end = datetime.now()
                 conv_t_delta = conv_t_end - conv_t_start
+                convert_rate = (audio_duration / conv_t_delta.total_seconds()).__round__(1)
                 printlog(
-                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s (rate: {audio_duration / conv_t_delta.total_seconds()})",
+                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s (rate: {convert_rate})",
                     2)
 
             # chunk
@@ -257,9 +258,6 @@ def analyze_multithread(modelname, cpus, memory_allot=None, chunklength=None,
                 chunknames = [chunk[2] for chunk in chunklist]
 
                 printlog(f"converter {ident}: chunking {chunknames}", 1)
-
-                chunks_already_exist = [os.path.exists(x) for x in chunknames]
-                printlog(f"converter {ident}: chunks {chunknames} exist: {chunks_already_exist}")
 
                 chunk_t_start = datetime.now()
                 subprocess.run(chunk_cmd)
@@ -332,8 +330,9 @@ def analyze_multithread(modelname, cpus, memory_allot=None, chunklength=None,
                 results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
                 analysis_t_end = datetime.now()
                 analysis_t_delta = analysis_t_end - analysis_t_start
+                analysis_rate = (chunk_duration / analysis_t_delta.total_seconds()).__round__(1)
                 printlog(
-                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s (rate: {chunk_duration / analysis_t_delta.total_seconds()}). {q_chunk.qsize()} files remain",
+                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s (rate: {analysis_rate}). {q_chunk.qsize()} files remain",
                     1)
 
                 # write
@@ -399,5 +398,5 @@ def analyze_multithread(modelname, cpus, memory_allot=None, chunklength=None,
 
 if __name__ == "__main__":
     analyze_multithread(modelname="revision_3_reweighted", cpus=4, chunklength=100, dir_raw="./audio_in", verbosity=1,
-                        cleanup_chunk=False, cleanup_conv=False, conflict_conv="skip", conflict_chunk="skip",
-                        conflict_out="skip")
+                        cleanup_chunk=False, cleanup_conv=False, conflict_conv="overwrite", conflict_chunk="overwrite",
+                        conflict_out="overwrite")
