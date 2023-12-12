@@ -9,7 +9,7 @@ import re
 import librosa
 import multiprocessing
 from datetime import datetime
-from buzzcode.tools import size_to_runtime, clip_name, search_dir
+from buzzcode.tools import size_to_runtime, clip_name, search_dir, runtime_to_size
 from buzzcode.tools_tf import loadup, load_audio, get_yamnet
 from buzzcode.conversion import cmd_convert
 from buzzcode.chunking import make_chunklist, cmd_chunk
@@ -49,12 +49,17 @@ def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop
 
     return output_df
 
+
 # test params:
 # for supercomputer:  modelname="revision_1"; cpus=48; memory_allot=140; dir_raw="./audio_in"; dir_proc=None; dir_out=None; verbosity=1; cleanup_conv=True; cleanup_chunk=False; conflict_conv="quit"; conflict_chunk="quit"; conflict_out="quit"
-def analyze_multithread(modelname, cpus, memory_allot,
+def analyze_multithread(modelname, cpus, memory_allot=None, chunklength=None,
                         dir_raw="./audio_in", dir_proc=None, dir_out=None, verbosity=1,
-                        cleanup_conv=True, cleanup_chunk=False, conflict_conv="quit", conflict_chunk="quit", conflict_out="quit"):
+                        cleanup_conv=True, cleanup_chunk=False, conflict_conv="quit", conflict_chunk="quit",
+                        conflict_out="quit"):
     total_t_start = datetime.now()
+
+    if memory_allot is None and chunklength is None:
+        quit("Must specify memory allotment or chunklength")
 
     # filesystem preparation
     #
@@ -74,7 +79,6 @@ def analyze_multithread(modelname, cpus, memory_allot,
             "conversion directory already exists; how would you like to proceed? [skip/overwrite/quit]")
         if conflict_conv == "quit":
             quit("user chose to quit; exiting analysis")
-
 
     if conflict_chunk == "quit" and os.path.isdir(dir_chunk):
         conflict_chunk = input(
@@ -105,22 +109,39 @@ def analyze_multithread(modelname, cpus, memory_allot,
     n_converters = min(cpus, len(paths_raw))
     sema_converter = multiprocessing.BoundedSemaphore(value=n_converters)
 
-    n_analysisproc = cpus # NOTE: I could launch only as many analyzers as there will be chunks made
-    sema_analysisproc = multiprocessing.BoundedSemaphore(value=n_analysisproc) # needed for logger to quit
+    n_analysisproc = cpus  # NOTE: I could launch only as many analyzers as there will be chunks made
+    sema_analysisproc = multiprocessing.BoundedSemaphore(value=n_analysisproc)  # needed for logger to quit
 
-    threadsperproc = (len(paths_raw)/n_analysisproc).__ceil__() # not sure this is the best approach; should benchmark
+    threadsperproc = (
+                len(paths_raw) / n_analysisproc).__ceil__()  # not sure this is the best approach; should benchmark
 
-    n_analyzers = n_analysisproc*threadsperproc
+    n_analyzers = n_analysisproc * threadsperproc
     sema_analyzer = multiprocessing.BoundedSemaphore(value=n_analyzers)
 
-    chunklength_split = size_to_runtime(((memory_allot/(cpus*threadsperproc)) - (1/3))/9).__floor__()/3600
-    chunklength_limit = size_to_runtime(1.9) / 3600  # sizes above 1.9 gigs produce overflow errors
+    chunklength_limit_filesize = size_to_runtime(1.9)  # sizes above 1.9 gigs produce overflow errors
 
-    chunklength = min(chunklength_split, chunklength_limit)
-    print(f"splitting audio to chunks of {chunklength.__round__(2)}h")
+    if chunklength is None and memory_allot is not None:
+        chunklength_limit_memory = size_to_runtime(
+            ((memory_allot / (cpus * threadsperproc)) - (1 / 3)) / 9).__floor__()
+        chunklength = min(chunklength_limit_memory, chunklength_limit_filesize)
 
-    for _ in range(n_converters):  # for each converter that will be running, remove a semaphore until converter finished
-        for _ in range(1, threadsperproc):
+    elif chunklength is not None and memory_allot is None:
+        chunklength = min(chunklength, chunklength_limit_filesize)
+
+    elif chunklength is not None and memory_allot is not None:
+        chunklength_limit_memory = size_to_runtime(
+            ((memory_allot / (cpus * threadsperproc)) - (1 / 3)) / 9).__floor__()
+        chunklength = min(chunklength_limit_memory, chunklength_limit_filesize, chunklength).__floor__() # make chunks always round seconds
+
+    if chunklength < 0:
+        quit(
+            f"problematic chunklength; chunks of size {chunklength.__round__(1)}s requested. Insufficient memory per cpu?")
+
+    print(f"splitting audio to chunks of {chunklength}s")
+
+    for _ in range(
+            n_converters):  # for each converter that will be running, remove a semaphore until converter finished
+        for _ in range(threadsperproc):
             sema_analyzer.acquire()
 
     event_analysis = multiprocessing.Event()
@@ -142,9 +163,9 @@ def analyze_multithread(modelname, cpus, memory_allot,
 
         while True:
             try:
-                log_item = q_log.get(block=True, timeout = 0.5)
+                log_item = q_log.get(block=True, timeout=0.5)
             except queue.Empty:
-                if q_raw.qsize() == 0 and sema_analysisproc.get_value() == n_analysisproc: # race condition?
+                if q_raw.qsize() == 0 and sema_analysisproc.get_value() == n_analysisproc:  # race condition?
                     total_t_delta = datetime.now() - total_t_start
 
                     closing_message = f"analysis complete; total time: {total_t_delta.total_seconds().__round__(2)}s"
@@ -177,9 +198,10 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 printlog(f"converter {ident}: no files in raw queue exiting", 1)
                 sema_converter.release()
 
-                printlog(f"converter {ident}: current semaphores {sema_analyzer.get_value()}, releasing {threadsperproc}", 1)
-                for _ in range(threadsperproc):
-                    sema_analyzer.release() # documentation says I should be able to release 2 at once, but it's throwing exceptions; maybe I can't with bounded?
+                printlog(
+                    f"converter {ident}: current semaphores {sema_analyzer.get_value()}, releasing {threadsperproc}", 1)
+                sema_analyzer.release()  # documentation says I should be able to release 2 at once, but it's throwing exceptions; maybe I can't with bounded?
+                sema_analyzer.release()
                 event_analysis.set()
                 break
 
@@ -206,7 +228,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 conv_t_end = datetime.now()
                 conv_t_delta = conv_t_end - conv_t_start
                 printlog(
-                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s (rate: {audio_duration/conv_t_delta.total_seconds()})",
+                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s (rate: {audio_duration / conv_t_delta.total_seconds()})",
                     2)
 
             # chunk
@@ -296,7 +318,9 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
 
                 if os.path.exists(path_out) and conflict_out == "skip":
-                    printlog(f"analysis process {ident}, analyzer {tid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis",1)
+                    printlog(
+                        f"analysis process {ident}, analyzer {tid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis",
+                        1)
                     continue
 
                 chunk_duration = librosa.get_duration(path=path_chunk)
@@ -309,7 +333,7 @@ def analyze_multithread(modelname, cpus, memory_allot,
                 analysis_t_end = datetime.now()
                 analysis_t_delta = analysis_t_end - analysis_t_start
                 printlog(
-                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s (rate: {chunk_duration/analysis_t_delta.total_seconds()}). {q_chunk.qsize()} files remain",
+                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s (rate: {chunk_duration / analysis_t_delta.total_seconds()}). {q_chunk.qsize()} files remain",
                     1)
 
                 # write
@@ -328,7 +352,8 @@ def analyze_multithread(modelname, cpus, memory_allot,
         threadlist = []
         for t in range(threadsperproc):
             printlog(f"analysis process {ident}: launching analyzer {t}", 1)
-            threadlist.append(threading.Thread(target=analyzer, args=[event_analysis, t], name=f"analyzer{ident}_thread{t}"))
+            threadlist.append(
+                threading.Thread(target=analyzer, args=[event_analysis, t], name=f"analyzer{ident}_thread{t}"))
             threadlist[-1].start()
 
         for t in threadlist:
@@ -354,7 +379,8 @@ def analyze_multithread(modelname, cpus, memory_allot,
     # launch analysis_process; will wait immediately
     analyzers = []
     for a in range(n_analysisproc):
-        analyzers.append(multiprocessing.Process(target=analysis_process, name=f"analysis_proc{a}", args=([event_analysis, a])))
+        analyzers.append(
+            multiprocessing.Process(target=analysis_process, name=f"analysis_proc{a}", args=([event_analysis, a])))
         analyzers[-1].start()
         pass  # Use this loop to keep track of progress
 
@@ -370,5 +396,8 @@ def analyze_multithread(modelname, cpus, memory_allot,
     # wait for analysis to finish
     proc_log.join()
 
+
 if __name__ == "__main__":
-    analyze_multithread(modelname="revision_1", cpus=48, memory_allot=140, dir_raw="./audio_in", verbosity=1, cleanup_chunk=False, cleanup_conv=True, conflict_conv="skip", conflict_chunk="skip", conflict_out="skip")
+    analyze_multithread(modelname="revision_3_reweighted", cpus=4, chunklength=100, dir_raw="./audio_in", verbosity=1,
+                        cleanup_chunk=False, cleanup_conv=False, conflict_conv="skip", conflict_chunk="skip",
+                        conflict_out="skip")

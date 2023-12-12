@@ -8,27 +8,25 @@ def make_chunklist(filepath, chunk_stub=None, chunklength=None, audio_duration=N
         audio_duration = librosa.get_duration(path=filepath)
 
     if chunklength is None:
-        chunklength_s = audio_duration
-    else:
-        chunklength_s = (60 * 60 * chunklength).__ceil__()  # in seconds
+        chunklength = audio_duration
 
-    if chunklength_s >= audio_duration:
+    if chunklength >= audio_duration:
         if chunk_stub is None:
             return [(0, audio_duration)]
         else:
             return [(0, audio_duration, chunk_stub + "_s0.wav")]
 
-    start_time = 0 - chunklength_s  # a bit odd, but makes the while loop an easier read
-    end_time = start_time + chunklength_s
+    start_time = 0 - chunklength  # a bit odd, but makes the while loop an easier read
+    end_time = start_time + chunklength
 
     chunklist = []
 
     while end_time < audio_duration:
-        start_time += chunklength_s
-        end_time += chunklength_s
+        start_time += chunklength
+        end_time += chunklength
 
-        # avoids miniscule chunks
-        if ((audio_duration - end_time) < 30):
+        # avoid miniscule chunks
+        if ((audio_duration - end_time) < 5):
             end_time = audio_duration
 
         chunktuple = (start_time, end_time)
