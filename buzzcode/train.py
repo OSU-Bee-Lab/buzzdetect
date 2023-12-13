@@ -50,7 +50,7 @@ def get_snipDuration(dir_training, invalidate = False):
     return df_out
 
 
-    # modelname="test"; epochs_in=80; dir_training="./audio_training"; drop_threshold = 0
+    # modelname="test"; epochs_in=80; dir_training="./audio_training"; drop_threshold = 0; path_weights=None
 
 
 def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_threshold=0, path_weights=None):
@@ -77,7 +77,7 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
 
         metadata = metadata[metadata['classification'].isin(classes_keep)]
 
-    metadata['fold'] = np.random.randint(low=1, high=5, size=len(metadata))
+    metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
 
     classes = metadata['classification'].unique()
 
@@ -85,14 +85,17 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
         weightdf = metadata[['classification', 'duration']].groupby('classification').sum()
         weightdf['weight_raw'] = (sum(weightdf['duration'])/weightdf['duration'])
         weightdf['weight'] = weightdf['weight_raw']/sum(weightdf['weight_raw'])
+        classes = list(weightdf.index)
+
     else:
         weightdf = pd.read_csv(path_weights)
         weights_new = pd.DataFrame()
 
-        weights_new['classification'] = [c for c in classes if not c in weightdf['classification'].values]
+        weights_new['classification'] = [c for c in classes if c not in weightdf['classification'].values]
         weights_new['weight'] = 1
 
         weightdf = pd.concat([weightdf, weights_new])
+        classes = weightdf['classification']
 
     weightdf.to_csv(os.path.join(dir_model, "weights.csv"))
 
@@ -102,6 +105,7 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
     map_class_to_id = {name: index for index, name in enumerate(classes)}
 
     metadata['target_model'] = [map_class_to_id[c] for c in metadata['classification']]
+    metadata.to_csv(os.path.join(dir_model, "metadata.csv"))
 
     # Load the audio files and retrieve embeddings
     #
@@ -183,6 +187,6 @@ if __name__ == "__main__":
             import shutil
 
             shutil.rmtree("./models/test")
-        generate_model("test", 1, path_weights="./audio_training/weights.csv")
+        generate_model("test", 1)
 
-    generate_model(modelname, 50, drop_threshold=15)
+    generate_model(modelname, 50, drop_threshold=15, path_weights = "./audio_training/weight_test_rev3.csv")
