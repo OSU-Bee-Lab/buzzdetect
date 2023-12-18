@@ -27,28 +27,6 @@ def load_wav_16k_mono(filename):
     return wav
 
 # dir_training="./audio_training"
-def get_snipDuration(dir_training, invalidate = False):
-    paths_audio = search_dir(dir_training, ".wav")
-    cachepath = os.path.join(dir_training, "durations.csv")
-
-    df = pd.DataFrame()
-    df['path'] = paths_audio
-
-    if (not os.path.exists(cachepath)) or invalidate:
-        df['duration'] = [librosa.get_duration(path=file) for file in df['path']]
-        df.to_csv(cachepath)
-        return df
-
-    df_cache = pd.read_csv(cachepath)
-
-    # drop cached values
-    df = df[-df['path'].isin(df_cache['path'])]
-    df['duration'] = [librosa.get_duration(path=file) for file in df['path']]
-
-    df_out = pd.concat([df, df_cache[df_cache['path'].isin(paths_audio)]])
-
-    return df_out
-
 
     # modelname="test"; epochs_in=80; dir_training="./audio_training"; drop_threshold = 0; path_weights=None
 
@@ -63,8 +41,7 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
 
     # Acquiring and filtering training data
     #
-    metadata = get_snipDuration(dir_training)
-    metadata['classification'] = [re.search(string=file, pattern="_s\\d+_(.*)\\.wav").group(1) for file in metadata['path']]
+    metadata = pd.read_csv(os.path.join(dir_training, "metadata.csv"))
 
     if drop_threshold > 0:
         classes = metadata.classification.unique()
