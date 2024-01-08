@@ -12,10 +12,8 @@
 * Move building of training to python module
 
 ### analyze.py
-* Create an "analyze only" function that doesn't bother spinning up converters
-     - Or...spin this into the smart-detecting system? Look ahead to see if files need chunked, only spin up converters after, instead of having converters figure out on their own
-     - Then I could separate chunkers and converters, although I still want chunkers to take priority to let analyzers spin up if there's idle CPU
-* Re-write entire script to use classes and methods instead of functions
+* Update to use new load_audio function directly with no conversion
+* Re-write entire script to use classes and methods instead of functions?
 * Make system for smart-detecting what data have already been analyzed
     - Read in all available buzzdetect outputs, chunk around those times
     - Or, have user specify overwrite or new file
@@ -23,6 +21,7 @@
 
 ## Machine Learning Design
 * Make ambient_night classification
+* Listen to all ambient_day and remove buzzes
 * Write custom loss function that penalizes within-buzz error less
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
 * Move away from YAMNet embeddings? YAMNet doesn't have a classification for 
