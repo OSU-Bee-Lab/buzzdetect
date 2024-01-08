@@ -23,6 +23,9 @@
 
 ## Machine Learning Design
 * Make ambient_night classification
+* Write custom loss function that penalizes within-buzz error less
+* Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
+* Move away from YAMNet embeddings? YAMNet doesn't have a classification for 
 
 ## Supercomputing
 ### Figure out supercomputing
