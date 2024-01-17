@@ -1,37 +1,49 @@
 # Imports
 #
-import os
-import pandas as pd
 import tensorflow as tf
-import re
+import pandas as pd
 import numpy as np
+import os
+import re
 import librosa
-from buzzcode.tools import search_dir
-from buzzcode.tools_tf import get_yamnet
+from buzzcode.tools_files import search_dir
+from buzzcode.tools_tf import get_yamnet, load_audio_tf
+
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 
 # Loading YAMNet from TensorFlow Hub
 #
 yamnet_model = get_yamnet()
 
+# dir_training="./training"
+def get_metadata(dir_training, invalidate = False):
+    paths_audio = search_dir(dir_training, ".wav")
+    cachepath = os.path.join(dir_training, "metadata.csv")
 
-# I would rather use load_audio, but it isn't playing nice with the sliced tensorflow dataset;
-# I get: TypeError: expected str, bytes or os.PathLike object, not Tensor
-# probs because of extension line?
-def load_wav_16k_mono(filename):
-    """ Load a WAV file, convert it to a float tensor """  # I removed resampling as this should be done in preprocessing
-    file_contents = tf.io.read_file(filename)
-    wav, sample_rate = tf.audio.decode_wav(
-        file_contents,
-        desired_channels=1)
-    wav = tf.squeeze(wav, axis=-1)
-    return wav
+    metadata = pd.DataFrame()
+    metadata['path'] = paths_audio
 
-# dir_training="./audio_training"
+    if (not os.path.exists(cachepath)) or invalidate:
+        metadata['duration'] = [librosa.get_duration(path=file) for file in metadata['path']]
+        metadata['classification'] = [re.search("_s\\d+_(.*)\\.wav", p).group(1) for p in metadata['path']]
 
-    # modelname="test"; epochs_in=80; dir_training="./audio_training"; drop_threshold = 0; path_weights=None
+        metadata.to_csv(cachepath)
+        return metadata
 
+    df_cache = pd.read_csv(cachepath)
 
-def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_threshold=0, path_weights=None):
+    # drop cached values
+    metadata = metadata[-metadata['path'].isin(df_cache['path'])]
+    metadata['duration'] = [librosa.get_duration(path=file) for file in metadata['path']]
+    metadata['classification'] = [re.search("_s\\d+_(.*)\\.wav", p).group(1) for p in metadata['path']]
+
+    df_out = pd.concat([metadata, df_cache[df_cache['path'].isin(paths_audio)]])
+
+    return df_out
+
+    # modelname="test"; epochs_in=80; dir_training="./training"; drop_threshold = 0; path_weights=None
+def generate_model(modelname, epochs_in, dir_training="./training", drop_threshold=0, path_weights=None, analyze_test = False, cpus = 8):
     dir_model = os.path.join("models/", modelname)
 
     if os.path.exists(dir_model):
@@ -41,7 +53,7 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
 
     # Acquiring and filtering training data
     #
-    metadata = pd.read_csv(os.path.join(dir_training, "metadata.csv"))
+    metadata = get_metadata(dir_training)
 
     if drop_threshold > 0:
         classes = metadata.classification.unique()
@@ -60,8 +72,7 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
 
     if path_weights is None:
         weightdf = metadata[['classification', 'duration']].groupby('classification').sum()
-        weightdf['weight_raw'] = (sum(weightdf['duration'])/weightdf['duration'])
-        weightdf['weight'] = weightdf['weight_raw']/sum(weightdf['weight_raw'])
+        weightdf['weight'] = 1
         classes = list(weightdf.index)
 
     else:
@@ -94,7 +105,7 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
     main_ds = tf.data.Dataset.from_tensor_slices((filenames, targets, folds))
 
     def load_wav_for_map(filename, label, fold):
-        return load_wav_16k_mono(filename), label, fold
+        return load_audio_tf(filename), label, fold
 
     main_ds = main_ds.map(load_wav_for_map)
 
@@ -156,7 +167,6 @@ def generate_model(modelname, epochs_in, dir_training="./audio_training", drop_t
 
     model.save(os.path.join("models", modelname), include_optimizer=True)
 
-
 if __name__ == "__main__":
     modelname = input("Input model name; 'test' for test run: ")
     if modelname == "test":
@@ -166,4 +176,4 @@ if __name__ == "__main__":
             shutil.rmtree("./models/test")
         generate_model("test", 1)
 
-    generate_model(modelname, 50, drop_threshold=15, path_weights = "./audio_training/weight_test_rev3.csv")
+    generate_model(modelname, 80, drop_threshold=5, path_weights="./weights.csv", analyze_test=True, cpus=8)

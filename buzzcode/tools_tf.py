@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorflow_io as tfio
 import tensorflow_hub as hub
 import pandas as pd
 import os
@@ -34,38 +33,13 @@ def get_yamnet():
 
     return yamnet
 
-
-def load_flac(filepath):
-    """ Load a FLAC file, convert it to a float tensor """
-    flac_contents = tf.io.read_file(filepath)
-    flac_tensor = tfio.audio.decode_flac(flac_contents, dtype=tf.int16)
-    flac_tensor = tf.squeeze(flac_tensor, axis=-1)
-    flac_32 = tf.cast(flac_tensor, tf.float32)
-    flac_normalized = (flac_32 + 1) / (65536 / 2)  # I think this is the right operation; tf.audio.decode_wav says:
-    # "-32768 to 32767 signed 16-bit values will be scaled to -1.0 to 1.0 in float"
-    # dividing by (65536/2) makes the max 1.0 and the min a rounding error from 0
-
-    return flac_normalized
-
-
-def load_wav(filepath):
+# loads audio from a filepath, including a filepath held in a tensor
+# could be deprecated if I find a way to read filepaths from tensors; but apparently this is difficult
+def load_audio_tf(path_audio):
     """ Load a WAV file, convert it to a float tensor """
-    wav_contents = tf.io.read_file(filepath)
-    wav, sample_rate = tf.audio.decode_wav(
-        wav_contents,
+    file_contents = tf.io.read_file(path_audio)
+    data, sample_rate = tf.audio.decode_wav(
+        file_contents,
         desired_channels=1)
-    wav = tf.squeeze(wav, axis=-1)
-    return wav
-
-
-def load_audio(filepath):
-    extension = os.path.splitext(filepath)[1].lower()
-
-    if extension == ".wav":
-        data = load_wav(filepath)
-    elif extension == ".flac":
-        data = load_flac(filepath)
-    else:
-        quit("buzzdetect only supports .wav and .flac files for analysis")
-
+    data = tf.squeeze(data, axis=-1)
     return data
