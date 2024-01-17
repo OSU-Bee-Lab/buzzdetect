@@ -1,284 +1,260 @@
 import tensorflow as tf
 import pandas as pd
-import threading
-import queue
 import os
-import sys
-import subprocess
 import re
+import sys
 import librosa
 import multiprocessing
+import numpy as np
+import soundfile as sf
 from datetime import datetime
-from buzzcode.tools import size_to_runtime, clip_name, search_dir, runtime_to_size
-from buzzcode.tools_tf import loadup, load_audio, get_yamnet
-from buzzcode.conversion import cmd_convert
-from buzzcode.chunking import make_chunklist, cmd_chunk
+from buzzcode.tools import search_dir, load_audio
+from buzzcode.tools_tf import loadup, get_yamnet
+
+memory_tf = 0.350  # memory (in GB) required for single tensorflow process
+memorydensity_audio = 3600 / 2.4  # seconds per gigabyte of decoded audio (estimate)
+framelength = 960
+framehop = 480
+out_suffix = "_buzzdetect.csv"
+
+class_bee = 'ins_buzz_bee'
+class_high = 'ins_buzz_high'
+class_low = 'ins_buzz_low'
+
+def solve_memory(memory_allot, cpus):
+    n_analyzers = min(cpus, (memory_allot/memory_tf).__floor__()) # allow as many workers as you have memory for
+    memory_remaining = memory_allot - (memory_tf*n_analyzers)
+    memory_perchunk = min(memory_remaining/cpus, 9) # hard limiting max memory per chunk to 9G because I haven't tested sizes above that (also there's probably not a performance benefit?)
+
+    chunklength = memory_perchunk * memorydensity_audio
+
+    if(chunklength<(framelength/1000)):
+        raise ValueError("memory_allot and cpu combination results in illegally small frames")  # illegally smol
+
+    return chunklength, n_analyzers
+
+def get_gaps(range_in, coverage_in):
+    coverage_in = sorted(coverage_in)
+    gaps = []
+
+    # gap between range start and coverage start
+    if coverage_in[0][0] > range_in[0]:  # if the first coverage starts after the range starts
+        gaps.append((0, coverage_in[0][0]))
+
+    # gaps between coverages
+    for i in range(0, len(coverage_in) - 1):
+        out_current = coverage_in[i]
+        out_next = coverage_in[i + 1]
+
+        if out_next[0] > out_current[1]:  # if the next coverage starts after this one ends,
+            gaps.append((out_current[1], out_next[0]))
+
+    # gap after coverage
+    if coverage_in[len(coverage_in) - 1][1] < range_in[1]:  # if the last coverage ends before the range ends
+        gaps.append((coverage_in[len(coverage_in) - 1][1], range_in[1]))
+
+    return gaps
 
 
-def analyze_wav(model, classes, wav_path, yamnet=None, framelength=960, framehop=480):
-    if yamnet is None:
-        yamnet = get_yamnet()
+def gaps_to_chunklist(gaps_in, chunklength):
+    if chunklength < 0.960:
+        raise ValueError("chunklength is illegally small")
 
-    audio_data = load_audio(wav_path)
+    chunklist_master = []
+
+    for gap in gaps_in:
+        gap_length = gap[1] - gap[0]
+        n_chunks = (gap_length/chunklength).__ceil__()
+        chunkpoints = np.arange(gap[0], gap[1], chunklength).tolist()
+
+        chunklist_gap = []
+        # can probably list comprehend this
+        for i in range(len(chunkpoints)-1):
+            chunklist_gap.append((chunkpoints[i], chunkpoints[i+1]))
+
+        chunklist_gap.append((chunkpoints[len(chunkpoints) - 1], gap[1]))
+        chunklist_master.extend(chunklist_gap)
+
+    return chunklist_master
+
+
+def get_coverage(path_raw, dir_raw, dir_out):
+    raw_base = os.path.splitext(path_raw)[0]
+    path_out = re.sub(dir_raw, dir_out, raw_base) + out_suffix
+
+    if not os.path.exists(path_out):
+        return []
+
+    out_df = pd.read_csv(path_out)
+    out_df.sort_values("start", inplace=True)
+    out_df["coverageGroup"] = (out_df["start"] > out_df["end"].shift()).cumsum()
+    df_coverage = out_df.groupby("coverageGroup").agg({"start": "min", "end": "max"})
+
+    coverage = list(zip(df_coverage['start'], df_coverage['end']))
+
+    return coverage # list of tuples
+
+# model, classes = loadup("revision_5_reweight1"); yamnet = get_yamnet()
+def analyze_data(model, classes, audio_data, yamnet):
+    if audio_data.dtype != 'tf.float32':
+        audio_data = tf.cast(audio_data, tf.float32)
+
     audio_data_split = tf.signal.frame(audio_data, framelength * 16, framehop * 16, pad_end=True, pad_value=0)
 
     results = []
 
     for i, data in enumerate(audio_data_split):
-        scores, embeddings, spectrogram = yamnet(data)
-        result = model(embeddings).numpy()
+        yam_scores, yam_embeddings, spectrogram = yamnet(data)
+        transfer_scores = model(yam_embeddings).numpy()[0]
 
-        class_means = result.mean(axis=0)
-        predicted_class_index = class_means.argmax()
-        inferred_class = classes[predicted_class_index]
+        results_frame = {
+            "start": (i * framehop) / 1000,
+            "end": ((i * framehop) + framelength) / 1000,
+            "class_predicted": classes[transfer_scores.argmax()],
+            "score_predicted": transfer_scores[transfer_scores.argmax()]
+        }
 
-        confidence_score = class_means[predicted_class_index]
-        bee_score = class_means[classes.index("bee")]
+        indices_out = [classes.index(c) for c in classes]
+        scorenames = ['score_' + c for c in classes]
+        results_frame.update({scorenames[i]: transfer_scores[i] for i in indices_out})
 
-        results.append(
-            {
-                "start": (i * framehop) / 1000,
-                "end": ((i * framehop) + framelength) / 1000,
-                "classification": inferred_class,
-                "confidence": confidence_score,
-                "confidence_bee": bee_score
-            }
-        )
+        results.append(results_frame)
 
     output_df = pd.DataFrame(results)
 
     return output_df
 
+# add caching of embeddings
+# add ability to auto-guess memory use?
+# modelname = "revision_5_reweight1"; cpus=4; memory_allot = 3; dir_raw="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; classes_out = [class_bee, class_high, class_low]
+def analyze_multithread(modelname, cpus, memory_allot, classes_out = [class_bee, class_high, class_low], dir_raw="./audio_in", dir_out=None, verbosity=1):
+    timer_total_start = datetime.now()
 
-# test params:
-# for supercomputer:  modelname="revision_1"; cpus=48; memory_allot=140; dir_raw="./audio_in"; dir_proc=None; dir_out=None; verbosity=1; cleanup_conv=True; cleanup_chunk=False; conflict_conv="quit"; conflict_chunk="quit"; conflict_out="quit"
-def analyze_multithread(modelname, cpus, memory_allot=None, chunklength=None,
-                        dir_raw="./audio_in", dir_proc=None, dir_out=None, verbosity=1,
-                        cleanup_conv=True, cleanup_chunk=False, conflict_conv="quit", conflict_chunk="quit",
-                        conflict_out="quit"):
-    total_t_start = datetime.now()
-
-    if memory_allot is None and chunklength is None:
-        quit("Must specify memory allotment or chunklength")
-
-    # filesystem preparation
-    #
     dir_model = os.path.join("models", modelname)
-
-    if dir_proc is None:
-        dir_proc = "./processing"
 
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
 
-    dir_conv = os.path.join(dir_proc, "conv")
-    dir_chunk = os.path.join(dir_proc, "chunk")
+    chunklength, n_analyzers = solve_memory(memory_allot, cpus)
 
-    if conflict_conv == "quit" and os.path.isdir(dir_conv):
-        conflict_conv = input(
-            "conversion directory already exists; how would you like to proceed? [skip/overwrite/quit]")
-        if conflict_conv == "quit":
-            quit("user chose to quit; exiting analysis")
-
-    if conflict_chunk == "quit" and os.path.isdir(dir_chunk):
-        conflict_chunk = input(
-            "chunk directory already exists; how would you like to proceed? [skip/overwrite/quit]")
-        if conflict_chunk == "quit":
-            quit("user chose to quit; exiting analysis")
-
-    if conflict_out == "quit" and os.path.isdir(dir_out):
-        conflict_out = input("output directory already exists; how would you like to proceed? [skip/overwrite/quit]")
-        if conflict_out == "quit":
-            quit("user chose to quit; exiting analysis")
-
-    paths_raw = search_dir(dir_raw, "mp3")
-
-    log_timestamp = total_t_start.strftime("%Y-%m-%d_%H%M%S")
+    log_timestamp = timer_total_start.strftime("%Y-%m-%d_%H%M%S")
     path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
+    os.makedirs(os.path.dirname(path_log), exist_ok=True)
+    log = open(path_log, "x")
+    log.close()
+
+    paths_raw = search_dir(dir_raw, list(sf.available_formats().keys()))
+
+    # start logger early and make these exit prints printlogs?
+    if len(paths_raw) == 0:
+        print(
+            f"no compatible audio files found in raw directory {dir_raw} \n"
+            f"audio format must be compatible with soundfile module version {sf.__version__} \n"
+            "exiting analysis"
+        )
+        sys.exit(0)
+
+    raws_chunklist = []
+    raws_unfinished = []
+
+    for path in paths_raw:
+        audio_duration = librosa.get_duration(path=path)
+
+        coverage = get_coverage(path, dir_raw, dir_out)
+        if len(coverage) == 0:
+            coverage = [(0, 0)]
+
+        gaps = get_gaps((0,audio_duration), coverage)
+        chunklist = gaps_to_chunklist(gaps, chunklength)
+
+        if len(chunklist) > 0:
+            raws_unfinished.append(path)
+            raws_chunklist.append(chunklist)
+
+    if len(raws_unfinished) == 0:
+        print(f"all files in {dir_raw} are fully analyzed; exiting analysis")
+        sys.exit(0)
 
     # process control
     #
+    dict_chunk = dict(zip(raws_unfinished, raws_chunklist))
 
-    q_raw = multiprocessing.Queue()
-    for path in paths_raw:
-        q_raw.put(path)
+    analyzer_ids = list(range(n_analyzers))
+    analyzers_per_raw = (n_analyzers/len(raws_unfinished)).__ceil__()
+    # if more analyzers than raws, repeat the list, wrapping the assignment back to the start
+    dict_analyzer = {i: (raws_unfinished*analyzers_per_raw)[i] for i in analyzer_ids}
 
-    q_chunk = multiprocessing.Queue()
+    dict_rawstatus = {p: "finished" for p in paths_raw}
+    for p in raws_unfinished:
+        dict_rawstatus[p] = "not finished"
+
+    colnames_out = ["score_" + c for c in classes_out]
+    columns_desired = ['start', 'end', 'class_predicted', 'score_predicted'] + colnames_out
+
+    q_request = multiprocessing.Queue() # holds...what? raw paths and worker names, so each worker can add its request for work?
+    q_analyze = [multiprocessing.Queue() for _ in analyzer_ids]
+    q_write = multiprocessing.Queue() # holds output data frames and paths for writers to work on
     q_log = multiprocessing.Queue()
-
-    n_converters = min(cpus, len(paths_raw))
-    sema_converter = multiprocessing.BoundedSemaphore(value=n_converters)
-
-    n_analysisproc = cpus  # NOTE: I could launch only as many analyzers as there will be chunks made
-    sema_analysisproc = multiprocessing.BoundedSemaphore(value=n_analysisproc)  # needed for logger to quit
-
-    threadsperproc = (
-                len(paths_raw) / n_analysisproc).__ceil__()  # not sure this is the best approach; should benchmark
-
-    n_analyzers = n_analysisproc * threadsperproc
-    sema_analyzer = multiprocessing.BoundedSemaphore(value=n_analyzers)
-
-    chunklength_limit_filesize = size_to_runtime(1.9)  # sizes above 1.9 gigs produce overflow errors
-
-    if chunklength is None and memory_allot is not None:
-        chunklength_limit_memory = size_to_runtime(
-            ((memory_allot / (cpus * threadsperproc)) - (1 / 3)) / 9).__floor__()
-        chunklength = min(chunklength_limit_memory, chunklength_limit_filesize)
-
-    elif chunklength is not None and memory_allot is None:
-        chunklength = min(chunklength, chunklength_limit_filesize)
-
-    elif chunklength is not None and memory_allot is not None:
-        chunklength_limit_memory = size_to_runtime(
-            ((memory_allot / (cpus * threadsperproc)) - (1 / 3)) / 9).__floor__()
-        chunklength = min(chunklength_limit_memory, chunklength_limit_filesize, chunklength).__floor__() # make chunks always round seconds
-
-    if chunklength < 0:
-        quit(
-            f"problematic chunklength; chunks of size {chunklength.__round__(1)}s requested. Insufficient memory per cpu?")
-
-    print(f"splitting audio to chunks of {chunklength}s")
-
-    for _ in range(
-            n_converters):  # for each converter that will be running, remove a semaphore until converter finished
-        for _ in range(threadsperproc):
-            sema_analyzer.acquire()
-
-    event_analysis = multiprocessing.Event()
-    event_log = multiprocessing.Event()
 
     def printlog(item, item_verb=0):
         time_current = datetime.now()
         q_log.put(f"{time_current} - {item} \n")
-        event_log.set()
 
         if item_verb <= verbosity:
             print(item)
 
+        return item
+
     # worker definition
     #
-    def logger(event_log):
-        printlog(f"logger initialized", 2)
-        event_log.wait()
+    def worker_manager():
+        chunks_remaining = sum([len(c) for c in dict_chunk.values()])
 
-        while True:
-            try:
-                log_item = q_log.get(block=True, timeout=0.5)
-            except queue.Empty:
-                if q_raw.qsize() == 0 and sema_analysisproc.get_value() == n_analysisproc:  # race condition?
-                    total_t_delta = datetime.now() - total_t_start
+        while chunks_remaining > 0:
+            printlog(f"manager: chunks remaining: {chunks_remaining}", 0)
 
-                    closing_message = f"analysis complete; total time: {total_t_delta.total_seconds().__round__(2)}s"
-                    print(closing_message)
-                    log = open(path_log, "a")
-                    log.write(closing_message)
-                    log.close()
-                    break
+            id_analyzer = q_request.get(block=True)
 
-                event_log.clear()  # for some reason, you have to clear before waiting
-                event_log.wait()  # Wait for the event to be set again
-                continue  # re-start the while loop
+            path_current = dict_analyzer[id_analyzer]
 
-            if not os.path.exists(path_log):
-                os.makedirs(os.path.dirname(path_log), exist_ok=True)
-                open(path_log, "x")
-
-            log = open(path_log, "a")
-            log.write(log_item)
-            log.close()
-
-    def converter(ident):
-        sema_converter.acquire()
-        printlog(f"converter {ident}: launching", 2)
-
-        while True:
-            try:
-                path_raw = q_raw.get(block=True, timeout=0.5)
-            except queue.Empty:
-                printlog(f"converter {ident}: no files in raw queue exiting", 1)
-                sema_converter.release()
-
-                printlog(
-                    f"converter {ident}: current semaphores {sema_analyzer.get_value()}, releasing {threadsperproc}", 1)
-                sema_analyzer.release()  # documentation says I should be able to release 2 at once, but it's throwing exceptions; maybe I can't with bounded?
-                sema_analyzer.release()
-                event_analysis.set()
-                break
-
-            audio_duration = librosa.get_duration(path=path_raw)
-
-            # convert
-            #
-            path_conv = re.sub(pattern=".mp3$", repl=".wav", string=path_raw)
-            path_conv = re.sub(pattern=dir_raw, repl=dir_conv, string=path_conv)
-            clipname_conv = clip_name(path_conv, dir_conv)
-
-            if os.path.exists(path_conv) and conflict_conv == "skip":
-                printlog(f"converter {ident}: {clipname_conv} already exists; skipping conversion", 1)
+            # if the file is marked not finished, keep on the current path
+            if dict_rawstatus[path_current] == "not finished":
+                path_used = path_current
+                msg = "continuing on raw"
+            # if the file is marked finished
             else:
-                clipname_raw = clip_name(path_raw, dir_raw)
+                # find the worker counts on unfinished files
+                workercounts = {p: list(dict_analyzer.values()).count(p) for p in dict_rawstatus if dict_rawstatus[p] != "finished"}
 
-                os.makedirs(os.path.dirname(path_conv), exist_ok=True)
+                # assign the first path with fewest workers
+                path_used = [p for p in workercounts.keys() if workercounts[p] <= min(workercounts.values())][0]
 
-                conv_cmd = cmd_convert(path_raw, path_conv, verbosity=verbosity)
+                # and update worker dict
+                dict_analyzer[id_analyzer] = path_used
 
-                printlog(f"converter {ident}: converting {clipname_raw}", 1)
-                conv_t_start = datetime.now()
-                subprocess.run(conv_cmd)
-                conv_t_end = datetime.now()
-                conv_t_delta = conv_t_end - conv_t_start
-                convert_rate = (audio_duration / conv_t_delta.total_seconds()).__round__(1)
-                printlog(
-                    f"converter {ident}: converted {audio_duration.__round__(1)}s of audio from {clipname_raw} in {conv_t_delta.total_seconds().__round__(2)}s (rate: {convert_rate})",
-                    2)
+                msg = "assigned to new raw"
 
-            # chunk
-            #
-            chunk_stub = re.sub(pattern=".wav$", repl="", string=path_conv)
-            chunk_stub = re.sub(pattern=dir_conv, repl=dir_chunk, string=chunk_stub)
+            chunk_out = dict_chunk[path_used].pop(0)
+            # if you took the last chunk, mark the file finished
+            if len(dict_chunk[path_used]) == 0:
+                dict_rawstatus[path_used] = "finished"
 
-            chunklist = make_chunklist(filepath=path_conv, chunk_stub=chunk_stub, chunklength=chunklength,
-                                       audio_duration=audio_duration)
+            path_snip = re.sub(dir_raw, "", path_used)
+            printlog(f"manager: analyzer {id_analyzer} {msg} {path_snip}, chunk {round(chunk_out[0], 1), round(chunk_out[1], 1)}", 2)
 
-            chunklist_existing = [chunk for chunk in chunklist if os.path.exists(chunk[2])]
-            if conflict_chunk == "skip" and len(chunklist_existing) > 0:
-                chunknames = [chunk[2] for chunk in chunklist_existing]
-                printlog(f"converter {ident}: skipping existing chunks: {chunknames}", 1)
+            assignment = (path_used, chunk_out)
 
-                for chunk in chunklist_existing:
-                    chunklist.remove(chunk)
-                    q_chunk.put(chunk[2])  # queue the chunks that exist so analyzers can start on them
+            q_analyze[id_analyzer].put(assignment)
+            chunks_remaining = sum([len(c) for c in dict_chunk.values()])
 
-                event_analysis.set()
+        printlog(f"manager: all chunks assigned, queuing terminate signal for analyzers", 2)
+        for q in q_analyze:
+            q.put("terminate")
 
-            if len(chunklist) > 0:
-                os.makedirs(os.path.dirname(chunk_stub), exist_ok=True)
-                chunk_cmd = cmd_chunk(path_in=path_conv, chunklist=chunklist, verbosity=verbosity)
 
-                chunknames = [chunk[2] for chunk in chunklist]
-
-                printlog(f"converter {ident}: chunking {chunknames}", 1)
-
-                chunk_t_start = datetime.now()
-                subprocess.run(chunk_cmd)
-                chunk_t_end = datetime.now()
-                chunk_t_delta = chunk_t_end - chunk_t_start
-                printlog(
-                    f"converter {ident}: chunked {len(chunklist)} chunks for {clipname_conv} in {chunk_t_delta.total_seconds().__round__(2)}s",
-                    2)
-
-            for chunk in chunklist:
-                q_chunk.put(chunk[2])
-            event_analysis.set()
-
-            if cleanup_conv:
-                printlog(f"converter {ident}: deleting converted audio {path_conv}", 2)
-                os.remove(path_conv)
-
-    def analysis_process(event_analysis, ident):
-        sema_analysisproc.acquire()
-
-        printlog(f"analysis process {ident}: launching", 1)
+    def worker_analyzer(id_analyzer):
+        # I could now easily add a progress bar or estimated time to completion
+        printlog(f"analyzer {id_analyzer}: launching", 1)
 
         tf.config.threading.set_inter_op_parallelism_threads(1)
         tf.config.threading.set_intra_op_parallelism_threads(1)
@@ -288,115 +264,119 @@ def analyze_multithread(modelname, cpus, memory_allot=None, chunklength=None,
         model, classes = loadup(modelname)
         yamnet = get_yamnet()
 
-        def analyzer(event_analysis, tid):
-            printlog(f"analysis process {ident}, analyzer {tid}: launching and waiting for semaphores", 1)
-            sema_analyzer.acquire()
+        q_request.put(id_analyzer)
+        assignment = q_analyze[id_analyzer].get()
+        while assignment != "terminate":
+            path_raw = assignment[0]
+            path_clip = re.sub(dir_raw, '', path_raw)
+            time_from = assignment[1][0]
+            time_to = assignment[1][1]
+            chunk_duration = time_to - time_from
 
-            printlog(f"analysis process {ident}, analyzer {tid}: waking", 2)
+            printlog(f"analyzer {id_analyzer}: analyzing {path_clip} from {round(time_from, 1)}s to {round(time_to, 1)}s", 1)
 
-            while True:
-                try:
-                    path_chunk = q_chunk.get(block=True, timeout=0.25)
-                except queue.Empty:
-                    if sema_converter.get_value() < n_converters:  # if there are still converters running
-                        printlog(f"analysis process {ident}, analyzer {tid}: waiting for more chunks", 2)
-                        event_analysis.clear()
-                        event_analysis.wait()
-                        continue
-                    else:
-                        printlog(f"analysis process {ident}, analyzer {tid}: chunk queue empty, exiting", 1)
-                        sema_analyzer.release()
-                        sys.exit(0)
+            timer_analysis_start = datetime.now()
+            audio_data = load_audio(path_raw, time_from, time_to)
+            results = analyze_data(model=model, classes=classes, audio_data=audio_data, yamnet=yamnet)
+            timer_analysis_end = datetime.now()
 
-                clipname_chunk = clip_name(path_chunk, dir_chunk)
+            timer_analysis = timer_analysis_end - timer_analysis_start
+            analysis_rate = (chunk_duration / timer_analysis.total_seconds()).__round__(1)
+            printlog(
+                f"analyzer {id_analyzer}: analyzed {path_clip} from {round(time_from, 1)}s to {round(time_to, 1)}s in {timer_analysis.total_seconds().__round__(2)}s (rate: {analysis_rate})",
+                1)
 
-                printlog(f"analysis process {ident}, analyzer {tid}: launching analysis of {clipname_chunk}", 2)
 
-                path_out = re.sub(pattern=dir_chunk, repl=dir_out, string=path_chunk)
-                path_out = re.sub(pattern=".wav$", repl="_buzzdetect.csv", string=path_out)
+            results['start'] = results['start'] + time_from
+            results['end'] = results['end'] + time_from
 
-                if os.path.exists(path_out) and conflict_out == "skip":
-                    printlog(
-                        f"analysis process {ident}, analyzer {tid}: output file {clip_name(path_out, dir_out)} already exists; skipping analysis",
-                        1)
-                    continue
+            results = results[columns_desired]
 
-                chunk_duration = librosa.get_duration(path=path_chunk)
+            q_write.put((path_raw, results))
+            q_request.put(id_analyzer)
+            assignment = q_analyze[id_analyzer].get()
+            
+        printlog(f"analyzer {id_analyzer}: terminating")
+        q_write.put(("terminate", id_analyzer))  # not super happy with this; feels a bit hacky
+        sys.exit(0)
 
-                # analyze
-                #
-                printlog(f"analysis process {ident}, analyzer {tid}: analyzing {clipname_chunk}", 1)
-                analysis_t_start = datetime.now()
-                results = analyze_wav(model=model, classes=classes, wav_path=path_chunk, yamnet=yamnet)
-                analysis_t_end = datetime.now()
-                analysis_t_delta = analysis_t_end - analysis_t_start
-                analysis_rate = (chunk_duration / analysis_t_delta.total_seconds()).__round__(1)
-                printlog(
-                    f"analysis process {ident}, analyzer {tid}: analyzed {chunk_duration.__round__(1)}s of audio from {clipname_chunk} in {analysis_t_delta.total_seconds().__round__(2)}s (rate: {analysis_rate}). {q_chunk.qsize()} files remain",
-                    1)
+    def worker_writer():
+        printlog(f"writer: initialized", 2)
 
-                # write
-                #
-                os.makedirs(os.path.dirname(path_out), exist_ok=True)
+        dirs_raw = set([os.path.dirname(p) for p in paths_raw])
+        dirs_out = [re.sub(dir_raw, dir_out, d) for d in dirs_raw]
+        for d in dirs_out:
+            os.makedirs(d, exist_ok=True)
 
-                printlog(f"analysis process {ident}, analyzer {tid}: writing results to {path_out}", 2)
+        status_analyzers = [True for _ in analyzer_ids]
+        while True in status_analyzers:
+            path_raw, results = q_write.get()
+
+            if path_raw == "terminate":
+                status_analyzers[results] = False
+                continue
+
+            path_out = os.path.splitext(path_raw)[0] + out_suffix
+            path_out = re.sub(dir_raw, dir_out, path_out)
+
+            if os.path.exists(path_out):
+                results_written = pd.read_csv(path_out)
+                results_updated = pd.concat([results_written, results],axis=0, ignore_index=True)
+                results_updated = results_updated.sort_values(by = "start")
+
+                results_updated.to_csv(path_out, index = False)
+            else:
                 results.to_csv(path_out)
 
-                # cleanup
-                #
-                if cleanup_chunk:
-                    printlog(f"analysis process {ident}, analyzer {tid}: deleting chunk {clipname_chunk}", 2)
-                    os.remove(path_chunk)
+        printlog(f"writer: terminating")
+        q_log.put("terminate")
 
-        threadlist = []
-        for t in range(threadsperproc):
-            printlog(f"analysis process {ident}: launching analyzer {t}", 1)
-            threadlist.append(
-                threading.Thread(target=analyzer, args=[event_analysis, t], name=f"analyzer{ident}_thread{t}"))
-            threadlist[-1].start()
+    def worker_logger():
+        log_item = q_log.get(block=True)
+        while log_item != "terminate":
+            log = open(path_log, "a")
+            log.write(log_item)
+            log.close()
+            log_item = q_log.get(block=True)
 
-        for t in threadlist:
-            t.join()
+        timer_total = datetime.now() - timer_total_start
+        closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.total_seconds().__round__(1)}s"
 
-        printlog(f"analysis process {ident}: all threads finished; exiting", 1)
-        sema_analysisproc.release()
-        sys.exit(0)
+        print(closing_message)
+        log = open(path_log, "a")
+        log.write(closing_message)
+        log.close()
 
     # Go!
     #
     printlog(
-        f"begin analysis on {total_t_start} with model {modelname} \n"
+        f"begin analysis \n"
+        f"start time: {timer_total_start} \n"
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
-        f"memory allotment {memory_allot}\n"
-        f"chunk length in seconds: {chunklength * 3600}\n"
-        f"conflict resolution for conversion files: {conflict_conv}\n"
-        f"conflict resolution for chunk files: {conflict_chunk}\n"
-        f"conflict resolution for output files: {conflict_out}\n",
+        f"memory allotment {memory_allot}\n",
         0)
 
     # launch analysis_process; will wait immediately
-    analyzers = []
-    for a in range(n_analysisproc):
-        analyzers.append(
-            multiprocessing.Process(target=analysis_process, name=f"analysis_proc{a}", args=([event_analysis, a])))
-        analyzers[-1].start()
-        pass  # Use this loop to keep track of progress
+    proc_analyzers = []
+    for a in range(n_analyzers):
+        proc_analyzers.append(
+            multiprocessing.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a])))
+        proc_analyzers[-1].start()
+        pass
 
-    proc_log = multiprocessing.Process(target=logger, args=(event_log,))
-    proc_log.start()
+    proc_logger = multiprocessing.Process(target=worker_logger)
+    proc_logger.start()
 
-    converters = []
-    for c in range(cpus):
-        converters.append(multiprocessing.Process(target=converter, name=f"converter{c}", args=([c])))
-        converters[-1].start()
-        pass  # Use this loop to keep track of progress
+    proc_writer = multiprocessing.Process(target=worker_writer)
+    proc_writer.start()
+
+    proc_manager = multiprocessing.Process(target=worker_manager())
+    proc_manager.start()
 
     # wait for analysis to finish
-    proc_log.join()
+    proc_logger.join()
 
 
 if __name__ == "__main__":
-    analyze_multithread(modelname="revision_3_reweighted", cpus=4, chunklength=100, dir_raw="./audio_in", verbosity=1,
-                        cleanup_chunk=False, cleanup_conv=False, conflict_conv="overwrite", conflict_chunk="overwrite",
-                        conflict_out="overwrite")
+    analyze_multithread(modelname="revision_5_reweight1", cpus=4, memory_allot=4, verbosity=2)
