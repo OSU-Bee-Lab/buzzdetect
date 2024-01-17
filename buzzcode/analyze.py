@@ -12,7 +12,7 @@ from buzzcode.tools import search_dir, load_audio
 from buzzcode.tools_tf import loadup, get_yamnet
 
 memory_tf = 0.350  # memory (in GB) required for single tensorflow process
-seconds_per_g = 3600/2.4
+memorydensity_audio = 3600 / 2.4  # seconds per gigabyte of decoded audio (estimate)
 framelength = 960
 framehop = 480
 out_suffix = "_buzzdetect.csv"
@@ -21,13 +21,12 @@ class_bee = 'ins_buzz_bee'
 class_high = 'ins_buzz_high'
 class_low = 'ins_buzz_low'
 
-
 def solve_memory(memory_allot, cpus):
     n_analyzers = min(cpus, (memory_allot/memory_tf).__floor__()) # allow as many workers as you have memory for
     memory_remaining = memory_allot - (memory_tf*n_analyzers)
-    memory_perchunk = min(memory_remaining/cpus, 4) # hard limiting max memory per chunk to 4G because I don't know if strange things will happen above that
+    memory_perchunk = min(memory_remaining/cpus, 9) # hard limiting max memory per chunk to 9G because I haven't tested sizes above that (also there's probably not a performance benefit?)
 
-    chunklength = memory_perchunk * seconds_per_g
+    chunklength = memory_perchunk * memorydensity_audio
 
     if(chunklength<(framelength/1000)):
         raise ValueError("memory_allot and cpu combination results in illegally small frames")  # illegally smol
@@ -55,6 +54,7 @@ def get_gaps(range_in, coverage_in):
         gaps.append((coverage_in[len(coverage_in) - 1][1], range_in[1]))
 
     return gaps
+
 
 def gaps_to_chunklist(gaps_in, chunklength):
     if chunklength < 0.960:
@@ -379,4 +379,4 @@ def analyze_multithread(modelname, cpus, memory_allot, classes_out = [class_bee,
 
 
 if __name__ == "__main__":
-    analyze_multithread(modelname="revision_5_reweight1", cpus=3, memory_allot=4, verbosity=2)
+    analyze_multithread(modelname="revision_5_reweight1", cpus=4, memory_allot=4, verbosity=2)

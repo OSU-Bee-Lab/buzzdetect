@@ -81,6 +81,7 @@ def search_dir(dir_in, extensions):
 
     return paths
 
+
 def load_audio(path_audio, time_start=0, time_stop=None):
     track = sf.SoundFile(path_audio)
 

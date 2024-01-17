@@ -27,6 +27,7 @@ def loadup(modelname):
     else:
         raise OSError("no file containing classes found in model directory")
 
+
 def get_yamnet():
     os.environ["TFHUB_CACHE_DIR"]="./yamnet"
     yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
