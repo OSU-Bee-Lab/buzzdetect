@@ -9,7 +9,7 @@ import re
 import librosa
 from buzzcode.tools import search_dir
 from buzzcode.tools_tf import get_yamnet, load_audio_tf
-from buzzcode.test_model import analyze_testFold
+from buzzcode.modelTesting import analyze_testFold
 
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
@@ -165,6 +165,7 @@ def generate_model(modelname, epochs_in, cpus, memory_allot, dir_training="./tra
     model.save(os.path.join("models", modelname), include_optimizer=True)
 
     if test_model:
+        print("analyzing testfold data")
         analyze_testFold(modelname, cpus, memory_allot)
 
 if __name__ == "__main__":
