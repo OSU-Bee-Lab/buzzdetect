@@ -1,4 +1,11 @@
 # So much to do...
+## Before 1.0
+* Update environment.yml to reflect packages currently in use
+* Get CLI up and running
+* Write CLI help
+* Rewrite README documentation
+* Write docstrings for functions
+
 ## Code
 ### Overall
 * Adjust useage of chunklength to always be in seconds once chunklength is automatically set from memory and cores
