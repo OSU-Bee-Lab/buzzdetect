@@ -74,9 +74,7 @@ def search_dir(dir_in, extensions):
     paths = []
     for root, dirs, files in os.walk(dir_in):
         for file in files:
-            file = file.lower()
-
-            if True in [bool(re.search(e, file)) for e in extensions]:
+            if True in [bool(re.search(e, file.lower())) for e in extensions]:
                 paths.append(os.path.join(root, file))
 
     return paths

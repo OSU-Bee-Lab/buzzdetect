@@ -124,10 +124,8 @@ def analyze_data(model, classes, audio_data, yamnet):
 
     return output_df
 
-# add caching of embeddings
-# add ability to auto-guess memory use?
 # modelname = "revision_5_reweight1"; cpus=4; memory_allot = 3; dir_raw="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; classes_out = [class_bee, class_high, class_low]
-def analyze_multithread(modelname, cpus, memory_allot, classes_out = [class_bee, class_high, class_low], dir_raw="./audio_in", dir_out=None, verbosity=1):
+def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class_high, class_low], dir_raw="./audio_in", paths_raw = None, dir_out=None, verbosity=1):
     timer_total_start = datetime.now()
 
     dir_model = os.path.join("models", modelname)
@@ -143,7 +141,8 @@ def analyze_multithread(modelname, cpus, memory_allot, classes_out = [class_bee,
     log = open(path_log, "x")
     log.close()
 
-    paths_raw = search_dir(dir_raw, list(sf.available_formats().keys()))
+    if paths_raw is None:
+        paths_raw = search_dir(dir_raw, list(sf.available_formats().keys()))
 
     # start logger early and make these exit prints printlogs?
     if len(paths_raw) == 0:
@@ -379,4 +378,4 @@ def analyze_multithread(modelname, cpus, memory_allot, classes_out = [class_bee,
 
 
 if __name__ == "__main__":
-    analyze_multithread(modelname="revision_5_reweight1", cpus=4, memory_allot=4, verbosity=2)
+    analyze_batch(modelname="revision_5_reweight1", cpus=4, memory_allot=4, verbosity=2)
