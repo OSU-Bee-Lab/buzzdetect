@@ -3,22 +3,24 @@
 import tensorflow as tf
 import pandas as pd
 import numpy as np
+import soundfile as sf
 import os
 import re
 import librosa
-from buzzcode.tools_files import search_dir
+from buzzcode.tools import search_dir
 from buzzcode.tools_tf import get_yamnet, load_audio_tf
+from buzzcode.test_model import analyze_testFold
 
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
 
 # Loading YAMNet from TensorFlow Hub
 #
-yamnet_model = get_yamnet()
+yamnet = get_yamnet()
 
 # dir_training="./training"
 def get_metadata(dir_training, invalidate = False):
-    paths_audio = search_dir(dir_training, ".wav")
+    paths_audio = search_dir(dir_training, list(sf.available_formats().keys()))
     cachepath = os.path.join(dir_training, "metadata.csv")
 
     metadata = pd.DataFrame()
@@ -42,12 +44,12 @@ def get_metadata(dir_training, invalidate = False):
 
     return df_out
 
-    # modelname="test"; epochs_in=80; dir_training="./training"; drop_threshold = 0; path_weights=None
-def generate_model(modelname, epochs_in, dir_training="./training", drop_threshold=0, path_weights=None, analyze_test = False, cpus = 8):
+
+def generate_model(modelname, epochs_in, cpus, memory_allot, dir_training="./training", drop_threshold=0, path_weights=None, test_model = False):
     dir_model = os.path.join("models/", modelname)
 
     if os.path.exists(dir_model):
-        raise FileExistsError('a model folder with this name already exists; delete or rename the folder and re-run')
+        raise FileExistsError('a model folder with this name already exists; delete or rename the existing model folder and re-run')
 
     os.makedirs(dir_model)
 
@@ -56,10 +58,10 @@ def generate_model(modelname, epochs_in, dir_training="./training", drop_thresho
     metadata = get_metadata(dir_training)
 
     if drop_threshold > 0:
-        classes = metadata.classification.unique()
+        classes_current = metadata.classification.unique()
 
         classes_keep = []
-        for c in classes:
+        for c in classes_current:
             count = len(metadata[metadata['classification'] == c])
             if count > drop_threshold:
                 classes_keep.append(c)
@@ -88,18 +90,17 @@ def generate_model(modelname, epochs_in, dir_training="./training", drop_thresho
     weightdf.to_csv(os.path.join(dir_model, "weights.csv"))
 
     weights = list(weightdf['weight'])
+    dict_weight = {index: weight for index, weight in enumerate(weights)}
+    dict_names = {name: index for index, name in enumerate(classes)}
 
-    map_class_to_weight = {index: weight for index, weight in enumerate(weights)}
-    map_class_to_id = {name: index for index, name in enumerate(classes)}
-
-    metadata['target_model'] = [map_class_to_id[c] for c in metadata['classification']]
+    metadata['target'] = [dict_names[c] for c in metadata['classification']]
     metadata.to_csv(os.path.join(dir_model, "metadata.csv"))
 
     # Load the audio files and retrieve embeddings
     #
 
     filenames = metadata['path']
-    targets = metadata['target_model']
+    targets = metadata['target']
     folds = metadata['fold']
 
     main_ds = tf.data.Dataset.from_tensor_slices((filenames, targets, folds))
@@ -109,10 +110,9 @@ def generate_model(modelname, epochs_in, dir_training="./training", drop_thresho
 
     main_ds = main_ds.map(load_wav_for_map)
 
-    # applies the embedding extraction model to a wav data
+    # returns YAMNet embeddings for given data
     def extract_embedding(wav_data, label, fold):
-        ''' run YAMNet to extract embedding from the wav data '''
-        scores, embeddings, spectrogram = yamnet_model(wav_data)
+        scores, embeddings, spectrogram = yamnet(wav_data)
         num_embeddings = tf.shape(embeddings)[0]
         return (embeddings,
                 tf.repeat(label, num_embeddings),
@@ -127,18 +127,15 @@ def generate_model(modelname, epochs_in, dir_training="./training", drop_thresho
     cached_ds = main_ds.cache()
     train_ds = cached_ds.filter(lambda embedding, label, fold: fold < 4)
     val_ds = cached_ds.filter(lambda embedding, label, fold: fold == 4)
-    test_ds = cached_ds.filter(lambda embedding, label, fold: fold == 5)
-
-    # remove the folds column now that it's not needed anymore
+    #
+    # # remove the folds column now that it's not needed anymore
     remove_fold_column = lambda embedding, label, fold: (embedding, label)
 
     train_ds = train_ds.map(remove_fold_column)
     val_ds = val_ds.map(remove_fold_column)
-    test_ds = test_ds.map(remove_fold_column)
 
     train_ds = train_ds.cache().shuffle(1000).batch(32).prefetch(tf.data.AUTOTUNE)
     val_ds = val_ds.cache().batch(32).prefetch(tf.data.AUTOTUNE)
-    test_ds = test_ds.cache().batch(32).prefetch(tf.data.AUTOTUNE)
 
     #
     # Create your model
@@ -163,9 +160,12 @@ def generate_model(modelname, epochs_in, dir_training="./training", drop_thresho
                         epochs=epochs_in,
                         validation_data=val_ds,
                         callbacks=callback,
-                        class_weight=map_class_to_weight)
+                        class_weight=dict_weight)
 
     model.save(os.path.join("models", modelname), include_optimizer=True)
+
+    if test_model:
+        analyze_testFold(modelname, cpus, memory_allot)
 
 if __name__ == "__main__":
     modelname = input("Input model name; 'test' for test run: ")
