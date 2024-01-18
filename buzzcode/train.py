@@ -1,5 +1,7 @@
 # Imports
 #
+import sys
+
 import tensorflow as tf
 import pandas as pd
 import numpy as np
@@ -45,7 +47,10 @@ def get_metadata(dir_training, invalidate = False):
     return df_out
 
 
-def generate_model(modelname, epochs_in, cpus, memory_allot, dir_training="./training", drop_threshold=0, path_weights=None, test_model = False):
+def generate_model(modelname, epochs_in, dir_training="./training", drop_threshold=0, path_weights=None, test_model=False, cpus=None, memory_allot=None):
+    if test_model and (cpus is None or memory_allot is None):
+        sys.exit("cpu count and memory allotment must be given when testing model")
+
     dir_model = os.path.join("models/", modelname)
 
     if os.path.exists(dir_model):
