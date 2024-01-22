@@ -18,7 +18,7 @@ def analyze_testFold(modelname, cpus, memory_allot, verbosity=1):
     # return all paths that weren't used in training
     paths_test = list(set(paths_all) - set(paths_training))
 
-    analyze_batch(modelname, cpus, memory_allot, paths_raw=paths_test, dir_out=dir_out, classes_out=[]) # only need the primary category back, I think
+    analyze_batch(modelname=modelname, cpus=cpus, memory_allot=memory_allot, dir_raw=dir_training, paths_raw=paths_test, dir_out=dir_out, classes_out=[]) # only need the primary category back, I think
 
 
 if __name__ == "__main__":
@@ -26,8 +26,8 @@ if __name__ == "__main__":
     modelprompt = input("Input model name; 'all' to validate all: ")
 
     if modelprompt != "all":
-       analyze_testFold(modelname=modelprompt, cpus=cpus, verbosity=1, conflict_out="quit")
+        analyze_testFold(modelname=modelprompt, cpus=cpus, memory_allot=6, verbosity=1)
     else:
         modelnames = list(os.walk("./models"))[0][1]
         for modelname in modelnames:
-            analyze_testFold(modelname=modelname, cpus=cpus, verbosity=1, conflict_out="skip")
+            analyze_testFold(modelname=modelname, cpus=cpus, memory_allot=6, verbosity=1)
