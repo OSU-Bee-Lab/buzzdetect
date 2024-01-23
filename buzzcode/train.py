@@ -47,7 +47,7 @@ def get_metadata(dir_training, invalidate = False):
     return df_out
 
 
-def generate_model(modelname, epochs_in, dir_training="./training", drop_threshold=0, path_weights=None, test_model=False, cpus=None, memory_allot=None):
+def generate_model(modelname, dir_training="./training", drop_threshold=0, path_weights=None, test_model=False, cpus=None, memory_allot=None):
     if test_model and (cpus is None or memory_allot is None):
         sys.exit("cpu count and memory allotment must be given when testing model")
 
@@ -162,7 +162,6 @@ def generate_model(modelname, epochs_in, dir_training="./training", drop_thresho
                                                 restore_best_weights=True)
 
     history = model.fit(train_ds,
-                        epochs=epochs_in,
                         validation_data=val_ds,
                         callbacks=callback,
                         class_weight=dict_weight)
@@ -174,12 +173,13 @@ def generate_model(modelname, epochs_in, dir_training="./training", drop_thresho
         analyze_testFold(modelname, cpus, memory_allot)
 
 if __name__ == "__main__":
-    modelname = input("Input model name; 'test' for test run: ")
+    # modelname = input("Input model name; 'test' for test run: ")
+    modelname = "test"
     if modelname == "test":
         if os.path.exists("./models/test"):
             import shutil
 
             shutil.rmtree("./models/test")
-        generate_model("test", 1)
+        generate_model("test")
 
-    generate_model(modelname, 80, drop_threshold=5, path_weights="./weights.csv", analyze_test=True, cpus=8)
+    generate_model(modelname, drop_threshold=5, path_weights="./weights.csv", analyze_test=True, cpus=8)
