@@ -10,11 +10,14 @@
 * Re-name labels to fit with class dictionary 2.0
      - For classes that were split, just leave the labels that haven't been reclassified at the finest known classification. E.g., "mech_auto_RECLASSIFY" can become mech_auto
      - RECLASSIFY is a mix of human and scrapes; mostly human. Just call human for now?
+* Fix train.py so that it actually trains on each frame! So far I think it's been making one frame of embeddings no matter how long the input audio!! (check that's the case (but also, ambient_day has been strangely effective even if that's true))
 * Train new model on relabeled data
 
 ### Optional
 * Write docstrings for functions
 * Write custom loss function
+* Implement Timer class in analyze to clean up timing
+* Split analysis functions from analyze (because they can be used in train, too)
 
 ## Code
 ### Overall
