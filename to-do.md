@@ -1,10 +1,20 @@
 # So much to do...
-## Before 1.0
-* Update environment.yml to reflect packages currently in use
-* Get CLI up and running
+## Before v1.0
+### Essential
+* Rewrite CLI options and test all actions
 * Write CLI help
 * Rewrite README documentation
+* Purge buzzes from ambient_day files
+* Add sufficient ambient_night annotations
+* Migrate classification dictionary into a .md in git repository
+* Re-name labels to fit with class dictionary 2.0
+     - For classes that were split, just leave the labels that haven't been reclassified at the finest known classification. E.g., "mech_auto_RECLASSIFY" can become mech_auto
+     - RECLASSIFY is a mix of human and scrapes; mostly human. Just call human for now?
+* Train new model on relabeled data
+
+### Optional
 * Write docstrings for functions
+* Write custom loss function
 
 ## Code
 ### Overall
@@ -12,6 +22,7 @@
 * Add docstrings to functions
 
 ### train.py
+* Rewrite training code to 
 * Store training history as python object in model directory (see the pickle package for python)
 * Allow option to run test_model.py after building model
      - Will I get tensorflow problems when multithreading?
@@ -19,6 +30,8 @@
 
 ### analyze.py
 * Allow cacheing of YAMNet embeddings for repeat analysis
+* Add progress bar/estimated time to completion
+* Split analyze_data() into extract_embeddings() and analyze_embeddings()
 
 ## Machine Learning Design
 * Make ambient_night classification
