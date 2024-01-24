@@ -1,9 +1,17 @@
 import argparse
+import sys
 from buzzcode.tools import str2bool
+
+# custom class credit: Steven Bethard
+class MyParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write('error: %s\n' % message)
+        self.print_help()
+        sys.exit(2)
 
 parser = argparse.ArgumentParser(
     prog='buzzdetect.py',
-    description='A program to detect bee buzzes using ML',
+    description='A program to train and apply machine learning models for bioacoustics',
     epilog='github.com/OSU-Bee-Lab/buzzdetect'
 )
 
@@ -11,7 +19,7 @@ subparsers = parser.add_subparsers(help='sub-command help', dest='action', requi
 
 # analyze
 parser_analyze = subparsers.add_parser('analyze', help='analyze all audio files in a directory')
-parser_analyze.add_argument('--modelname', required=True, type=str)
+parser_analyze.add_argument('--modelname', help='the name of the directory holding the model data', required=True, type=str)
 parser_analyze.add_argument('--cpus', required=True, type=int)
 parser_analyze.add_argument('--memory', required=True, type=float)
 parser_analyze.add_argument('--classes', required=False, type=str) # give as...comma-separated list?
@@ -21,9 +29,9 @@ parser_analyze.add_argument('--verbosity', required=False, default=1, type=int)
 
 # train
 parser_train = subparsers.add_parser('train', help='train a new model')
-parser_train.add_argument('--modelname', required=True, type=str)
-parser_train.add_argument('--epochs', required=True, type=int)
-parser_train.add_argument('--cpus', required=False, default=None, type=str)
+parser_train.add_argument('--modelname', help='the name for your new model; created as a directory in ./models/', required=True, type=str)
+parser_train.add_argument('--epochs', help='the maximum number of training epochs', required=True, type=int)
+parser_train.add_argument('--cpus', help='the number of processes to create if analyzing the test fold', required=False, default=None, type=str)
 parser_train.add_argument('--memory', required=False, default=None, type=str)
 parser_train.add_argument('--drop', required=False, default=0, type=str)
 parser_train.add_argument('--weightpath', required=False, default=None, type=str)
