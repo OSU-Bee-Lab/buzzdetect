@@ -1,30 +1,48 @@
 # So much to do...
-## Retraining cycle
-* Figure out retraining cycle!
+## Before v1.0
+### Essential
+* Rewrite CLI options and test all actions
+* Write CLI help
+* Rewrite README documentation
+* Purge buzzes from ambient_day files
+* Add sufficient ambient_night annotations
+* Migrate classification dictionary into a .md in git repository
+* Re-name labels to fit with class dictionary 2.0
+     - For classes that were split, just leave the labels that haven't been reclassified at the finest known classification. E.g., "mech_auto_RECLASSIFY" can become mech_auto
+     - RECLASSIFY is a mix of human and scrapes; mostly human. Just call human for now?
+* Fix train.py so that it actually trains on each frame! So far I think it's been making one frame of embeddings no matter how long the input audio!! (check that's the case (but also, ambient_day has been strangely effective even if that's true))
+* Train new model on relabeled data
+
+### Optional
+* Write docstrings for functions
+* Write custom loss function
+* Implement Timer class in analyze to clean up timing
+* Split analysis functions from analyze (because they can be used in train, too)
 
 ## Code
 ### Overall
 * Adjust useage of chunklength to always be in seconds once chunklength is automatically set from memory and cores
+* Add docstrings to functions
 
 ### train.py
+* Rewrite training code to 
 * Store training history as python object in model directory (see the pickle package for python)
-* Allow to read from different directories
-* Move building of training to python module
+* Allow option to run test_model.py after building model
+     - Will I get tensorflow problems when multithreading?
+     - Isn't this already being done in training? Can I just save those results?
 
 ### analyze.py
-* Update to use new load_audio function directly with no conversion
-* Re-write entire script to use classes and methods instead of functions?
-* Make system for smart-detecting what data have already been analyzed
-    - Read in all available buzzdetect outputs, chunk around those times
-    - Or, have user specify overwrite or new file
-* Change cleanup to take arg list, e.g. ["conv", "chunk"]
+* Allow cacheing of YAMNet embeddings for repeat analysis
+* Add progress bar/estimated time to completion (dependent on verbosity?)
+* Split analyze_data() into extract_embeddings() and analyze_embeddings()
+* Use full paths (not clipped) at verbosity 2
 
 ## Machine Learning Design
 * Make ambient_night classification
 * Listen to all ambient_day and remove buzzes
 * Write custom loss function that penalizes within-buzz error less
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
-* Move away from YAMNet embeddings? YAMNet doesn't have a classification for 
+* Move away from YAMNet embeddings? 
 
 ## Supercomputing
 ### Figure out supercomputing
@@ -33,44 +51,3 @@
 ## Documentation
 ### README.md
 * CLI commands and flags will need to change once we update buzzdetect.py
-
-# So much done!
-## Preprocessing pipeline
-* Do we need to get Reed's snipper code working?
-  - New chunking code working that splits audio into 1h segments, but doesn't downsample or snip out buzzes only; I don't think we have a need to snip out buzzes at this point
-*  MP3 → WAV; on supercomputer instead of local?
-  -  No longer converting to WAV, but chunking on supercomputer probably makes sense; parallelizing would be great!
-* Does tfio.audio.AudioIOTensor` from [this guide](https://www.tensorflow.org/io/tutorials/audio) mean we don't have to worry about trimming down files?
-  - I don't think so. Giving up and just working with ffmpeg
- 
-## Documentation
-### README.md
-* FileZilla information should be updated when we figure out how to integrate SharePoint
-    - Crap. Can't use FileZilla without paying (quite reasonable) license fee
-
-
-## Code
-### train.py
-* [done!] Store metadata csv within model directory
-
-### analyze.py
-* Output confidence score as probability?
-    - Apparently, working with raw confidence scores is normal and acceptable; instead of probability, I need to figure out a confidence cutoff that balances false positives/negatives
-* Rewrite to input files from any directory structure (e.g., all WAVs within the input path) and output with a cloned directory structure
-    - Done diddly. Takes in all mp3s located in input dir, finds the dirpaths of those mp3s, translates them to dirpaths of the output dir.
- 
-## Machine Learning Design
-* Make sure you're doing biasing correctly! Does the sample from the training set apply to the sample from the field audio?
-    - I'm going to call this one done just because I feel comfortable with the biasing at the moment; maybe the biases should shift the prior expectation from rates-in-training to rates-in-field, but rates-in-field can't really be known ahead of time.
-* Re-create training set as mp3 instead of downsampled wav
-    - Well, it's wav, but wav directly from mp3 with minmal processing (only what's needed for yamnet)
- 
-## Supercomputing
-### Figure out Teams → OSC file transfer
-* Are we working with terabytes at once?
-  - No. Lily's entire experiment is only 67GB (assuming it's all uploaded on Teams)
- 
-## Documentation
-### README.md
-* FileZilla information should be updated when we figure out how to integrate SharePoint
-    - Bummer...FileZilla doesn't work with SharePoint unless you pay for Pro. Which honestly might be worth it...
