@@ -1,3 +1,4 @@
+from buzzcode.analysis import framelength, solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, get_yamnet, load_audio, extract_embeddings, analyze_embeddings
 import tensorflow as tf
 import pandas as pd
 import os
@@ -5,128 +6,19 @@ import re
 import sys
 import librosa
 import multiprocessing
-import numpy as np
 import soundfile as sf
 from datetime import datetime
-from buzzcode.tools import search_dir, load_audio
-from buzzcode.tools_tf import loadup, get_yamnet
-
-memory_tf = 0.350  # memory (in GB) required for single tensorflow process
-memorydensity_audio = 3600 / 2.4  # seconds per gigabyte of decoded audio (estimate)
-framelength = 960
-framehop = 480
-out_suffix = "_buzzdetect.csv"
+from buzzcode.tools import search_dir, Timer, clip_name
 
 class_bee = 'ins_buzz_bee'
 class_high = 'ins_buzz_high'
 class_low = 'ins_buzz_low'
 
-def solve_memory(memory_allot, cpus):
-    n_analyzers = min(cpus, (memory_allot/memory_tf).__floor__()) # allow as many workers as you have memory for
-    memory_remaining = memory_allot - (memory_tf*n_analyzers)
-    memory_perchunk = min(memory_remaining/cpus, 9) # hard limiting max memory per chunk to 9G because I haven't tested sizes above that (also there's probably not a performance benefit?)
+# change classes_out to none
 
-    chunklength = memory_perchunk * memorydensity_audio
-
-    if(chunklength<(framelength/1000)):
-        raise ValueError("memory_allot and cpu combination results in illegally small frames")  # illegally smol
-
-    return chunklength, n_analyzers
-
-def get_gaps(range_in, coverage_in):
-    coverage_in = sorted(coverage_in)
-    gaps = []
-
-    # gap between range start and coverage start
-    if coverage_in[0][0] > range_in[0]:  # if the first coverage starts after the range starts
-        gaps.append((0, coverage_in[0][0]))
-
-    # gaps between coverages
-    for i in range(0, len(coverage_in) - 1):
-        out_current = coverage_in[i]
-        out_next = coverage_in[i + 1]
-
-        if out_next[0] > out_current[1]:  # if the next coverage starts after this one ends,
-            gaps.append((out_current[1], out_next[0]))
-
-    # gap after coverage
-    if coverage_in[len(coverage_in) - 1][1] < range_in[1]:  # if the last coverage ends before the range ends
-        gaps.append((coverage_in[len(coverage_in) - 1][1], range_in[1]))
-
-    return gaps
-
-
-def gaps_to_chunklist(gaps_in, chunklength):
-    if chunklength < 0.960:
-        raise ValueError("chunklength is illegally small")
-
-    chunklist_master = []
-
-    for gap in gaps_in:
-        gap_length = gap[1] - gap[0]
-        n_chunks = (gap_length/chunklength).__ceil__()
-        chunkpoints = np.arange(gap[0], gap[1], chunklength).tolist()
-
-        chunklist_gap = []
-        # can probably list comprehend this
-        for i in range(len(chunkpoints)-1):
-            chunklist_gap.append((chunkpoints[i], chunkpoints[i+1]))
-
-        chunklist_gap.append((chunkpoints[len(chunkpoints) - 1], gap[1]))
-        chunklist_master.extend(chunklist_gap)
-
-    return chunklist_master
-
-
-def get_coverage(path_raw, dir_raw, dir_out):
-    raw_base = os.path.splitext(path_raw)[0]
-    path_out = re.sub(dir_raw, dir_out, raw_base) + out_suffix
-
-    if not os.path.exists(path_out):
-        return []
-
-    out_df = pd.read_csv(path_out)
-    out_df.sort_values("start", inplace=True)
-    out_df["coverageGroup"] = (out_df["start"] > out_df["end"].shift()).cumsum()
-    df_coverage = out_df.groupby("coverageGroup").agg({"start": "min", "end": "max"})
-
-    coverage = list(zip(df_coverage['start'], df_coverage['end']))
-
-    return coverage # list of tuples
-
-# model, classes = loadup("revision_5_reweight1"); yamnet = get_yamnet()
-def analyze_data(model, classes, audio_data, yamnet):
-    if audio_data.dtype != 'tf.float32':
-        audio_data = tf.cast(audio_data, tf.float32)
-
-    audio_data_split = tf.signal.frame(audio_data, framelength * 16, framehop * 16, pad_end=True, pad_value=0)
-
-    results = []
-
-    for i, data in enumerate(audio_data_split):
-        yam_scores, yam_embeddings, spectrogram = yamnet(data)
-        transfer_scores = model(yam_embeddings).numpy()[0]
-
-        results_frame = {
-            "start": (i * framehop) / 1000,
-            "end": ((i * framehop) + framelength) / 1000,
-            "class_predicted": classes[transfer_scores.argmax()],
-            "score_predicted": transfer_scores[transfer_scores.argmax()]
-        }
-
-        indices_out = [classes.index(c) for c in classes]
-        scorenames = ['score_' + c for c in classes]
-        results_frame.update({scorenames[i]: transfer_scores[i] for i in indices_out})
-
-        results.append(results_frame)
-
-    output_df = pd.DataFrame(results)
-
-    return output_df
-
-# modelname = "revision_5_reweight1"; cpus=4; memory_allot = 3; dir_raw="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; classes_out = [class_bee, class_high, class_low]
-def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class_high, class_low], dir_raw="./audio_in", paths_raw = None, dir_out=None, verbosity=1):
-    timer_total_start = datetime.now()
+# modelname = "revision_5_reweight1"; cpus=4; memory_allot = 3; dir_raw="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; classes_out = [class_bee, class_high, class_low]; paths_raw = None; pad=False
+def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class_high, class_low], dir_raw="./audio_in", paths_raw = None, dir_out=None, verbosity=1, pad=False):
+    timer_total = Timer()
 
     dir_model = os.path.join("models", modelname)
 
@@ -135,7 +27,7 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
     chunklength, n_analyzers = solve_memory(memory_allot, cpus)
 
-    log_timestamp = timer_total_start.strftime("%Y-%m-%d_%H%M%S")
+    log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
     path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
     os.makedirs(os.path.dirname(path_log), exist_ok=True)
     log = open(path_log, "x")
@@ -163,7 +55,15 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
         if len(coverage) == 0:
             coverage = [(0, 0)]
 
-        gaps = get_gaps((0,audio_duration), coverage)
+        gaps = get_gaps((0, audio_duration), coverage)
+
+        # if there's no padding, ignore gaps that start less than 1 frame from file end
+        if not pad:
+            gaps = [gap for gap in gaps if gap[0] < (audio_duration - (framelength/1000))]
+
+        # expand gaps smaller than one frame; leave gaps larger than one frame
+        gaps = [(gap[0], gap[0] + (framelength/1000)) if (gap[1] - gap[0]) < (framelength/1000) else gap for gap in gaps]
+
         chunklist = gaps_to_chunklist(gaps, chunklength)
 
         if len(chunklist) > 0:
@@ -238,8 +138,8 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
             if len(dict_chunk[path_used]) == 0:
                 dict_rawstatus[path_used] = "finished"
 
-            path_snip = re.sub(dir_raw, "", path_used)
-            printlog(f"manager: analyzer {id_analyzer} {msg} {path_snip}, chunk {round(chunk_out[0], 1), round(chunk_out[1], 1)}", 2)
+            path_clip = clip_name(path_used, dir_raw)
+            printlog(f"manager: analyzer {id_analyzer} {msg} {path_clip}, chunk {round(chunk_out[0], 1), round(chunk_out[1], 1)}", 2)
 
             assignment = (path_used, chunk_out)
 
@@ -252,7 +152,6 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
 
     def worker_analyzer(id_analyzer):
-        # I could now easily add a progress bar or estimated time to completion
         printlog(f"analyzer {id_analyzer}: launching", 1)
 
         tf.config.threading.set_inter_op_parallelism_threads(1)
@@ -265,26 +164,20 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
         q_request.put(id_analyzer)
         assignment = q_analyze[id_analyzer].get()
+
+        timer_analysis = Timer()
         while assignment != "terminate":
+            timer_analysis.restart()
             path_raw = assignment[0]
-            path_clip = re.sub(dir_raw, '', path_raw)
+            path_clip = clip_name(path_raw, dir_raw)
             time_from = assignment[1][0]
             time_to = assignment[1][1]
             chunk_duration = time_to - time_from
 
             printlog(f"analyzer {id_analyzer}: analyzing {path_clip} from {round(time_from, 1)}s to {round(time_to, 1)}s", 1)
-
-            timer_analysis_start = datetime.now()
             audio_data = load_audio(path_raw, time_from, time_to)
-            results = analyze_data(model=model, classes=classes, audio_data=audio_data, yamnet=yamnet)
-            timer_analysis_end = datetime.now()
-
-            timer_analysis = timer_analysis_end - timer_analysis_start
-            analysis_rate = (chunk_duration / timer_analysis.total_seconds()).__round__(1)
-            printlog(
-                f"analyzer {id_analyzer}: analyzed {path_clip} from {round(time_from, 1)}s to {round(time_to, 1)}s in {timer_analysis.total_seconds().__round__(2)}s (rate: {analysis_rate})",
-                1)
-
+            embeddings = extract_embeddings(audio_data, yamnet)
+            results = analyze_embeddings(model=model, classes=classes, embeddings=embeddings)
 
             results['start'] = results['start'] + time_from
             results['end'] = results['end'] + time_from
@@ -293,6 +186,13 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
             q_write.put((path_raw, results))
             q_request.put(id_analyzer)
+
+            timer_analysis.stop()
+            analysis_rate = (chunk_duration / timer_analysis.get_total()).__round__(1)
+            printlog(
+                f"analyzer {id_analyzer}: analyzed {path_clip} from {round(time_from, 1)}s to {round(time_to, 1)}s in {timer_analysis.get_total()}s (rate: {analysis_rate})",
+                1)
+
             assignment = q_analyze[id_analyzer].get()
             
         printlog(f"analyzer {id_analyzer}: terminating")
@@ -315,16 +215,19 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
                 status_analyzers[results] = False
                 continue
 
-            path_out = os.path.splitext(path_raw)[0] + out_suffix
+            path_out = os.path.splitext(path_raw)[0] + '_buzzdetect.csv'
             path_out = re.sub(dir_raw, dir_out, path_out)
+            path_clip = clip_name(path_out, dir_out)
 
             if os.path.exists(path_out):
+                printlog(f"writer: updating file for {path_clip}", 2)
                 results_written = pd.read_csv(path_out)
                 results_updated = pd.concat([results_written, results],axis=0, ignore_index=True)
                 results_updated = results_updated.sort_values(by = "start")
 
                 results_updated.to_csv(path_out, index = False)
             else:
+                printlog(f"writer: creating new file for {path_clip}", 2)
                 results.to_csv(path_out)
 
         printlog(f"writer: terminating")
@@ -338,8 +241,8 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
             log.close()
             log_item = q_log.get(block=True)
 
-        timer_total = datetime.now() - timer_total_start
-        closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.total_seconds().__round__(1)}s"
+        timer_total.stop()
+        closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
 
         print(closing_message)
         log = open(path_log, "a")
@@ -350,7 +253,7 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
     #
     printlog(
         f"begin analysis \n"
-        f"start time: {timer_total_start} \n"
+        f"start time: {timer_total.time_start} \n"
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
         f"memory allotment {memory_allot}\n",
@@ -378,4 +281,5 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname="revision_5_reweight1", cpus=4, memory_allot=4, verbosity=2)
+    modelname = "revision_5_reweight1"
+    analyze_batch(modelname=modelname, cpus=4, memory_allot=4, verbosity=2)

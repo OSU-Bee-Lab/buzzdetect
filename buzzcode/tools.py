@@ -3,43 +3,28 @@ import re
 import argparse
 import librosa
 import soundfile as sf
-
-# given a list of paths, create the directories necessary to hold the files
-def unique_dirs(paths, make=False):
-    path_dirs = []
-    for path in paths:
-        path_dir = os.path.dirname(path)
-        path_dirs.append(path_dir)
-
-    dirs_unique = list(set(path_dirs))
-
-    if make == True:
-        for path_dir in dirs_unique:
-            os.makedirs(path_dir, exist_ok=True)
-
-    return dirs_unique
+from datetime import datetime
 
 
-def size_to_runtime(size_GB, kbps=256):
-    runtime = (
-            size_GB *  # gigabytes
-            8 *  # convert to gigabits
-            (10 ** 6) *  # convert to kilobits
-            (1 / kbps)
-    )  # convert to seconds
+class Timer:
+    def __init__(self):
+        self.time_start = datetime.now()
+        # self.state = 'running'  # not pursuing it right now, but I could add exceptions for illegal start/stop
 
-    return runtime
+    def stop(self):
+        self.time_end = datetime.now()
 
+    def restart(self):
+        self.time_start = datetime.now()
 
-def runtime_to_size(runtime, kbps=256):
-    size_GB = (
-            runtime *  # seconds
-            kbps *  # kilobits
-            (1 / 8) *  # kilobytes
-            (10 ** -6)  # gigabytes
-    )
+    def get_current(self):
+        return datetime.now() - self.time_start
 
-    return size_GB
+    def get_total(self, decimals=2):
+        self.time_total = self.time_end - self.time_start
+        self.total_formatted = self.time_total.total_seconds().__round__(decimals)
+
+        return self.total_formatted
 
 
 def clip_name(filepath, clippath):
@@ -78,23 +63,3 @@ def search_dir(dir_in, extensions):
                 paths.append(os.path.join(root, file))
 
     return paths
-
-
-def load_audio(path_audio, time_start=0, time_stop=None):
-    track = sf.SoundFile(path_audio)
-
-    can_seek = track.seekable() # True
-    if not can_seek:
-        raise ValueError("Input file not compatible with seeking")
-
-    if time_stop is None:
-        time_stop = librosa.get_duration(path=path_audio)
-
-    sr = track.samplerate
-    start_frame = round(sr * time_start)
-    frames_to_read = round(sr * (time_stop - time_start))
-    track.seek(start_frame)
-    audio_section = track.read(frames_to_read)
-    audio_section = librosa.resample(y=audio_section, orig_sr=sr, target_sr=16000)  # overwrite for memory purposes
-
-    return audio_section
