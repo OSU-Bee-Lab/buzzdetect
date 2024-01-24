@@ -33,8 +33,9 @@
 
 ### analyze.py
 * Allow cacheing of YAMNet embeddings for repeat analysis
-* Add progress bar/estimated time to completion
+* Add progress bar/estimated time to completion (dependent on verbosity?)
 * Split analyze_data() into extract_embeddings() and analyze_embeddings()
+* Use full paths (not clipped) at verbosity 2
 
 ## Machine Learning Design
 * Make ambient_night classification
