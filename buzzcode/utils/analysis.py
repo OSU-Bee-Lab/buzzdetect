@@ -18,24 +18,11 @@ def loadup(modelname):
     dir_model = os.path.join("./models/", modelname)
     model = tf.keras.models.load_model(dir_model)
 
-    classpath_txt =os.path.join(dir_model, "classes.txt") # backwards compatibility for previous models; can remove later
-    classpath_csv = os.path.join(dir_model, "weights.csv")
+    path_weights = os.path.join(dir_model, "weights.csv")
 
-    if os.path.exists(classpath_csv): # prefer weights if available
-        df = pd.read_csv(classpath_csv)
-        classes = df['classification']
-        return model, list(classes)
-
-    elif os.path.exists(classpath_txt):
-        classes = []
-        with open(os.path.join("models/", modelname, "classes.txt"), "r") as file:
-            # Use a for loop to read each line from the file and append it to the list
-            for line in file:
-                # Remove the newline character and append the item to the list
-                classes.append(line.strip())
-        return model, classes
-    else:
-        raise OSError("no file containing classes found in model directory")
+    df = pd.read_csv(path_weights)
+    classes = df['classification']
+    return model, list(classes)
 
 
 def get_yamnet():
@@ -54,7 +41,7 @@ def solve_memory(memory_allot, cpus):
 
     n_analyzers = min(cpus, (memory_allot/memory_tf).__floor__()) # allow as many workers as you have memory for
     memory_remaining = memory_allot - (memory_tf*n_analyzers)
-    memory_perchunk = min(memory_remaining/cpus, 9) # hard limiting max memory per chunk to 9G because I haven't tested sizes above that (also there's probably not a performance benefit?)
+    memory_perchunk = min(memory_remaining/cpus, 9)  # hard limiting max memory per chunk to 9G because I haven't tested sizes above that (also there's probably not a performance benefit?)
 
     chunklength = memory_perchunk * memorydensity_audio
 
