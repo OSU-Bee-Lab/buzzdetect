@@ -18,15 +18,7 @@ tf.config.threading.set_intra_op_parallelism_threads(1)
 yamnet = get_yamnet()
 
 
-def get_metadata(path_metadata):
-    metadata = pd.read_csv(path_metadata)
-    if 'duration' not in metadata.columns:
-        metadata['duration'] = [librosa.get_duration(path=file) for file in metadata['path']]
-
-    return metadata
-
-
-def generate_model(modelname, path_metadata="./training/metadata/metadata.csv", drop_threshold=0, path_weights=None, test_model=False, cpus=None, memory_allot=None):
+def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.csv", path_weights=None, test_model=False, cpus=None, memory_allot=None):
     if test_model and (cpus is None or memory_allot is None):
         sys.exit("cpu count and memory allotment must be given when testing model")
 
@@ -39,25 +31,16 @@ def generate_model(modelname, path_metadata="./training/metadata/metadata.csv", 
 
     # Acquiring and filtering training data
     #
-    metadata = get_metadata(path_metadata)
+    metadata = pd.read_csv(path_metadata)
 
-    if drop_threshold > 0:
-        classes_current = metadata.classification.unique()
-
-        classes_keep = []
-        for c in classes_current:
-            count = len(metadata[metadata['classification'] == c])
-            if count > drop_threshold:
-                classes_keep.append(c)
-
-        metadata = metadata[metadata['classification'].isin(classes_keep)]
-
-    metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
+    if 'fold' not in metadata.columns:
+        metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
 
     classes = metadata['classification'].unique()
 
     if path_weights is None:
-        weightdf = metadata[['classification', 'duration']].groupby('classification').sum()
+        weightdf = pd.DataFrame()
+        weightdf['classification'] = metadata['classification'].unique()
         weightdf['weight'] = 1
         classes = list(weightdf.index)
 
