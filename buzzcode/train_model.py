@@ -1,54 +1,53 @@
-# Imports
-#
-import sys
-
 import tensorflow as tf
 import pandas as pd
 import numpy as np
 import os
-import librosa
-from buzzcode.utils.analysis import get_yamnet, load_audio_tf
-from buzzcode.test_model import analyze_testFold
+import re
+from buzzcode.utils.analysis import get_yamnet, load_audio_tf, load_audio, extract_embeddings, load_embeddings, save_embeddings
 
-tf.config.threading.set_inter_op_parallelism_threads(1)
-tf.config.threading.set_intra_op_parallelism_threads(1)
-
-# Loading YAMNet from TensorFlow Hub
-#
 yamnet = get_yamnet()
 
 
-def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.csv", path_weights=None, test_model=False, cpus=None, memory_allot=None, max_per_class=100):
-    if test_model and (cpus is None or memory_allot is None):
-        sys.exit("cpu count and memory allotment must be given when testing model")
-
+def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, epochs_in=100):
     dir_model = os.path.join("./models/", modelname)
-
     if os.path.exists(dir_model):
         raise FileExistsError('a model folder with this name already exists; delete or rename the existing model folder and re-run')
-
     os.makedirs(dir_model)
+
+    dir_training = './training'
+    dir_metadata = os.path.join(dir_training, 'metadata')
+    dir_audio = os.path.join(dir_training, 'audio')
+    dir_embeddings = './embeddings'
 
     # Acquiring and filtering training data
     #
-    metadata = pd.read_csv(path_metadata)
+    if not bool(re.search('\\.csv$',metadata_name)):
+        metadata_name = metadata_name + '.csv'
+    metadata = pd.read_csv(os.path.join(dir_metadata, metadata_name))
 
-    if 'path' not in metadata.columns:
-        metadata['path'] = [os.path.join('./training/audio', p) for p in metadata['path_relative']]
+    # trim leading slash, if present, from idents for os.path.join
+    metadata['path_relative'] = [re.sub('^/', '', i) for i in metadata['path_relative']]
+
+    if 'path_audio' not in metadata.columns:
+        metadata['path_audio'] = [os.path.join(dir_audio, p) for p in metadata['path_relative']]
 
     if 'fold' not in metadata.columns:
         metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
 
     classes = metadata['classification'].unique()
 
-    if path_weights is None:
+    if weights_name is None:
         weightdf = pd.DataFrame()
         weightdf['classification'] = metadata['classification'].unique()
         weightdf['weight'] = 1
         classes = weightdf['classification'].to_list()
-
     else:
-        weightdf = pd.read_csv(path_weights)
+        if not bool(re.search('\\.csv$', weights_name)):
+            weights_name = weights_name + '.csv'
+
+        weights_path = os.path.join(dir_training, 'weights', weights_name)
+
+        weightdf = pd.read_csv(weights_path)
         weights_new = pd.DataFrame()
 
         # if a weight isn't assigned to a class, assign it 1
@@ -60,56 +59,43 @@ def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.cs
 
     weightdf.to_csv(os.path.join(dir_model, "weights.csv"))
 
-    weights = list(weightdf['weight'])
-    dict_weight = {index: weight for index, weight in enumerate(weights)}
+    dict_weight = {index: weight for index, weight in enumerate(weightdf['weight'])}
     dict_names = {name: index for index, name in enumerate(classes)}
 
     metadata['target'] = [dict_names[c] for c in metadata['classification']]
     metadata.to_csv(os.path.join(dir_model, "metadata.csv"))
 
-    # Load the audio files and retrieve embeddings
+    # dataset creation
     #
+    dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_audio'], metadata['target'], metadata['fold']))
 
-    filenames = metadata['path']
-    targets = metadata['target']
-    folds = metadata['fold']
+    # I desparately want to allow caching of embeddings, but I can't read from paths stored in tensors
+    def prep_ds(path_audio, label, fold):
+        audio_data = load_audio_tf(path_audio)
+        scores, embeddings, spectrogram = yamnet(audio_data)
 
-    main_ds = tf.data.Dataset.from_tensor_slices((filenames, targets, folds))
-
-    def load_wav_for_map(filename, label, fold):
-        return load_audio_tf(filename), label, fold
-
-    main_ds = main_ds.map(load_wav_for_map)
-
-    # returns YAMNet embeddings for given data
-    def extract_embedding(wav_data, label, fold):
-        scores, embeddings, spectrogram = yamnet(wav_data)
         num_embeddings = tf.shape(embeddings)[0]
         return (embeddings,
                 tf.repeat(label, num_embeddings),
                 tf.repeat(fold, num_embeddings))
 
-    # extract embedding
-    main_ds = main_ds.map(extract_embedding).unbatch()
+    dataset_full = dataset_full.map(prep_ds).unbatch()
 
     # Split the data
     #
+    dataset_cache = dataset_full.cache()
+    dataset_train = dataset_cache.filter(lambda embedding, label, fold: fold < 4)
+    dataset_val = dataset_cache.filter(lambda embedding, label, fold: fold == 4)
 
-    cached_ds = main_ds.cache()
-    train_ds = cached_ds.filter(lambda embedding, label, fold: fold < 4)
-    val_ds = cached_ds.filter(lambda embedding, label, fold: fold == 4)
-    #
-    # # remove the folds column now that it's not needed anymore
+    # remove the folds column now that it's not needed anymore
     remove_fold_column = lambda embedding, label, fold: (embedding, label)
+    dataset_train = dataset_train.map(remove_fold_column)
+    dataset_val = dataset_val.map(remove_fold_column)
 
-    train_ds = train_ds.map(remove_fold_column)
-    val_ds = val_ds.map(remove_fold_column)
+    dataset_train = dataset_train.cache().shuffle(1000).batch(32).prefetch(tf.data.AUTOTUNE)
+    dataset_val = dataset_val.cache().batch(32).prefetch(tf.data.AUTOTUNE)
 
-    train_ds = train_ds.cache().shuffle(1000).batch(32).prefetch(tf.data.AUTOTUNE)
-    val_ds = val_ds.cache().batch(32).prefetch(tf.data.AUTOTUNE)
-
-    #
-    # Create your model
+    # Model creation
     #
 
     model = tf.keras.Sequential([
@@ -127,28 +113,15 @@ def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.cs
                                                 patience=3,
                                                 restore_best_weights=True)
 
-    history = model.fit(train_ds,
-                        epochs=100,  # would rather solely rely on early stopping
-                        validation_data=val_ds,
+    history = model.fit(dataset_train,
+                        epochs=epochs_in,  # would rather solely rely on early stopping
+                        validation_data=dataset_val,
                         callbacks=callback,
                         class_weight=dict_weight)
 
     model.save(os.path.join("models", modelname), include_optimizer=True)
 
-    if test_model:
-        print("analyzing testfold data")
-        analyze_testFold(modelname, cpus, memory_allot)
-
 if __name__ == "__main__":
-    # modelname = input("Input model name; 'test' for test run: ")
-    modelname = "test"
-    if modelname == "test":
-        if os.path.exists("./models/test"):
-            import shutil
-
-            shutil.rmtree("./models/test")
-        generate_model("test")
-
-    generate_model(modelname, drop_threshold=400, path_weights="./weights.csv", test_model=True, cpus=8, memory_allot=8)
+    generate_model('test_embedcache', weights_name="evenWeight_supergeneralMetadata.csv", epochs_in=1)
 
 
