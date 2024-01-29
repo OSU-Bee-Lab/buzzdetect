@@ -162,17 +162,14 @@ def extract_embeddings(audio_data, yamnet, pad=False):
 
 
 # not yet implemented for full-length analysis; won't work for long files (too large for mem)
-def save_embeddings(ident, embeddings):
-    path_pickle = os.path.join("embeddings", ident)
+def save_embeddings(path_pickle, embeddings):
     os.makedirs(os.path.dirname(path_pickle), exist_ok=True)
 
     with open(path_pickle, 'wb') as file_pickle:
         pickle.dump(embeddings, file_pickle)
 
 
-def load_embeddings(ident):
-    path_pickle = os.path.join("embeddings", ident)
-
+def load_embeddings(path_pickle):
     with open(path_pickle, 'rb') as file_pickle:
         embeddings = pickle.load(file_pickle)
 
