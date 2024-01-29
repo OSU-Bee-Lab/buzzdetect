@@ -1,24 +1,29 @@
 import pandas as pd
 import os
+import re
 import soundfile as sf
 from buzzcode.utils.tools import search_dir
 from buzzcode.analyze_directory import analyze_batch
 
-# modelname = "revision_5"; cpus = 6; memory_allot = 6; verbosity=2
+# modelname = "revision_5_reweight1"; cpus = 6; memory_allot = 6; max_per_class=10
 # when iterating through models, could avoid startup time by passing analyze_wav different models instead of restarting the whole analyze_testFold function
-def analyze_testFold(modelname, cpus, memory_allot, verbosity=1):
+def analyze_testFold(modelname, cpus, memory_allot, max_per_class = 100, verbosity=1):
     dir_model = os.path.join("models", modelname)
-    dir_training = "./training"
+    dir_training = "./training/audio"
     dir_out = os.path.join(dir_model, "output_testFold")
 
     metadata = pd.read_csv(os.path.join(dir_model, "metadata.csv"))
-    paths_training = metadata[metadata['fold'] != 5]['path'].to_list()
-    paths_all = search_dir(dir_training, list(sf.available_formats().keys()))
 
-    # return all paths that weren't used in training
-    paths_test = list(set(paths_all) - set(paths_training))
+    paths_test = []
+    for c in metadata['classification'].unique():
+        sub = metadata[(metadata['classification'] == c) & (metadata['fold'] == 5)]
+        n_rows = min(len(sub), max_per_class)
+        paths = sub.sample(n_rows)['path_relative'].to_list()
+        paths = [re.sub("^/",'', p) for p in paths]
+        paths = [os.path.join(dir_training, path) for path in paths]
+        paths_test.extend(paths)
 
-    analyze_batch(modelname=modelname, cpus=cpus, memory_allot=memory_allot, dir_raw=dir_training, paths_raw=paths_test, dir_out=dir_out, classes_out=list(metadata['classification'].unique())) # only need the primary category back, I think
+    analyze_batch(modelname=modelname, cpus=cpus, memory_allot=memory_allot, dir_raw=dir_training, paths_raw=paths_test, dir_out=dir_out, classes_out=list(metadata['classification'].unique()))
 
 
 if __name__ == "__main__":

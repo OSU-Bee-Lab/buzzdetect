@@ -18,7 +18,7 @@ tf.config.threading.set_intra_op_parallelism_threads(1)
 yamnet = get_yamnet()
 
 
-def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.csv", path_weights=None, test_model=False, cpus=None, memory_allot=None):
+def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.csv", path_weights=None, test_model=False, cpus=None, memory_allot=None, max_per_class=100):
     if test_model and (cpus is None or memory_allot is None):
         sys.exit("cpu count and memory allotment must be given when testing model")
 
@@ -33,6 +33,9 @@ def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.cs
     #
     metadata = pd.read_csv(path_metadata)
 
+    if 'path' not in metadata.columns:
+        metadata['path'] = [os.path.join('./training/audio', p) for p in metadata['path_relative']]
+
     if 'fold' not in metadata.columns:
         metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
 
@@ -42,7 +45,7 @@ def generate_model(modelname, path_metadata="./training/metadata/metadata_raw.cs
         weightdf = pd.DataFrame()
         weightdf['classification'] = metadata['classification'].unique()
         weightdf['weight'] = 1
-        classes = list(weightdf.index)
+        classes = weightdf['classification'].to_list()
 
     else:
         weightdf = pd.read_csv(path_weights)
@@ -147,3 +150,5 @@ if __name__ == "__main__":
         generate_model("test")
 
     generate_model(modelname, drop_threshold=400, path_weights="./weights.csv", test_model=True, cpus=8, memory_allot=8)
+
+
