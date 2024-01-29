@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import re
 import librosa
+import pickle
 import numpy as np
 import soundfile as sf
 
@@ -156,6 +157,24 @@ def extract_embeddings(audio_data, yamnet, pad=False):
     audio_data_split = tf.signal.frame(audio_data, framelength * 16, framehop * 16, pad_end=pad, pad_value=0)
 
     embeddings = [yamnet(data)[1] for data in audio_data_split]
+
+    return embeddings
+
+
+# not yet implemented for full-length analysis; won't work for long files (too large for mem)
+def save_embeddings(ident, embeddings):
+    path_pickle = os.path.join("embeddings", ident)
+    os.makedirs(os.path.dirname(path_pickle), exist_ok=True)
+
+    with open(path_pickle, 'wb') as file_pickle:
+        pickle.dump(embeddings, file_pickle)
+
+
+def load_embeddings(ident):
+    path_pickle = os.path.join("embeddings", ident)
+
+    with open(path_pickle, 'rb') as file_pickle:
+        embeddings = pickle.load(file_pickle)
 
     return embeddings
 
