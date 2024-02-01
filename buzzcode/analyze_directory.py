@@ -159,8 +159,17 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
         # ready model
         #
-        model, classes = loadup(modelname)
         yamnet = get_yamnet()
+        model, classes, classes_semantic = loadup(modelname)
+
+        if semantic:
+            classes = classes_semantic
+
+        colnames_out = []
+        if not semantic:
+            colnames_out = ["score_" + c for c in classes]
+
+        columns_desired = ['start', 'end', 'class_predicted', 'score_predicted'] + colnames_out
 
         q_request.put(id_analyzer)
         assignment = q_analyze[id_analyzer].get()
