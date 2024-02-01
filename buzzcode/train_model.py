@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 import os
 import re
-from buzzcode.utils.analysis import get_yamnet, load_audio_tf, load_audio, extract_embeddings, load_embeddings, save_embeddings
+from buzzcode.utils.analysis import get_yamnet, load_audio_tf
+from buzzcode.utils.tools import save_pickle
 
 yamnet = get_yamnet()
 
@@ -123,6 +124,6 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     model.save(os.path.join(dir_model), include_optimizer=True)
 
 if __name__ == "__main__":
-    generate_model('test_embedcache', weights_name="evenWeight_supergeneralMetadata.csv", epochs_in=1)
+    generate_model('test', metadata_name="metadata_raw.csv", epochs_in=1)
 
 
