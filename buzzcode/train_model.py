@@ -17,7 +17,6 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     dir_training = './training'
     dir_metadata = os.path.join(dir_training, 'metadata')
     dir_audio = os.path.join(dir_training, 'audio')
-    dir_embeddings = './embeddings'
 
     # Acquiring and filtering training data
     #
@@ -55,15 +54,15 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
         weights_new['weight'] = 1
 
         weightdf = pd.concat([weightdf, weights_new])
-        classes = weightdf['classification']
 
-    weightdf.to_csv(os.path.join(dir_model, "weights.csv"))
+    weightdf = weightdf.sort_values(by='classification')
+    weightdf.to_csv(os.path.join(dir_model, "weights.csv"), index=False)
 
     dict_weight = {index: weight for index, weight in enumerate(weightdf['weight'])}
-    dict_names = {name: index for index, name in enumerate(classes)}
+    dict_names = {name: index for index, name in enumerate(weightdf['classification'])}
 
     metadata['target'] = [dict_names[c] for c in metadata['classification']]
-    metadata.to_csv(os.path.join(dir_model, "metadata.csv"))
+    metadata.to_csv(os.path.join(dir_model, "metadata.csv"), index=False)
 
     # dataset creation
     #
