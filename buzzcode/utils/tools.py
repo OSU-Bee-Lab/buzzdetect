@@ -1,6 +1,7 @@
 import os
 import re
 import argparse
+import pickle
 from datetime import datetime
 
 
@@ -61,3 +62,17 @@ def search_dir(dir_in, extensions):
                 paths.append(os.path.join(root, file))
 
     return paths
+
+
+def save_pickle(path_pickle, obj):
+    os.makedirs(os.path.dirname(path_pickle), exist_ok=True)
+
+    with open(path_pickle, 'wb') as file_pickle:
+        pickle.dump(obj, file_pickle)
+
+
+def load_pickle(path_pickle):
+    with open(path_pickle, 'rb') as file_pickle:
+        obj = pickle.load(file_pickle)
+
+    return obj
