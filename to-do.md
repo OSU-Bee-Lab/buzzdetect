@@ -30,6 +30,10 @@
 * Add progress bar/estimated time to completion (dependent on verbosity?)
 * Split analyze_data() into extract_embeddings() and analyze_embeddings()
 * Use full paths (not clipped) at verbosity 2
+* With very long output files (e.g., 50 hour file using a model with many classifications and recording all neuron activations), worker_writer seriously struggles with clearing its queue. Perhaps because of thread scheduling, its work piles up until the end of analysis, where it can take many minutes to perform all of the writes (on most recent analysis, 8 minutes to make 64 writes). This is likely because for every chunk it needs to read, append, sort, and write a csv that can be hundreds of megabytes in size. Options for more intelligent writing:
+  - Maintain an internal list of pending write operations; perform all write operations for the same file at once
+  - [my preference] Write in chunks until the end of analysis; at the end of analysis, stitch together chunks
+        - If analysis gets interrupted, re-running analysis should first check for chunked outputs and stitch them together (would need to happen before checking gaps)
 
 ## Machine Learning Design
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
