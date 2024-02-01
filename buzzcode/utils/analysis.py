@@ -4,7 +4,6 @@ import pandas as pd
 import os
 import re
 import librosa
-import pickle
 import numpy as np
 import soundfile as sf
 
@@ -167,6 +166,9 @@ def extract_embeddings(audio_data, yamnet=None, pad=False):
 def analyze_embeddings(model, classes, embeddings):
     results = []
 
+    indices_out = [classes.index(c) for c in classes]
+    scorenames = ['score_' + c for c in classes]
+
     for i, e in enumerate(embeddings):
         scores = model(e).numpy()[0]
 
@@ -177,8 +179,6 @@ def analyze_embeddings(model, classes, embeddings):
             "score_predicted": scores[scores.argmax()]
         }
 
-        indices_out = [classes.index(c) for c in classes]
-        scorenames = ['score_' + c for c in classes]
         results_frame.update({scorenames[i]: scores[i] for i in indices_out})
 
         results.append(results_frame)
@@ -186,3 +186,4 @@ def analyze_embeddings(model, classes, embeddings):
     output_df = pd.DataFrame(results)
 
     return output_df
+
