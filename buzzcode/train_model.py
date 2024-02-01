@@ -119,7 +119,9 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
                         callbacks=callback,
                         class_weight=dict_weight)
 
-    model.save(os.path.join("models", modelname), include_optimizer=True)
+    save_pickle(os.path.join(dir_model, 'history'), history)
+
+    model.save(os.path.join(dir_model), include_optimizer=True)
 
 if __name__ == "__main__":
     generate_model('test_embedcache', weights_name="evenWeight_supergeneralMetadata.csv", epochs_in=1)
