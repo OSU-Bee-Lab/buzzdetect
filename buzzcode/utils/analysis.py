@@ -23,7 +23,8 @@ def loadup(modelname):
 
     df = pd.read_csv(path_weights)
     classes = df['classification']
-    return model, list(classes)
+    classes_semantic = df['classification_semantic']
+    return model, list(classes), list(classes_semantic)
 
 
 def get_yamnet():
