@@ -10,14 +10,12 @@ import soundfile as sf
 from datetime import datetime
 from buzzcode.utils.tools import search_dir, Timer, clip_name
 
-class_bee = 'ins_buzz_bee'
-class_high = 'ins_buzz_high'
-class_low = 'ins_buzz_low'
 
-# change classes_out to none
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 
-# modelname = "revision_5_reweight1"; cpus=4; memory_allot = 3; dir_raw="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; classes_out = [class_bee, class_high, class_low]; paths_raw = None; pad=False
-def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class_high, class_low], dir_raw="./audio_in", paths_raw = None, dir_out=None, verbosity=1, pad=False):
+# modelname = "invProp_strict"; cpus=4; memory_allot = 3; dir_raw="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; paths_raw = None; pad=False; semantic = True
+def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./audio_in", paths_raw = None, dir_out=None, verbosity=1, pad=False):
     timer_total = Timer()
 
     dir_model = os.path.join("models", modelname)
@@ -72,7 +70,9 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
     if len(raws_unfinished) == 0:
         print(f"all files in {dir_raw} are fully analyzed; exiting analysis")
-        sys.exit(0)
+        return
+
+
 
     # process control
     #
@@ -87,12 +87,9 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
     for p in raws_unfinished:
         dict_rawstatus[p] = "not finished"
 
-    colnames_out = ["score_" + c for c in classes_out]
-    columns_desired = ['start', 'end', 'class_predicted', 'score_predicted'] + colnames_out
-
-    q_request = multiprocessing.Queue() # holds...what? raw paths and worker names, so each worker can add its request for work?
+    q_request = multiprocessing.Queue()
     q_analyze = [multiprocessing.Queue() for _ in analyzer_ids]
-    q_write = multiprocessing.Queue() # holds output data frames and paths for writers to work on
+    q_write = multiprocessing.Queue()
     q_log = multiprocessing.Queue()
 
     def printlog(item, item_verb=0):
@@ -153,9 +150,6 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
     def worker_analyzer(id_analyzer):
         printlog(f"analyzer {id_analyzer}: launching", 1)
-
-        tf.config.threading.set_inter_op_parallelism_threads(1)
-        tf.config.threading.set_intra_op_parallelism_threads(1)
 
         # ready model
         #
@@ -245,18 +239,18 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
     def worker_logger():
         log_item = q_log.get(block=True)
         while log_item != "terminate":
-            log = open(path_log, "a")
-            log.write(log_item)
-            log.close()
+            file_log = open(path_log, "a")
+            file_log.write(log_item)
+            file_log.close()
             log_item = q_log.get(block=True)
 
         timer_total.stop()
         closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
 
         print(closing_message)
-        log = open(path_log, "a")
-        log.write(closing_message)
-        log.close()
+        file_log = open(path_log, "a")
+        file_log.write(closing_message)
+        file_log.close()
 
     # Go!
     #
@@ -290,5 +284,5 @@ def analyze_batch(modelname, cpus, memory_allot, classes_out = [class_bee, class
 
 
 if __name__ == "__main__":
-    modelname = "revision_5_reweight1"
-    analyze_batch(modelname=modelname, cpus=4, memory_allot=4, verbosity=2)
+    modelname = "currentbest"
+    analyze_batch(modelname=modelname, cpus=6, memory_allot=8, verbosity=2, semantic=True)
