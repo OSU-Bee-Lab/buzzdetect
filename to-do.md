@@ -41,6 +41,7 @@
      - Dominant frequency of frame (could also be used in a second, within-buzz classificatio model)
      - Time of day
 * Write custom loss function that penalizes within-buzz error less
+* Try different sizes for dense layer
 
 ## Supercomputing
 ### Figure out supercomputing
