@@ -37,10 +37,10 @@
 
 ## Machine Learning Design
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
-* Add a single element to YAMNet embedding array that represents fundamental frequency? Could also be added in the second dense layer (or second model) that classifies within-buzz
-* Add time of day to model input?
+* Enhance embedding array with elements for relevant information:
+     - Dominant frequency of frame (could also be used in a second, within-buzz classificatio model)
+     - Time of day
 * Write custom loss function that penalizes within-buzz error less
-* Move away from YAMNet embeddings? 
 
 ## Supercomputing
 ### Figure out supercomputing
