@@ -12,7 +12,13 @@ from buzzcode.analyze_directory import analyze_batch
 def analyze_testFold(modelname, cpus, memory_allot, semantic, max_per_class = None):
     dir_model = os.path.join("models", modelname)
     dir_training = "./training/audio"
-    dir_out = os.path.join(dir_model, "output_testFold")
+
+    if semantic:
+        tag = '_semantic'
+    else:
+        tag = '_literal'
+
+    dir_out = os.path.join(dir_model, "output_testFold" + tag)
 
     metadata = pd.read_csv(os.path.join(dir_model, "metadata.csv"))
 
@@ -35,7 +41,7 @@ def analyze_testFold(modelname, cpus, memory_allot, semantic, max_per_class = No
 
 if __name__ == "__main__":
     cpus = 8
-    semantic = True
+    semantic = False
 
     modelprompt = input("Input model name; 'all' to validate all: ")
 
@@ -45,4 +51,4 @@ if __name__ == "__main__":
         modelnames = os.listdir('./models')
         modelnames.remove('archive')
         for modelname in modelnames:
-            analyze_testFold(modelname=modelname, cpus=cpus, memory_allot=6, verbosity=1, max_per_class=None)
+            analyze_testFold(modelname=modelname, cpus=cpus, memory_allot=6, semantic=semantic, max_per_class=200)
