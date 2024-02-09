@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorflow_hub as hub
 import pandas as pd
 import os
 import re
@@ -24,17 +23,6 @@ def loadup(modelname):
     classes = df['classification']
     classes_semantic = df['classification_semantic']
     return model, list(classes), list(classes_semantic)
-
-
-def get_embedder(embeddername):
-    if embeddername.lower() == 'yamnet':
-        os.environ["TFHUB_CACHE_DIR"]="./yamnet"
-        yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
-
-        return yamnet
-    elif embeddername.lower() == 'birdnet':
-        import buzzcode.BirdNET as bn
-        return bn.model.embeddings()
 
 
 # Functions for mapping analysis
@@ -152,19 +140,6 @@ def load_audio(path_audio, time_start=0, time_stop=None):
     audio_section = librosa.resample(y=audio_section, orig_sr=sr, target_sr=16000)  # overwrite for memory purposes
 
     return audio_section
-
-
-def extract_embeddings(audio_data, yamnet=None, pad=False):
-    if yamnet is None:
-        yamnet=get_embedder()
-    if audio_data.dtype != 'tf.float32':
-        audio_data = tf.cast(audio_data, tf.float32)
-
-    audio_data_split = tf.signal.frame(audio_data, framelength * 16, framehop * 16, pad_end=pad, pad_value=0)
-
-    embeddings = [yamnet(data)[1] for data in audio_data_split]
-
-    return embeddings
 
 
 def analyze_embeddings(model, classes, embeddings):

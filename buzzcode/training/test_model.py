@@ -5,7 +5,7 @@ tf.config.threading.set_intra_op_parallelism_threads(1)
 import pandas as pd
 import os
 import re
-from buzzcode.analyze_directory import analyze_batch
+from buzzcode.analysis.analyze_directory import analyze_batch
 
 # modelname = "invProp_stric"; cpus = 6; memory_allot = 6; max_per_class=10
 # when iterating through models, could avoid startup time by passing analyze_wav different models instead of restarting the whole analyze_testFold function

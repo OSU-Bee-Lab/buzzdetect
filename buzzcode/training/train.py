@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import re
-from buzzcode.utils.tools import save_pickle
+from buzzcode.tools import save_pickle
 
 
 # modelname = 'test'; metadata_name="metadata_raw"; weights_name=None; epochs_in=3
@@ -13,7 +13,7 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
         raise FileExistsError('a model folder with this name already exists; delete or rename the existing model folder and re-run')
     os.makedirs(dir_model, exist_ok=True)
 
-    dir_training = './training'
+    dir_training = ''
     dir_metadata = os.path.join(dir_training, 'metadata')
     dir_embeddings = os.path.join(dir_training, 'embeddings')
     dir_audio = os.path.join(dir_training, 'audio')

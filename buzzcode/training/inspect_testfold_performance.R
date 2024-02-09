@@ -1,0 +1,277 @@
+library(dplyr)
+library(parallel)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(caret)
+library(shadowtext)
+
+cpus <- 8
+dir_training = './training/audio'
+
+dir_out <- './localData/model_inspection_literal'
+dir.create(dir_out, showWarnings = F, recursive = F)
+
+inspect_model <- function(modelname, write = T){
+  print(paste0('LAUNCHING inspection of model ', modelname))
+  
+  #  filesystem prep
+  #
+    dir_model <- file.path('models', modelname)
+    dir_test <- file.path(dir_model, 'output_testFold_literal')
+    
+  # loading data
+  #
+    print('loading data')
+    metadata <- read.csv(file.path(dir_model, 'metadata.csv')) %>% 
+      mutate(
+        stub_audio = path_audio %>% 
+          str_remove(dir_training) %>% 
+          str_remove(paste0('.',tools::file_ext(.)))
+      )
+    
+    import_data <- function(path_test){
+      stub_audio = path_test %>% 
+        str_remove(dir_test) %>% 
+        str_remove('_buzzdetect\\.csv')
+      
+      snip_data <- read.csv(path_test) %>% 
+        mutate(
+          stub_audio = stub_audio
+        )
+      
+      return(snip_data)
+    }
+    
+    paths_test <- list.files(dir_test, recursive = T, full.names = T, pattern = "buzzdetect.csv")
+    data <- paths_test %>% 
+      lapply(
+        FUN = import_data
+      ) %>% 
+      bind_rows() %>% 
+      select(!c(X, start, end, score_predicted))
+    
+    data <- data %>%
+      left_join(
+        select(metadata, stub_audio, classification)
+      )
+
+    data_long <- data %>%
+      pivot_longer(
+        cols = starts_with("score_"),
+        names_to = "target_name",
+        values_to = "target_activation"
+      ) %>%
+      mutate(
+        target_name = str_remove(target_name, "score_"),
+        is_correct = target_name == classification
+      ) %>%
+      filter(!is.na(is_correct))
+
+
+    data_falseneg <- data %>%
+      filter(classification == "ins_buzz_bee", class_predicted != "ins_buzz_bee") %>%
+      mutate(
+        across(
+          starts_with("score_"),
+          ~ .x - score_ins_buzz_bee
+        )
+      ) %>%
+      select(!c(stub_audio)) %>%
+      pivot_longer(
+        cols = starts_with("score_"),
+        names_to = "target_name",
+        values_to = "target_activation"
+      )
+    print('done loading data')
+
+  # Plotting
+  #
+    print('starting plotting')
+    plots <- list()
+# 
+#     plots$given_bee <- ggplot(
+#       data = data_long %>%
+#         filter(classification == "ins_buzz_bee"),
+#       aes(
+#         x = target_name,
+#         y = target_activation,
+#         fill = is_correct
+#       )
+#     ) +
+#       geom_violin(draw_quantiles = 0.50) +
+#       ylab('neuron activation') +
+#       xlab('target neuron') +
+#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
+#       ggtitle("neuron activations when given honey bee buzzes")
+# 
+#     plots$compare_correct <- ggplot(
+#       data = data_long,
+#       aes(
+#         x = target_name,
+#         y = target_activation,
+#         fill = is_correct
+#       )
+#     ) +
+#       xlab('target neuron') +
+#       ylab('neuron activation') +
+#       geom_violin(draw_quantiles = 0.50) +
+#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
+#       ggtitle("neuron activations of targets when target is correct or incorrect")
+# 
+#     plots$bee_activation <- ggplot(
+#       data = data_long %>%
+#         filter(target_name == "ins_buzz_bee"),
+#       aes(
+#         x = classification,
+#         y = target_activation,
+#         fill = is_correct
+#       )
+#     ) +
+#       geom_violin(draw_quantiles = 0.50) +
+#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
+#       ylab('honey bee activation') +
+#       xlab('given classification') +
+#       ggtitle("activation of *honey bee neuron* across classifications")
+# 
+#     plots$false_negative <- ggplot(
+#         data = data_falseneg,
+#         aes(
+#           x = target_name,
+#           y = target_activation
+#         )
+#       ) +
+#       geom_violin(draw_quantiles = 0.50) +
+#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
+#       ylab('target_activation') +
+#       xlab('target neuron') +
+#       ggtitle("*relative* neuron activations on false bee negative")
+# 
+#   # Saving plots
+#   #
+#     if(write) {
+#       print('saving plots')
+#       for(p in names(plots)){
+#         ggsave(
+#           filename = file.path(dir_out, paste0('PLOT_',p, '_MODEL_', modelname,'.svg')),
+#           plot = plots[[p]],
+#           width = 8,
+#           height = 5
+#         )
+#       }
+# 
+#       print('done saving plots')
+#     }
+
+
+  # Confusion
+  #
+    print('starting confusion')
+    levels(metadata$classification) <- metadata$classification %>% unique() %>% sort()
+
+    confusion <- caret::confusionMatrix(
+      data = factor(data$class_predicted, levels = levels(metadata$classification)),
+      reference = factor(data$classification, levels = levels(metadata$classification))
+    )
+    
+    confusion_table <- confusion$table %>% 
+      as.data.frame() %>% 
+      rename('actual' = Reference, 'predicted' = 'Prediction', 'frequency' = Freq) %>% 
+      group_by(actual) %>% 
+      reframe(
+        predicted = predicted,
+        proportion = frequency/sum(frequency)
+      ) %>% 
+      mutate(
+        correct = predicted==actual
+      )
+    
+    levels(confusion_table$actual) <- sort(levels(confusion_table$actual))
+    levels(confusion_table$predicted) <- levels(confusion_table$actual)
+    
+    print('plotting confusion')
+    plot_confusion <- ggplot(
+      confusion_table %>% 
+        mutate(is_zero = proportion < 0.01),
+      aes(
+        x = actual,
+        y = predicted,
+        fill = proportion,
+        label = round(proportion, 2) %>% 
+          format(nsmall=2)
+      )
+    ) +
+      geom_tile(color = "#0d0429", linewidth = 1.3) +
+      geom_text(aes(color = is_zero)) +
+      scale_x_discrete(position = 'top') +
+      scale_y_discrete(limits=rev) +
+      scale_color_manual(values = c('TRUE' = '#0d0429', 'FALSE' = 'white'), guide = 'none') +
+      scale_fill_gradientn(colors=c('#0d0429', '#cf325f', '#f8ae5e'), guide = 'none') +
+      theme(
+        panel.background = element_rect(fill="#0d0429"),
+        plot.background = element_rect(fill="#0d0429"),
+        text = element_text(color = 'white'),
+        axis.text.x = element_text(angle = -45),
+        axis.text = element_text(color = 'white') 
+      ) +
+      ggtitle(paste0('confusion table for ', modelname)) +
+      geom_tile(
+        data = expand.grid(foo = c('ins_buzz_bee', 'ins_buzz_high', 'ins_buzz_low'), bar = c('ins_buzz_bee', 'ins_buzz_high', 'ins_buzz_low'), proportion = 1),
+        mapping = aes(x = bar, y = foo),
+        fill = "#00000000",
+        linewidth = 1.3,
+        color = "#212121"
+      ) +
+      # true buzz highlight
+      geom_tile(
+        aes(x = 'ins_buzz_bee', y = 'ins_buzz_bee'),
+        fill = "#00000000",
+        linewidth = 1.3,
+        color = "darkgray"
+      )
+
+    
+    if(write){
+      print('saving confusion')
+      write.csv(confusion_table, file.path(dir_out, paste0('confusion_', modelname, '.csv')))
+      
+      ggsave(
+        filename = file.path(dir_out, paste0('PLOT_confusion_MODEL_', modelname,'.svg')),
+        plot = plot_confusion,
+        width = 12,
+        height = 9
+      )
+    }
+  
+  print(paste0('done inspecting ', modelname))
+  return(list('plots' = plots, 'confusion' = confusion_table))
+}
+
+modelnames <- list.files('./models') %>% 
+  .[!.%in%c('archive', 'inspection')]
+
+full <- lapply(
+  modelnames,
+  inspect_model,
+  write = T
+)
+
+names(full) <- modelnames
+
+confusions <- lapply(
+  modelnames,
+  function(m){
+    full[[m]][[2]] %>% 
+      as.data.frame() %>% 
+      mutate(
+        model = m
+      )
+  }
+) %>% 
+  bind_rows() %>% 
+  mutate(
+    weight = str_extract(model, '(.*)Weight_', group =1),
+    metadata = str_extract(model, '_(.*)Meta', group = 1)
+  )
+
+write.csv(confusions, file.path(dir_out, 'confusion_all.csv'), row.names = F)

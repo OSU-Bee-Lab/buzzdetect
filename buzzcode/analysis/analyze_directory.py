@@ -1,4 +1,6 @@
-from buzzcode.utils.analysis import framelength, solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, get_embedder, load_audio, extract_embeddings, analyze_embeddings
+from buzzcode.analysis import framelength, solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, \
+    load_audio, analyze_embeddings
+from buzzcode.analysis.embeddings import get_embedder, extract_embeddings
 import tensorflow as tf
 import pandas as pd
 import os
@@ -8,7 +10,7 @@ import librosa
 import multiprocessing
 import soundfile as sf
 from datetime import datetime
-from buzzcode.utils.tools import search_dir, Timer, clip_name
+from buzzcode.tools import search_dir, Timer, clip_name
 
 
 tf.config.threading.set_inter_op_parallelism_threads(1)
