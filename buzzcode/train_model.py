@@ -3,12 +3,10 @@ import pandas as pd
 import numpy as np
 import os
 import re
-from buzzcode.utils.analysis import get_yamnet, load_audio_tf
 from buzzcode.utils.tools import save_pickle
 
-yamnet = get_yamnet()
 
-
+# modelname = 'test'; metadata_name="metadata_raw"; weights_name=None; epochs_in=3
 def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, epochs_in=100):
     dir_model = os.path.join("./models/", modelname)
     if os.path.exists(dir_model) and modelname != 'test':
@@ -17,6 +15,7 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
 
     dir_training = './training'
     dir_metadata = os.path.join(dir_training, 'metadata')
+    dir_embeddings = os.path.join(dir_training, 'embeddings')
     dir_audio = os.path.join(dir_training, 'audio')
 
     # Acquiring and filtering training data
@@ -63,23 +62,44 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     dict_names = {name: index for index, name in enumerate(weightdf['classification'])}
 
     metadata['target'] = [dict_names[c] for c in metadata['classification']]
+
+    metadata['path_embeddings'] = [re.sub(dir_audio, dir_embeddings, path) for path in metadata['path_audio']]
+    metadata['path_embeddings'] = [os.path.splitext(emb)[0] + '.npy' for emb in metadata['path_embeddings']]
+
+    metadata = metadata[[os.path.exists(e) for e in metadata['path_embeddings']]]
+
     metadata.to_csv(os.path.join(dir_model, "metadata.csv"), index=False)
 
     # dataset creation
     #
-    dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_audio'], metadata['target'], metadata['fold']))
+    # dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_audio'], metadata['target'], metadata['fold']))
 
-    # I desparately want to allow caching of embeddings, but I can't read from paths stored in tensors
-    def prep_ds(path_audio, label, fold):
-        audio_data = load_audio_tf(path_audio)
-        scores, embeddings, spectrogram = yamnet(audio_data)
 
-        num_embeddings = tf.shape(embeddings)[0]
-        return (embeddings,
-                tf.repeat(label, num_embeddings),
-                tf.repeat(fold, num_embeddings))
 
-    dataset_full = dataset_full.map(prep_ds).unbatch()
+    dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_embeddings'], metadata['target'], metadata['fold']))
+
+
+    def load_embed(path_embeddings, target, fold):
+        embed_array = tf.numpy_function(
+            func=lambda y: np.array(np.load(y.decode("utf-8"), allow_pickle=True)),
+            inp=[path_embeddings],
+            Tout=tf.float32,
+        )
+
+        embeddings = tf.convert_to_tensor(embed_array)
+        n_embeddings = tf.shape(embeddings)[0]
+
+        return embeddings, tf.repeat(target, n_embeddings), tf.repeat(fold, n_embeddings)
+
+    dataset_full = dataset_full.map(lambda paths, labels, folds: load_embed(paths, labels, folds)).unbatch()
+
+    def set_shape(embeddings, target, fold):
+        embeddings.set_shape(1024)
+
+        return embeddings, target, fold
+
+
+    dataset_full = dataset_full.map(lambda embeddings, labels, folds: set_shape(embeddings, labels, folds))
 
     # Split the data
     #
