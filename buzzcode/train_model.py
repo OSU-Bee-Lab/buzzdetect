@@ -11,9 +11,9 @@ yamnet = get_yamnet()
 
 def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, epochs_in=100):
     dir_model = os.path.join("./models/", modelname)
-    if os.path.exists(dir_model):
+    if os.path.exists(dir_model) and modelname != 'test':
         raise FileExistsError('a model folder with this name already exists; delete or rename the existing model folder and re-run')
-    os.makedirs(dir_model)
+    os.makedirs(dir_model, exist_ok=True)
 
     dir_training = './training'
     dir_metadata = os.path.join(dir_training, 'metadata')
