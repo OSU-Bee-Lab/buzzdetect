@@ -1,4 +1,4 @@
-from buzzcode.utils.analysis import framelength, solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, get_yamnet, load_audio, extract_embeddings, analyze_embeddings
+from buzzcode.utils.analysis import framelength, solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, get_embedder, load_audio, extract_embeddings, analyze_embeddings
 import tensorflow as tf
 import pandas as pd
 import os
@@ -153,7 +153,7 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
 
         # ready model
         #
-        yamnet = get_yamnet()
+        yamnet = get_embedder('yamnet')
         model, classes, classes_semantic = loadup(modelname)
 
         if semantic:
@@ -284,5 +284,5 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
 
 
 if __name__ == "__main__":
-    modelname = "currentbest"
+    modelname = "abrc"
     analyze_batch(modelname=modelname, cpus=6, memory_allot=8, verbosity=2, semantic=True)

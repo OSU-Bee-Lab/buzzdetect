@@ -26,11 +26,15 @@ def loadup(modelname):
     return model, list(classes), list(classes_semantic)
 
 
-def get_yamnet():
-    os.environ["TFHUB_CACHE_DIR"]="./yamnet"
-    yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
+def get_embedder(embeddername):
+    if embeddername.lower() == 'yamnet':
+        os.environ["TFHUB_CACHE_DIR"]="./yamnet"
+        yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
 
-    return yamnet
+        return yamnet
+    elif embeddername.lower() == 'birdnet':
+        import buzzcode.BirdNET as bn
+        return bn.model.embeddings()
 
 
 # Functions for mapping analysis
@@ -152,7 +156,7 @@ def load_audio(path_audio, time_start=0, time_stop=None):
 
 def extract_embeddings(audio_data, yamnet=None, pad=False):
     if yamnet is None:
-        yamnet=get_yamnet()
+        yamnet=get_embedder()
     if audio_data.dtype != 'tf.float32':
         audio_data = tf.cast(audio_data, tf.float32)
 
