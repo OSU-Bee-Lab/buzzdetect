@@ -1,7 +1,6 @@
-import os
-
-import tensorflow as tf
 import tensorflow_hub as hub
+import numpy as np
+import os
 
 
 def get_embedder(embeddername):
@@ -10,7 +9,9 @@ def get_embedder(embeddername):
         yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
 
         def embedder(data):
-            return yamnet(data)[1]
+            embeddings = yamnet(data)[1]  # element 1 is embeddings
+            embeddings = np.array(embeddings)[0, ]  # numpy converts to (1024,1) by default
+            return embeddings
 
         framelength = 0.96
         samplerate = 16000
@@ -18,23 +19,16 @@ def get_embedder(embeddername):
     elif embeddername.lower() == 'birdnet':
         import buzzcode.BirdNET as bn
 
-        embedder= bn.model.embeddings()
+        embedder = bn.model.embeddings()
         framelength = 3
         samplerate = 48000
     else:
         print('ERROR: invalid embedder name')
+        return
 
     return embedder, framelength, samplerate
 
 
-def extract_embeddings(audio_data, embedder, pad=False):
-    embedder, framelength, samplerate = get_embedder()
-
-    if audio_data.dtype != 'tf.float32':
-        audio_data = tf.cast(audio_data, tf.float32)
-
-    audio_data_split = tf.signal.frame(audio_data, framelength * 16, framehop * 16, pad_end=pad, pad_value=0)
-
-    embeddings = [embedder(data)[1] for data in audio_data_split]
-
+def extract_embeddings(frame_data, embedder):
+    embeddings = embedder(frame_data)
     return embeddings

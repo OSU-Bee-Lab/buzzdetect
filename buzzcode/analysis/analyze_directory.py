@@ -1,6 +1,4 @@
-from buzzcode.analysis import framelength, solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, \
-    load_audio, analyze_embeddings
-from buzzcode.analysis.embeddings import get_embedder, extract_embeddings
+from buzzcode.preprocessing.embeddings import get_embedder, extract_embeddings
 import tensorflow as tf
 import pandas as pd
 import os
@@ -155,7 +153,7 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
 
         # ready model
         #
-        yamnet = get_embedder('yamnet')
+        embedder, framelength, samplerate = get_embedder('yamnet')
         model, classes, classes_semantic = loadup(modelname)
 
         if semantic:
@@ -181,7 +179,7 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
 
             printlog(f"analyzer {id_analyzer}: analyzing {path_clip} from {round(time_from, 1)}s to {round(time_to, 1)}s", 1)
             audio_data = load_audio(path_raw, time_from, time_to)
-            embeddings = extract_embeddings(audio_data, yamnet)
+            embeddings = extract_embeddings(audio_data, embedder)
             results = analyze_embeddings(model=model, classes=classes, embeddings=embeddings)
 
             results['start'] = results['start'] + time_from

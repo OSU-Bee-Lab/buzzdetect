@@ -2,12 +2,7 @@ import tensorflow as tf
 import pandas as pd
 import os
 import re
-import librosa
 import numpy as np
-import soundfile as sf
-
-framelength = 960
-framehop = 480
 
 
 # Functions for handling models
@@ -22,13 +17,13 @@ def loadup(modelname):
     df = pd.read_csv(path_weights)
     classes = df['classification']
     classes_semantic = df['classification_semantic']
-    return model, list(classes), list(classes_semantic)
+    return model, list(classes), list(classes_semantic), input_size
 
 
 # Functions for mapping analysis
 #
 
-def solve_memory(memory_allot, cpus):
+def solve_memory(memory_allot, cpus, framelength):
     memory_tf = 0.350  # memory (in GB) required for single tensorflow process
     memorydensity_audio = 3600 / 2.4  # seconds per gigabyte of decoded audio (estimate)
 
@@ -38,7 +33,7 @@ def solve_memory(memory_allot, cpus):
 
     chunklength = memory_perchunk * memorydensity_audio
 
-    if chunklength<(framelength/1000):
+    if chunklength < framelength:
         raise ValueError("memory_allot and cpu combination results in illegally small frames")  # illegally smol
 
     return chunklength, n_analyzers
@@ -111,49 +106,20 @@ def get_coverage(path_raw, dir_raw, dir_out):
 # Functions for handling audio
 #
 
-# could be deprecated if I find a way to read filepaths from tensors or rewrite training
-def load_audio_tf(path_audio):
-    """ Load a WAV file, convert it to a float tensor """
-    file_contents = tf.io.read_file(path_audio)
-    data, sample_rate = tf.audio.decode_wav(
-        file_contents,
-        desired_channels=1)
-    data = tf.squeeze(data, axis=-1)
-    return data
-
-
-def load_audio(path_audio, time_start=0, time_stop=None):
-    track = sf.SoundFile(path_audio)
-
-    can_seek = track.seekable() # True
-    if not can_seek:
-        raise ValueError("Input file not compatible with seeking")
-
-    if time_stop is None:
-        time_stop = librosa.get_duration(path=path_audio)
-
-    sr = track.samplerate
-    start_frame = round(sr * time_start)
-    frames_to_read = round(sr * (time_stop - time_start))
-    track.seek(start_frame)
-    audio_section = track.read(frames_to_read)
-    audio_section = librosa.resample(y=audio_section, orig_sr=sr, target_sr=16000)  # overwrite for memory purposes
-
-    return audio_section
-
-
-def analyze_embeddings(model, classes, embeddings):
+def analyze_input(model, classes, framelength, input):
     results = []
+
+    framehop = framelength/2
 
     indices_out = [classes.index(c) for c in classes]
     scorenames = ['score_' + c for c in classes]
 
-    for i, e in enumerate(embeddings):
+    for i, e in enumerate(input):
         scores = model(e).numpy()[0]
 
         results_frame = {
-            "start": (i * framehop) / 1000,
-            "end": ((i * framehop) + framelength) / 1000,
+            "start": i * framehop,
+            "end": ((i * framehop) + framelength),
             "class_predicted": classes[scores.argmax()],
             "score_predicted": scores[scores.argmax()]
         }

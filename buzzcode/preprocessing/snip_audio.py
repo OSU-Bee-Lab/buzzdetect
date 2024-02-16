@@ -8,8 +8,7 @@ import pandas as pd
 import soundfile as sf
 
 
-#  sniplist = [('./localData/a.wav', './localData/a_1.wav', 0 , 1), ('./localData/a.wav', './localData/a_2.wav', 2 , 3)]
-def snip_audio(sniplist, cpus, conflict_out='skip', samplerate = 16000):
+def snip_audio(sniplist, cpus, conflict_out='skip'):
     """ takes sniplist as list of tuples (path_raw, path_snip, start, end) and cuts those snips out of larger raw
     audio files."""
     raws = list(set([t[0] for t in sniplist]))
@@ -48,7 +47,7 @@ def snip_audio(sniplist, cpus, conflict_out='skip', samplerate = 16000):
             sniplist_assigned = control_dict[raw_assigned]
 
             track = sf.SoundFile(raw_assigned)
-            samplerate_file = track.samplerate
+            samplerate_native = track.samplerate
 
             # snip loop
             #
@@ -57,14 +56,13 @@ def snip_audio(sniplist, cpus, conflict_out='skip', samplerate = 16000):
                     continue
 
                 # print(f'snipper {worker_id}: snipping {path_snip}')
-                start_frame = round(samplerate_file * start)
-                frames_to_read = round(samplerate_file * (end - start))
+                start_frame = round(samplerate_native * start)
+                frames_to_read = round(samplerate_native * (end - start))
                 track.seek(start_frame)
 
                 audio_data = track.read(frames_to_read)
-                audio_data = librosa.resample(y=audio_data, orig_sr=samplerate_file, target_sr=samplerate)
 
-                sf.write(path_snip, audio_data, samplerate)
+                sf.write(path_snip, audio_data, samplerate_native)
 
     process_list = [multiprocessing.Process(target=worker_snipper, args=[c]) for c in range(cpus)]
     for p in process_list:
@@ -101,8 +99,7 @@ def snip_training(path_annotations, dir_training, dir_raw, cpus, conflict_out='s
     snip_audio(
         sniplist=sniplist,
         cpus=cpus,
-        conflict_out='skip',
-        samplerate=16000
+        conflict_out='skip'
     )
 
 

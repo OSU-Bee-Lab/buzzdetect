@@ -10,17 +10,18 @@ from buzzcode.tools import save_pickle
 def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, epochs_in=100):
     dir_model = os.path.join("./models/", modelname)
     if os.path.exists(dir_model) and modelname != 'test':
-        raise FileExistsError('a model folder with this name already exists; delete or rename the existing model folder and re-run')
+        raise FileExistsError(
+            'a model folder with this name already exists; delete or rename the existing model folder and re-run')
     os.makedirs(dir_model, exist_ok=True)
 
-    dir_training = ''
+    dir_training = './training'
     dir_metadata = os.path.join(dir_training, 'metadata')
     dir_embeddings = os.path.join(dir_training, 'embeddings')
     dir_audio = os.path.join(dir_training, 'audio')
 
     # Acquiring and filtering training data
     #
-    if not bool(re.search('\\.csv$',metadata_name)):
+    if not bool(re.search('\\.csv$', metadata_name)):
         metadata_name = metadata_name + '.csv'
     metadata = pd.read_csv(os.path.join(dir_metadata, metadata_name))
 
@@ -74,10 +75,8 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     #
     # dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_audio'], metadata['target'], metadata['fold']))
 
-
-
-    dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_embeddings'], metadata['target'], metadata['fold']))
-
+    dataset_full = tf.data.Dataset.from_tensor_slices(
+        (metadata['path_embeddings'], metadata['target'], metadata['fold']))
 
     def load_embed(path_embeddings, target, fold):
         embed_array = tf.numpy_function(
@@ -98,7 +97,6 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
 
         return embeddings, target, fold
 
-
     dataset_full = dataset_full.map(lambda embeddings, labels, folds: set_shape(embeddings, labels, folds))
 
     # Split the data
@@ -118,14 +116,63 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     # Model creation
     #
 
+    # where columns are true, rows are predicted in the order of (notBuzz, buzz)
+    # remember, rows are indexed first. So indexing goes [predicted][true]
+    penalties = np.array(
+        (  # n  b  <- ACTUAL
+            (1, 2),  # n  PREDICTED
+            (5, 1)  # b     V
+        )
+    )
+
+    classes_isbuzz = [int(bool(re.search('buzz', c))) for c in classes]
+
+    # problem: putting tensors into custom loss function. Ugh!
+
+    # targets_true = tf.constant(np.random.randint(0, len(classes), 32))
+    # logits_pred = tf.constant([np.random.random(size=len(classes)) for i in targets_true], dtype=tf.float32)  # p.sure the activations are in float32
+
+    @tf.py_function(Tout=tf.float32)
+    def custom_loss(targets_true, logits_pred):
+        loss = tf.keras.losses.sparse_categorical_crossentropy(targets_true, logits_pred, from_logits=True)
+        loss_penalized = np.array([0 for _ in range(tf.size(loss).numpy())])
+
+        # iterate over batch
+        for i in range(len(targets_true)):
+            target_true = targets_true[i].numpy()  # do I need .numpy()?
+            isbuzz_true = classes_isbuzz[target_true]
+
+            target_predicted = tf.math.argmax(logits_pred[i]).numpy()
+            isbuzz_predicted = classes_isbuzz[target_predicted]
+
+            penalty = penalties[isbuzz_predicted][isbuzz_true]
+
+            loss_penalized[i] = loss[i].numpy() * penalty
+
+        return tf.constant(loss_penalized, dtype=tf.float32)
+
+    @tf.py_function(Tout=tf.float32)
+    def penalizer(inputs):
+        loss=tf.cast(inputs[0], dtype=tf.float32)
+        mult=tf.cast(inputs[1], dtype=tf.float32)
+        loss_penalized = loss*mult
+        return loss_penalized
+
+    @tf.function
+    def custom_loss2(targets_true, logits_pred):
+        loss = tf.keras.losses.sparse_categorical_crossentropy(targets_true, logits_pred, from_logits=True)
+        loss_penalized = penalizer(
+            (loss, np.random.random(size=tf.size(loss).numpy()))
+        )
+        return loss
+
     model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=(1024), dtype=tf.float32,
-                              name='input_embedding'),
+        tf.keras.layers.Input(shape=1024, dtype=tf.float32, name='input_embedding'),
         tf.keras.layers.Dense(512, activation='relu'),
         tf.keras.layers.Dense(len(classes))
     ], name=modelname)
 
-    model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+    model.compile(loss=custom_loss_np,
                   optimizer="adam",
                   metrics=['accuracy'])
 
@@ -143,7 +190,6 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
 
     model.save(os.path.join(dir_model), include_optimizer=True)
 
+
 if __name__ == "__main__":
     generate_model('test', metadata_name="metadata_raw.csv", epochs_in=1)
-
-
