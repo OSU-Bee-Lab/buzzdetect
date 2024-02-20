@@ -6,7 +6,7 @@ buzzdetect is a machine learning based python tool for automated biacoustic surv
 ### Performance
 The accuracy of buzzdetect varies between models. Our current best model has a true positive rate for honey bees of ~87% within the test set of the training data, but we are still addressing issues with false-positives when the model encounters sounds outside of its training set.
 
-The speed of buzzdetect varies between models and the machine running the computation. Per-process performance is roughly 20x–40x realtime. A standard laptop with a solid state hard drive processing on 8 logical CPUs will probably process an hour of audio in about 15 seconds.
+The speed of buzzdetect varies between models and the machine running the computation. Per-process performance is roughly 20x–40x realtime. An average laptop with a solid state hard drive processing on 8 logical CPUs will probably process an hour of audio in about 15 seconds.
 
 ### Models
 The models that buzzdetect applies to data are still rapidly evolving. We will publicly host a selection of models that we believe to be production-ready, as well as performance metrics to aid in the interpretation of their results.
