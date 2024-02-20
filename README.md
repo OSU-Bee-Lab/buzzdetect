@@ -1,63 +1,38 @@
-# BuzzDetect
+# buzzdetect
 
-## Getting set up on OSC
-1. Log in to OSC
+## Introduction
+buzzdetect is a machine learning based python tool for automated biacoustic surveys of honey bees. buzzdetect is capable of processing arbitrarily large audio files of virtually any type and producing second-by-second annotations of the sounds identified in the files. It outputs results as CSV files for easy transfer into other data processing software.
 
-    i. Visit www.osc.edu, click the "Access OSC" dropdown in the top right, and click System Gateway
-    <img src="/documentation/OSC_login.png" width="600">
-   
-   ii. Log in with your username and password
+### Performance
+The accuracy of buzzdetect varies between models. Our current best model has a true positive rate for honey bees of ~87% within the test set of the training data, but we are still addressing issues with false-positives when the model encounters sounds outside of its training set.
 
-2. Navigate to the project directory
+The speed of buzzdetect varies between models and the machine running the computation. Per-process performance is roughly 20x–40x realtime. A standard laptop with a solid state hard drive processing on 8 logical CPUs will probably process an hour of audio in about 15 seconds.
 
-   i. Click the "Files" dropdown in the top left
+### Models
+The models that buzzdetect applies to data are still rapidly evolving. We will publicly host a selection of models that we believe to be production-ready, as well as performance metrics to aid in the interpretation of their results.
 
-   ii. Click "/fs/ess/PAS1063"
-   
-   You are now in the "project directory" for the Bee Lab. Files made here will, by default, be accessible to anyone else on this project. This differs from your home directory, which has a path of /fs/users/PAS1063/[your username]. Note: if you were first granted access to the supercomputer on another project, your home directory won't have PAS1063, but the ID of the first project you were granted access to.
-   
-   ii. Navigate to /fs/ess/PAS1063/buzzdetect
-   
-   iii. Within the buzzdetect folder, click “open in terminal”
+### Transfer learning
+buzzdetect is based on the machine learning strategy of transfer learning. In brief, this means we do not feed our bespoke models audio data directly, but instead preprocess the data using an existing audio classification model. This allows us to create a highly performant model on a relatively small dataset. The first model extracts relevant features from the audio data and represents them in a lower-dimensional space called the "embedding space." Our models are trained on those smaller and more information-dense embeddings.
 
-4. Activate the conda environment
-    - The conda environment is a location where all packages for the buzzdetect tool are pre-configured
-    - If there is a directory within buzzdetect/ called "environment", the conda environment has already been set up. Load the environment by typing `conda activate buzzdetect-py39`
-        - If you get the error `CommandNotFoundError: Your shell has not been properly configured to use 'conda activate'.`, run `conda init bash` and then rerun the `activate` command
-    - If there is no "environment" directory, see [the time first setup documentation](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_firstTimeSetup.md), then return to this step.
+Currently, we are training our models on embeddings from the Google Tensorflow model [YAMNet](https://github.com/tensorflow/models/blob/master/research/audioset/yamnet/yamnet.py).
   
 
-## Getting set up locally
-1. Ensure all your files are up-to-date with the GitHub repo
-2. Install python and conda on your device [need more detail!]
-3. Go through the [time first setup process](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_firstTimeSetup.md)
-4. You're ready to go! Load or train a model and get detecting.
+## Quick Start Guide
+### First time steup
+1. Install the environment manager [Conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html)
+2. Clone the buzzdetect files from this github repo to the directory where you want to store buzzdetect. We'll refer to this directory as the "project directory."
+3. Open a terminal in the project directory
+4. Run the command: `conda env create -f environment.yml -p ./environment`
+  - the -p argument is the path where the conda environment will be created. The above command creates the environment as a subdirectory of the project directory, but you can choose to install it elsewhere.
+5. Conda will create the environment and install all required packages
 
-## To analyze audio
-What follows is a basic workflow for the buzzdetect tool. If you want refined control over the analysis, see the [command line documentation](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_CLI.md).
-1. Place the files you wish to analyze in ./buzzdetect/audio_in
-       - At the time of writing, files need to be WAV files with 16 bit depth and cannot be hours long (exact filesize limit unknown)
-       - At the time of writing, buzzdetect's preprocessing function is not functioning
-2. Have a trained model ready in the ./buzzdetect/models/ directory
-    - See the section "To train a model" below
-4. Open a terminal in the project root directory (./buzzdetect/) and activate the conda environemnt with `conda activate ./environment`
-5. Analyze the audio files with the following command: `python buzzdetect.py analyze --modelname [your model's name here]`
+You are now ready to run your first analysis!
+
+### Analyzing audio
+1. buzzdetect looks for audio files to analyze in the `./audio` subdirectory. Place the audio you want to analyze in this directory.
+       - Audio files can be of any format that [the soundfile package](https://python-soundfile.readthedocs.io) supports; see supported types [here](http://www.mega-nerd.com/libsndfile/#Features).
+       - Audio files do not need to be in the root level of the `./audio` subdirectory. You can have them stored in any structure you like. buzzdetect will clone the input directory structure to the output folder. For example, the results of the audio file `./audio_in/visitation_experiment/block 1/recorder4.wav` would be written to `./models/[model used in analysis]/output/visitation_experiment/block 1/recorder4_buzzdetect.csv`
+2. Open a terminal in the project directory and activate the conda environment by running the command `conda activate ./environment`
+5. Analyze the audio files with the following command: `python buzzdetect.py analyze --modelname [model to use] --cpus [number of cpus]`
     - See the comprehensive command-line documentation [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_CLI.md) for additional configuration options.
-6. The analysis will be output as .txt files in the directory ./buzzdetect/output
-    - Note: running the analysis multiple times will append (not overwrite) the new information to the old file; this may cause problems
-
-## To train a model
-New models can be trained with the command `python buzzdetect.py train --modelname [your model name here] --trainingset [your training set here]`
-"Training set" refers to a metadata CSV, stored in ./buzzdetect/training/ with the name of "metadata_[setname].csv". The trainingset option looks for a metadata CSV with a matching name, subsets the training data (in the ./buzzdetect/training/audio directory) for matching audio files, and trains a model on them.
-
-The model is output as a folder to ./buzzdetect/models. The folder is then read by the analyze function of buzzdetect.py for analysis.
-
-## Uploading files with FileZilla
-Files can be uploaded with drag-and-drop, or with the “Upload” button, however, when you need to upload a lot of data (many files or few, large files), FileZilla makes things easier.
-
-1. Download/install at https://filezilla-project.org/download.php
-2. Click the “Site Manager” button in the top left:
-
-    <img src="/documentation/filezilla_sitemanager.png" width="400">
-3. The lefthand file selector is for files on your computer; the righthand file selector contains files on the server
-4. Navigate to /fs/ess/PAS1063/buzzdetect on the righthand pane and drag the files you want to move from your computer
+6. The results will be output as .csv files in the 'output' subdirectory of the model's directory.
