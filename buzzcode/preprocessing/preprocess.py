@@ -1,14 +1,14 @@
-import os
 from buzzcode.tools import search_dir
-from buzzcode.preprocessing.audio import load_audio, frame_audio, extract_frequencies
+from buzzcode.audio import load_audio, frame_audio
 from buzzcode.preprocessing.embeddings import get_embedder, extract_embeddings
-from buzzcode.preprocessing.audio import extract_frequencies
+from buzzcode.audio import extract_frequencies
 import soundfile as sf
 import tensorflow as tf
 import numpy as np
 import multiprocessing
 import librosa
 import re
+import os
 
 
 def extract_input(frame_samples, embedder, sr_native, sr_embedder):
@@ -19,19 +19,20 @@ def extract_input(frame_samples, embedder, sr_native, sr_embedder):
     frame_resample = librosa.resample(frame_samples, orig_sr=sr_native, target_sr=sr_embedder)
     embeddings = extract_embeddings(frame_resample, embedder)
 
-    data_in = np.concatenate((embeddings, frequencies_beeband, frequency_global))
+    inputs = np.concatenate((embeddings, frequencies_beeband, frequency_global))
 
-    return data_in
+    return inputs
 
 
 # cpus=2; dir_in = './training/audio'; dir_out = None; conflict='overwrite'; worker_id=0; embeddername='yamnet'
+# WARNING: cannot handle files larger than memory
 def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=None):
     paths_in = search_dir(dir_in, list(sf.available_formats()))
     if len(paths_in) == 0:
         quit("no compatible audio files found in input directory")
 
     if dir_out is None:
-        dir_out = os.path.join(dir_in, 'input_cache')
+        dir_out = os.path.join(os.path.dirname(dir_in), 'input_cache')
 
     paths_out = [re.sub(dir_in, dir_out, path_in) for path_in in paths_in]
     paths_out = [os.path.splitext(path)[0] + '.npy' for path in paths_out]  # change
@@ -60,7 +61,10 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
         print(f"cacher {worker_id}: launching")
         tf.config.threading.set_inter_op_parallelism_threads(1)
         tf.config.threading.set_intra_op_parallelism_threads(1)
-        embedder, framelength, sr_embedder = get_embedder(embeddername)
+        embedder, config = get_embedder(embeddername)
+
+        framelength = config['framelength']
+        sr_embedder = config['samplerate']
 
         assignment = q_assignments.get()
         path_in = assignment[0]
@@ -79,7 +83,7 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
                 continue
 
             frames = frame_audio(audio_data, framelength, sr_native)
-            inputs = [extract_input(f, embedder, sr_native, sr_embedder) for f in frames]
+            inputs = np.array([extract_input(f, embedder, sr_native, sr_embedder) for f in frames], dtype=np.float32)
 
             np.save(path_out, inputs)
 

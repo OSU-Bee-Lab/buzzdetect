@@ -9,7 +9,7 @@ library(shadowtext)
 cpus <- 8
 dir_training = './training/audio'
 
-dir_out <- './localData/model_inspection_literal'
+dir_out <- './localData/model_inspection'
 dir.create(dir_out, showWarnings = F, recursive = F)
 
 inspect_model <- function(modelname, write = T){
@@ -18,7 +18,7 @@ inspect_model <- function(modelname, write = T){
   #  filesystem prep
   #
     dir_model <- file.path('models', modelname)
-    dir_test <- file.path(dir_model, 'output_testFold_literal')
+    dir_test <- file.path(dir_model, 'output_testFold')
     
   # loading data
   #
@@ -85,85 +85,7 @@ inspect_model <- function(modelname, write = T){
       )
     print('done loading data')
 
-  # Plotting
-  #
-    print('starting plotting')
-    plots <- list()
-# 
-#     plots$given_bee <- ggplot(
-#       data = data_long %>%
-#         filter(classification == "ins_buzz_bee"),
-#       aes(
-#         x = target_name,
-#         y = target_activation,
-#         fill = is_correct
-#       )
-#     ) +
-#       geom_violin(draw_quantiles = 0.50) +
-#       ylab('neuron activation') +
-#       xlab('target neuron') +
-#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
-#       ggtitle("neuron activations when given honey bee buzzes")
-# 
-#     plots$compare_correct <- ggplot(
-#       data = data_long,
-#       aes(
-#         x = target_name,
-#         y = target_activation,
-#         fill = is_correct
-#       )
-#     ) +
-#       xlab('target neuron') +
-#       ylab('neuron activation') +
-#       geom_violin(draw_quantiles = 0.50) +
-#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
-#       ggtitle("neuron activations of targets when target is correct or incorrect")
-# 
-#     plots$bee_activation <- ggplot(
-#       data = data_long %>%
-#         filter(target_name == "ins_buzz_bee"),
-#       aes(
-#         x = classification,
-#         y = target_activation,
-#         fill = is_correct
-#       )
-#     ) +
-#       geom_violin(draw_quantiles = 0.50) +
-#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
-#       ylab('honey bee activation') +
-#       xlab('given classification') +
-#       ggtitle("activation of *honey bee neuron* across classifications")
-# 
-#     plots$false_negative <- ggplot(
-#         data = data_falseneg,
-#         aes(
-#           x = target_name,
-#           y = target_activation
-#         )
-#       ) +
-#       geom_violin(draw_quantiles = 0.50) +
-#       theme(axis.text.x = element_text(angle = -45, hjust = -0.0125)) +
-#       ylab('target_activation') +
-#       xlab('target neuron') +
-#       ggtitle("*relative* neuron activations on false bee negative")
-# 
-#   # Saving plots
-#   #
-#     if(write) {
-#       print('saving plots')
-#       for(p in names(plots)){
-#         ggsave(
-#           filename = file.path(dir_out, paste0('PLOT_',p, '_MODEL_', modelname,'.svg')),
-#           plot = plots[[p]],
-#           width = 8,
-#           height = 5
-#         )
-#       }
-# 
-#       print('done saving plots')
-#     }
-
-
+    
   # Confusion
   #
     print('starting confusion')
@@ -244,16 +166,17 @@ inspect_model <- function(modelname, write = T){
     }
   
   print(paste0('done inspecting ', modelname))
-  return(list('plots' = plots, 'confusion' = confusion_table))
+  return(confusion_table)
 }
 
 modelnames <- list.files('./models') %>% 
   .[!.%in%c('archive', 'inspection')]
 
-full <- lapply(
+full <- mclapply(
   modelnames,
   inspect_model,
-  write = T
+  write = T,
+  mc.cores=cpus
 )
 
 names(full) <- modelnames

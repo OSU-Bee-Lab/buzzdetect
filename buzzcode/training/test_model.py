@@ -5,24 +5,20 @@ tf.config.threading.set_intra_op_parallelism_threads(1)
 import pandas as pd
 import os
 import re
-from buzzcode.analysis.analyze_directory import analyze_batch
+import multiprocessing
+import numpy as np
+from buzzcode.analysis.analyze_directory import loadup, translate_results
 
-# modelname = "invProp_stric"; cpus = 6; memory_allot = 6; max_per_class=10
-# when iterating through models, could avoid startup time by passing analyze_wav different models instead of restarting the whole analyze_testFold function
-def analyze_testFold(modelname, cpus, memory_allot, semantic, max_per_class = None):
+# modelname = 'freq_128'; cpus=6; max_per_class=100
+def analyze_testfold(modelname, cpus, max_per_class = 100):
     dir_model = os.path.join("models", modelname)
-    dir_training = "./training/audio"
+    dir_cache = './training/input_cache_freq'
 
-    if semantic:
-        tag = '_semantic'
-    else:
-        tag = '_literal'
-
-    dir_out = os.path.join(dir_model, "output_testFold" + tag)
+    dir_out = os.path.join(dir_model, "output_testFold")
 
     metadata = pd.read_csv(os.path.join(dir_model, "metadata.csv"))
 
-    paths_test = []
+    paths_cache = []
     for c in metadata['classification'].unique():
         sub = metadata[(metadata['classification'] == c) & (metadata['fold'] == 5)]
         if max_per_class is not None:
@@ -32,23 +28,66 @@ def analyze_testFold(modelname, cpus, memory_allot, semantic, max_per_class = No
 
         paths = sub.sample(n_rows)['path_relative'].to_list()
         paths = [re.sub("^/",'', p) for p in paths]
-        paths = [os.path.join(dir_training, path) for path in paths]
+        paths = [os.path.join(dir_cache, path) for path in paths]
+        paths = [os.path.splitext(path)[0] + '.npy' for path in paths]
         paths = [p for p in paths if os.path.exists(p)]
-        paths_test.extend(paths)
+        paths_cache.extend(paths)
 
-    analyze_batch(modelname=modelname, cpus=cpus, memory_allot=memory_allot, dir_raw=dir_training, paths_raw=paths_test, dir_out=dir_out, semantic=semantic)
+    paths_out = [re.sub(dir_cache, dir_out, path_cache) for path_cache in paths_cache]
+    paths_out = [re.sub('\\.npy$', '_buzzdetect.csv', p) for p in paths_out]
+
+    dirs_out = set([os.path.dirname(p) for p in paths_out])
+    for d in dirs_out:
+        os.makedirs(d, exist_ok=True)
+
+    q_assignments = multiprocessing.Queue()
+    for a in zip(paths_cache, paths_out):
+        q_assignments.put(a)
+
+    for c in range(cpus):
+        q_assignments.put(('TERMINATE', 'TERMINATE'))
+
+    def analyzer_cache(worker_id):
+        model, config = loadup(modelname)
+        classes = config['classes']
+        framelength = config['framelength']
+
+        path_cache, path_out = q_assignments.get()
+        while path_cache != 'TERMINATE':
+            print(f"analyzer {worker_id}: analyzing {path_cache}")
+            inputs = np.load(path_cache, allow_pickle=True)
+            results = model(inputs)
+            output = translate_results(np.array(results), classes, framelength)
+
+            output.to_csv(path_out)
+
+            path_cache, path_out = q_assignments.get()
+
+        print(f"analyzer {worker_id}: finished analyzing")
+
+    proc_analyzers = []
+    for c in range(cpus):
+        proc_analyzers.append(
+            multiprocessing.Process(target=analyzer_cache, name=f"analysis_proc{c}", args=([c])))
+        proc_analyzers[-1].start()
+        pass
+
+
+    for a in proc_analyzers:
+        a.join()
+
+    print('done!')
 
 
 if __name__ == "__main__":
     cpus = 8
-    semantic = False
 
     modelprompt = input("Input model name; 'all' to validate all: ")
 
     if modelprompt != "all":
-        analyze_testFold(modelname=modelprompt, cpus=cpus, memory_allot=6, semantic=semantic)
+        analyze_testfold(modelname=modelprompt, cpus=cpus)
     else:
         modelnames = os.listdir('./models')
         modelnames.remove('archive')
         for modelname in modelnames:
-            analyze_testFold(modelname=modelname, cpus=cpus, memory_allot=6, semantic=semantic, max_per_class=200)
+            analyze_testfold(modelname=modelname, cpus=cpus, max_per_class=400)

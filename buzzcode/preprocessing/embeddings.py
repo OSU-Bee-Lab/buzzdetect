@@ -13,20 +13,30 @@ def get_embedder(embeddername):
             embeddings = np.array(embeddings)[0, ]  # numpy converts to (1024,1) by default
             return embeddings
 
-        framelength = 0.96
-        samplerate = 16000
+        config = dict(
+            embeddername='yamnet',
+            framelength=0.96,
+            samplerate=16000,
+            n_embeddings=1024
+        )
 
     elif embeddername.lower() == 'birdnet':
         import buzzcode.BirdNET as bn
 
         embedder = bn.model.embeddings()
-        framelength = 3
-        samplerate = 48000
+
+        config = dict(
+            embeddername='birdnet',
+            framelength=3,
+            samplerate=48000,
+            n_embeddings=1024
+        )
+
     else:
         print('ERROR: invalid embedder name')
         return
 
-    return embedder, framelength, samplerate
+    return embedder, config
 
 
 def extract_embeddings(frame_data, embedder):

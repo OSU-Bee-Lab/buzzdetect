@@ -1,3 +1,4 @@
+import json
 import tensorflow as tf
 import pandas as pd
 import os
@@ -12,12 +13,10 @@ def loadup(modelname):
     dir_model = os.path.join("./models/", modelname)
     model = tf.keras.models.load_model(dir_model)
 
-    path_weights = os.path.join(dir_model, "weights.csv")
+    with open(os.path.join(dir_model, 'config.txt'), 'r') as cfg:
+        config = json.load(cfg)
 
-    df = pd.read_csv(path_weights)
-    classes = df['classification']
-    classes_semantic = df['classification_semantic']
-    return model, list(classes), list(classes_semantic), input_size
+    return model, config
 
 
 # Functions for mapping analysis
@@ -103,10 +102,32 @@ def get_coverage(path_raw, dir_raw, dir_out):
     return coverage # list of tuples
 
 
-# Functions for handling audio
+# Functions for applying transfer model
 #
 
-def analyze_input(model, classes, framelength, input):
+def translate_results(results, classes, framelength):
+    scorenames = ['score_' + c for c in classes]
+
+    translate = []
+    for i, scores in enumerate(results):
+        results_frame = {
+            "start": i * (framelength/2),
+            "end": ((i * (framelength/2)) + framelength),
+            "class_predicted": classes[scores.argmax()],
+            "score_predicted": scores[scores.argmax()]
+        }
+
+        results_frame.update({scorenames[i]: scores[i] for i in range(len(classes))})
+
+        translate.append(results_frame)
+
+    output_df = pd.DataFrame(translate)
+
+    return output_df
+
+
+
+def analyze_input_old(model, classes, framelength, inputs):
     results = []
 
     framehop = framelength/2
@@ -114,7 +135,7 @@ def analyze_input(model, classes, framelength, input):
     indices_out = [classes.index(c) for c in classes]
     scorenames = ['score_' + c for c in classes]
 
-    for i, e in enumerate(input):
+    for i, e in enumerate(inputs):
         scores = model(e).numpy()[0]
 
         results_frame = {

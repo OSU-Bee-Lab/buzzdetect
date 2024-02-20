@@ -3,11 +3,73 @@ import pandas as pd
 import numpy as np
 import os
 import re
+import json
 from buzzcode.tools import save_pickle
+from buzzcode.preprocessing.embeddings import get_embedder
 
 
-# modelname = 'test'; metadata_name="metadata_raw"; weights_name=None; epochs_in=3
-def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, epochs_in=100):
+# could maybe be generalized into frame_audio? also I'm sure this could get way faster, but kludge for now!
+def count_frames(duration, framelength, framehop=0.5):
+    frames = []
+    frame_start = 0
+    frame_end = framelength
+    step = framelength*framehop
+
+    while frame_end <= duration:
+        frames.append((frame_start, frame_end))
+        frame_start += step
+        frame_end += step
+
+    return len(frames)
+
+def weight_inverseproportional(metadata, framelength):
+    weightdf = pd.DataFrame()
+    weightdf['classification'] = metadata['classification'].unique()
+
+    def count_class_frames(classification_in):
+        #  don't include test information in weighting
+        sub = metadata[(metadata['classification'] == classification_in) & (metadata['fold'] != 5)]
+        framecounts = [count_frames(d, framelength, 0.5) for d in sub['duration']]
+
+        return sum(framecounts)
+
+    weightdf['frames'] = [count_class_frames(c) for c in weightdf['classification']]
+
+    frames_total = sum(weightdf['frames'])
+
+    weightdf['weight'] = [np.log(frames_total / f) for f in weightdf['frames']]
+
+    weightdf = weightdf.sort_values(by='classification')
+
+    return weightdf
+
+
+def weight_fractional(metadata, framelength):
+    weightdf = pd.DataFrame()
+    weightdf['classification'] = metadata['classification'].unique()
+
+    def count_class_frames(classification_in):
+        #  don't include test information in weighting
+        sub = metadata[(metadata['classification'] == classification_in) & (metadata['fold'] != 5)]
+        framecounts = [count_frames(d, framelength, 0.5) for d in sub['duration']]
+
+        return sum(framecounts)
+
+    weightdf['frames'] = [count_class_frames(c) for c in weightdf['classification']]
+
+    frames_max = max(weightdf['frames'])
+
+    weightdf['weight'] = [(frames_max / f) for f in weightdf['frames']]
+
+    weightdf = weightdf.sort_values(by='classification')
+
+    return weightdf
+
+
+# modelname = 'test'; metadata_name="metadata_strict"; weights_name=None; epochs_in=3
+def generate_model(modelname, embeddername='yamnet', metadata_name="metadata_strict", epochs_in=100):
+    input_size = 1028  # not sure how to handle this; input shape will be fixed for any one model but is still in flux
+
     dir_model = os.path.join("./models/", modelname)
     if os.path.exists(dir_model) and modelname != 'test':
         raise FileExistsError(
@@ -16,10 +78,18 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
 
     dir_training = './training'
     dir_metadata = os.path.join(dir_training, 'metadata')
-    dir_embeddings = os.path.join(dir_training, 'embeddings')
     dir_audio = os.path.join(dir_training, 'audio')
+    dir_cache = os.path.join(dir_training, 'input_cache_freq')
 
-    # Acquiring and filtering training data
+    embedder, config = get_embedder(embeddername)
+    framelength = config['framelength']
+
+    config.update({'input_size': input_size})
+
+    # METADATA ----
+    #
+
+    # prep
     #
     if not bool(re.search('\\.csv$', metadata_name)):
         metadata_name = metadata_name + '.csv'
@@ -34,55 +104,39 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     if 'fold' not in metadata.columns:
         metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
 
-    classes = metadata['classification'].unique()
+    # drop inputs that haven't been cached
+    # TODO: just generate the cache files!
+    metadata['path_inputs'] = [re.sub(dir_audio, dir_cache, path) for path in metadata['path_audio']]
+    metadata['path_inputs'] = [os.path.splitext(emb)[0] + '.npy' for emb in metadata['path_inputs']]
 
-    if weights_name is None:
-        weightdf = pd.DataFrame()
-        weightdf['classification'] = metadata['classification'].unique()
-        weightdf['weight'] = 1
-        classes = weightdf['classification'].to_list()
-    else:
-        if not bool(re.search('\\.csv$', weights_name)):
-            weights_name = weights_name + '.csv'
+    metadata = metadata[[os.path.exists(p) for p in metadata['path_inputs']]]
 
-        weights_path = os.path.join(dir_training, 'weights', weights_name)
-
-        weightdf = pd.read_csv(weights_path)
-        weights_new = pd.DataFrame()
-
-        # if a weight isn't assigned to a class, assign it 1
-        weights_new['classification'] = [c for c in classes if c not in weightdf['classification'].values]
-        weights_new['weight'] = 1
-
-        weightdf = pd.concat([weightdf, weights_new])
-
-    weightdf = weightdf.sort_values(by='classification')
+    # WEIGHTING ----
+    #
+    weightdf = weight_inverseproportional(metadata, framelength)
     weightdf.to_csv(os.path.join(dir_model, "weights.csv"), index=False)
 
     dict_weight = {index: weight for index, weight in enumerate(weightdf['weight'])}
     dict_names = {name: index for index, name in enumerate(weightdf['classification'])}
 
-    metadata['target'] = [dict_names[c] for c in metadata['classification']]
+    config.update({'classes': weightdf['classification'].tolist()})
 
-    metadata['path_embeddings'] = [re.sub(dir_audio, dir_embeddings, path) for path in metadata['path_audio']]
-    metadata['path_embeddings'] = [os.path.splitext(emb)[0] + '.npy' for emb in metadata['path_embeddings']]
+    # hmm this is throwing an error when it wasn't before; because subsetting for existing files?
+    metadata['target'] = [dict_names[c] for c in metadata['classification']]  # add model internal target number
 
-    metadata = metadata[[os.path.exists(e) for e in metadata['path_embeddings']]]
-
+    # write metadata
     metadata.to_csv(os.path.join(dir_model, "metadata.csv"), index=False)
 
     # dataset creation
     #
-    # dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_audio'], metadata['target'], metadata['fold']))
-
     dataset_full = tf.data.Dataset.from_tensor_slices(
-        (metadata['path_embeddings'], metadata['target'], metadata['fold']))
+        (metadata['path_inputs'], metadata['target'], metadata['fold']))
 
-    def load_embed(path_embeddings, target, fold):
+    def load_embed(path_inputs, target, fold):
         embed_array = tf.numpy_function(
             func=lambda y: np.array(np.load(y.decode("utf-8"), allow_pickle=True)),
-            inp=[path_embeddings],
-            Tout=tf.float32,
+            inp=[path_inputs],
+            Tout=tf.float64,
         )
 
         embeddings = tf.convert_to_tensor(embed_array)
@@ -93,7 +147,7 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     dataset_full = dataset_full.map(lambda paths, labels, folds: load_embed(paths, labels, folds)).unbatch()
 
     def set_shape(embeddings, target, fold):
-        embeddings.set_shape(1024)
+        embeddings.set_shape(input_size)
 
         return embeddings, target, fold
 
@@ -115,64 +169,15 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
 
     # Model creation
     #
-
-    # where columns are true, rows are predicted in the order of (notBuzz, buzz)
-    # remember, rows are indexed first. So indexing goes [predicted][true]
-    penalties = np.array(
-        (  # n  b  <- ACTUAL
-            (1, 2),  # n  PREDICTED
-            (5, 1)  # b     V
-        )
-    )
-
-    classes_isbuzz = [int(bool(re.search('buzz', c))) for c in classes]
-
-    # problem: putting tensors into custom loss function. Ugh!
-
-    # targets_true = tf.constant(np.random.randint(0, len(classes), 32))
-    # logits_pred = tf.constant([np.random.random(size=len(classes)) for i in targets_true], dtype=tf.float32)  # p.sure the activations are in float32
-
-    @tf.py_function(Tout=tf.float32)
-    def custom_loss(targets_true, logits_pred):
-        loss = tf.keras.losses.sparse_categorical_crossentropy(targets_true, logits_pred, from_logits=True)
-        loss_penalized = np.array([0 for _ in range(tf.size(loss).numpy())])
-
-        # iterate over batch
-        for i in range(len(targets_true)):
-            target_true = targets_true[i].numpy()  # do I need .numpy()?
-            isbuzz_true = classes_isbuzz[target_true]
-
-            target_predicted = tf.math.argmax(logits_pred[i]).numpy()
-            isbuzz_predicted = classes_isbuzz[target_predicted]
-
-            penalty = penalties[isbuzz_predicted][isbuzz_true]
-
-            loss_penalized[i] = loss[i].numpy() * penalty
-
-        return tf.constant(loss_penalized, dtype=tf.float32)
-
-    @tf.py_function(Tout=tf.float32)
-    def penalizer(inputs):
-        loss=tf.cast(inputs[0], dtype=tf.float32)
-        mult=tf.cast(inputs[1], dtype=tf.float32)
-        loss_penalized = loss*mult
-        return loss_penalized
-
-    @tf.function
-    def custom_loss2(targets_true, logits_pred):
-        loss = tf.keras.losses.sparse_categorical_crossentropy(targets_true, logits_pred, from_logits=True)
-        loss_penalized = penalizer(
-            (loss, np.random.random(size=tf.size(loss).numpy()))
-        )
-        return loss
-
     model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=1024, dtype=tf.float32, name='input_embedding'),
+        tf.keras.layers.BatchNormalization(axis=-1, name='normalization'),
+        tf.keras.layers.Input(shape=input_size, dtype=tf.float32, name='input'),
         tf.keras.layers.Dense(512, activation='relu'),
-        tf.keras.layers.Dense(len(classes))
+        # tf.keras.layers.Dense(256, activation='relu'),
+        tf.keras.layers.Dense(len(weightdf))
     ], name=modelname)
 
-    model.compile(loss=custom_loss_np,
+    model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                   optimizer="adam",
                   metrics=['accuracy'])
 
@@ -189,7 +194,10 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     save_pickle(os.path.join(dir_model, 'history'), history)
 
     model.save(os.path.join(dir_model), include_optimizer=True)
+    with open(os.path.join(dir_model, 'config.txt'), 'x') as f:
+        f.write(json.dumps(config))
 
 
 if __name__ == "__main__":
-    generate_model('test', metadata_name="metadata_raw.csv", epochs_in=1)
+    modelprompt = input("Input model name: ")
+    generate_model(modelprompt)

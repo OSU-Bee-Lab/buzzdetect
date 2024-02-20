@@ -1,7 +1,10 @@
 library(dplyr)
 library(stringr)
-source('./buzzextras/get_frames.R')
+source('./buzzcode/preprocessing/get_frames.R')
   
+  # TO DO: drop counting frames, to make buzzdetect embedder-flexible
+  
+
   path_raw <- './training/metadata/metadata_raw.csv'
   metadata_raw <- read.csv(path_raw)
   drop_threshold <- 15  # drop below 15 obs; need at least 3 test files

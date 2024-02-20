@@ -48,7 +48,8 @@ def frame_audio(audio_data, framelength, samplerate, framehop=0.5):
 
 
 def extract_frequencies(audio_data, sr=44100, n_freq=3, freq_range=(300, 600)):
-    n_fft = 4096
+    # n_fft = 4096
+    n_fft = 8192
     freqs = np.array((np.arange(0, 1 + n_fft / 2) * sr) / n_fft)
 
     index_min = np.argmin(abs(freqs - freq_range[0]))

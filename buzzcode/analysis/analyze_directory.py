@@ -1,4 +1,7 @@
-from buzzcode.preprocessing.embeddings import get_embedder, extract_embeddings
+from buzzcode.preprocessing.embeddings import get_embedder
+from buzzcode.preprocessing.preprocess import extract_input
+from buzzcode.analysis.analysis import solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, translate_results
+from buzzcode.audio import load_audio, frame_audio
 import tensorflow as tf
 import pandas as pd
 import os
@@ -6,24 +9,30 @@ import re
 import sys
 import librosa
 import multiprocessing
+import json
 import soundfile as sf
+import numpy as np
 from datetime import datetime
 from buzzcode.tools import search_dir, Timer, clip_name
-
 
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
 
-# modelname = "invProp_strict"; cpus=4; memory_allot = 3; dir_raw="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; paths_raw = None; pad=False; semantic = True
-def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./audio_in", paths_raw = None, dir_out=None, verbosity=1, pad=False):
+# modelname = "frequency_aware"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; paths_audio = None
+def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", dir_cache = None, paths_audio = None, dir_out=None, verbosity=1):
     timer_total = Timer()
 
     dir_model = os.path.join("models", modelname)
+    with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
+        config = json.load(file)
+
+    framelength = config['framelength']
+    sr_embedder = config['samplerate']
 
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
 
-    chunklength, n_analyzers = solve_memory(memory_allot, cpus)
+    chunklength, n_analyzers = solve_memory(memory_allot, cpus, framelength=framelength)
 
     log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
     path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
@@ -31,13 +40,13 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
     log = open(path_log, "x")
     log.close()
 
-    if paths_raw is None:
-        paths_raw = search_dir(dir_raw, list(sf.available_formats().keys()))
+    if paths_audio is None:
+        paths_audio = search_dir(dir_audio, list(sf.available_formats().keys()))
 
     # start logger early and make these exit prints printlogs?
-    if len(paths_raw) == 0:
+    if len(paths_audio) == 0:
         print(
-            f"no compatible audio files found in raw directory {dir_raw} \n"
+            f"no compatible audio files found in raw directory {dir_audio} \n"
             f"audio format must be compatible with soundfile module version {sf.__version__} \n"
             "exiting analysis"
         )
@@ -46,18 +55,17 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
     raws_chunklist = []
     raws_unfinished = []
 
-    for path in paths_raw:
+    for path in paths_audio:
         audio_duration = librosa.get_duration(path=path)
 
-        coverage = get_coverage(path, dir_raw, dir_out)
+        coverage = get_coverage(path, dir_audio, dir_out)
         if len(coverage) == 0:
             coverage = [(0, 0)]
 
         gaps = get_gaps((0, audio_duration), coverage)
 
-        # if there's no padding, ignore gaps that start less than 1 frame from file end
-        if not pad:
-            gaps = [gap for gap in gaps if gap[0] < (audio_duration - (framelength/1000))]
+        # ignore gaps that start less than 1 frame from file end
+        gaps = [gap for gap in gaps if gap[0] < (audio_duration - (framelength/1000))]
 
         # expand gaps smaller than one frame; leave gaps larger than one frame
         gaps = [(gap[0], gap[0] + (framelength/1000)) if (gap[1] - gap[0]) < (framelength/1000) else gap for gap in gaps]
@@ -69,10 +77,8 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
             raws_chunklist.append(chunklist)
 
     if len(raws_unfinished) == 0:
-        print(f"all files in {dir_raw} are fully analyzed; exiting analysis")
-        return
-
-
+        print(f"all files in {dir_audio} are fully analyzed; exiting analysis")
+        sys.exit(0)
 
     # process control
     #
@@ -83,7 +89,7 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
     # if more analyzers than raws, repeat the list, wrapping the assignment back to the start
     dict_analyzer = {i: (raws_unfinished*analyzers_per_raw)[i] for i in analyzer_ids}
 
-    dict_rawstatus = {p: "finished" for p in paths_raw}
+    dict_rawstatus = {p: "finished" for p in paths_audio}
     for p in raws_unfinished:
         dict_rawstatus[p] = "not finished"
 
@@ -135,7 +141,7 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
             if len(dict_chunk[path_used]) == 0:
                 dict_rawstatus[path_used] = "finished"
 
-            path_clip = clip_name(path_used, dir_raw)
+            path_clip = clip_name(path_used, dir_audio)
             printlog(f"manager: analyzer {id_analyzer} {msg} {path_clip}, chunk {round(chunk_out[0], 1), round(chunk_out[1], 1)}", 2)
 
             assignment = (path_used, chunk_out)
@@ -153,16 +159,10 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
 
         # ready model
         #
-        embedder, framelength, samplerate = get_embedder('yamnet')
-        model, classes, classes_semantic = loadup(modelname)
+        embedder, _ = get_embedder('yamnet')
+        model, classes = loadup(modelname)
 
-        if semantic:
-            classes = classes_semantic
-
-        colnames_out = []
-        if not semantic:
-            colnames_out = ["score_" + c for c in classes]
-
+        colnames_out = ["score_" + c for c in classes]
         columns_desired = ['start', 'end', 'class_predicted', 'score_predicted'] + colnames_out
 
         q_request.put(id_analyzer)
@@ -172,22 +172,25 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
         while assignment != "terminate":
             timer_analysis.restart()
             path_raw = assignment[0]
-            path_clip = clip_name(path_raw, dir_raw)
+            path_clip = clip_name(path_raw, dir_audio)
             time_from = assignment[1][0]
             time_to = assignment[1][1]
             chunk_duration = time_to - time_from
 
             printlog(f"analyzer {id_analyzer}: analyzing {path_clip} from {round(time_from, 1)}s to {round(time_to, 1)}s", 1)
-            audio_data = load_audio(path_raw, time_from, time_to)
-            embeddings = extract_embeddings(audio_data, embedder)
-            results = analyze_embeddings(model=model, classes=classes, embeddings=embeddings)
+            audio_data, sr_native = load_audio(path_raw, time_from, time_to)
+            # extract_input does the necessary resampling for embeddings
+            audio_frames = frame_audio(audio_data, framelength, sr_native, framehop=0.5)
+            inputs = [extract_input(f, embedder=embedder, sr_native=sr_native,sr_embedder=sr_embedder) for f in audio_frames]
+            results = model(np.array(inputs))
+            output = translate_results(np.array(results), classes, framelength)
 
-            results['start'] = results['start'] + time_from
-            results['end'] = results['end'] + time_from
+            output['start'] = output['start'] + time_from
+            output['end'] = output['end'] + time_from
 
-            results = results[columns_desired]
+            output = output[columns_desired]
 
-            q_write.put((path_raw, results))
+            q_write.put((path_raw, output))
             q_request.put(id_analyzer)
 
             timer_analysis.stop()
@@ -205,8 +208,8 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
     def worker_writer():
         printlog(f"writer: initialized", 2)
 
-        dirs_raw = set([os.path.dirname(p) for p in paths_raw])
-        dirs_out = [re.sub(dir_raw, dir_out, d) for d in dirs_raw]
+        dirs_raw = set([os.path.dirname(p) for p in paths_audio])
+        dirs_out = [re.sub(dir_audio, dir_out, d) for d in dirs_raw]
         for d in dirs_out:
             os.makedirs(d, exist_ok=True)
 
@@ -219,7 +222,7 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
                 continue
 
             path_out = os.path.splitext(path_raw)[0] + '_buzzdetect.csv'
-            path_out = re.sub(dir_raw, dir_out, path_out)
+            path_out = re.sub(dir_audio, dir_out, path_out)
             path_clip = clip_name(path_out, dir_out)
 
             if os.path.exists(path_out):
@@ -285,4 +288,4 @@ def analyze_batch(modelname, cpus, memory_allot, semantic = True, dir_raw="./aud
 
 if __name__ == "__main__":
     modelname = "abrc"
-    analyze_batch(modelname=modelname, cpus=6, memory_allot=8, verbosity=2, semantic=True)
+    analyze_batch(modelname='frequency_aware', cpus=6, memory_allot=8, verbosity=2)
