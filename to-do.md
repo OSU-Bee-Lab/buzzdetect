@@ -31,6 +31,7 @@
 * Add progress bar/estimated time to completion (dependent on verbosity?)
 * Split analyze_data() into extract_embeddings() and analyze_embeddings()
 * Use full paths (not clipped) at verbosity 2
+* Try stretching audio; YAMNet expects (0.960*16,000) samples. Can we instead feed it 0.348s of 44.1KHz audio? BirdNET expects 3s of 48KHz audio...probably nothing we can do to satisfy that with a smaller frame length.
 
 ## Machine Learning Design
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
