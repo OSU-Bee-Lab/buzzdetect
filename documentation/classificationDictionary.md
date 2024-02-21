@@ -42,7 +42,9 @@ The `ins_buzz_high` and `ins_buzz_low` categories are, as of this version, entir
 
 #### LABEL: ins_buzz_bee (honey bee)
 Honey bee (Apis mellifera) flight. 
-Classifiers should take note of the pitch of the buzz to distinguish honey bees from other insects. 
+Classifiers should take note of the pitch of the buzz to distinguish honey bees from other insects.
+
+[This video](https://www.youtube.com/watch?v=5HHGDi6HN9c) from the bee lab provides useful reference audio. Mind that yellowjackets can often be heard at the mic as a slightly lower buzz; you should be able to spot them in the video.
 
 #### LABEL: ins_buzz_high (high-pitched buzz)
 Flight buzzes that are higher in pitch than that of the honey bee. Perhaps small solitary bees, mosquitoes, flies.
