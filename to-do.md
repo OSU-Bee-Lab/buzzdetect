@@ -16,6 +16,7 @@
 ## Code
 ### Overall
 * Add docstrings to functions
+* Make guide for managing training data and training new models. Make way for other researchers to share training data.
 
 ### train.py
 * Allow training from cached embeddings. The issue here is that I can't write custom python functions to load embeddings. I can't pull strings out of tensors to operate on filepaths and as best as I can find, there's no tensorflow function for loading arbitrary data.
