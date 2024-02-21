@@ -19,7 +19,7 @@ Currently, we are training our models on embeddings from the Google Tensorflow m
 
 ## Quick Start Guide
 ### First time steup
-1. Install the environment manager [Conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html)
+1. Install the environment manager [conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html)
 2. Clone the buzzdetect files from this github repo to the directory where you want to store buzzdetect. We'll refer to this directory as the "project directory."
 3. Open a terminal in the project directory
 4. Run the command: `conda env create -f environment.yml -p ./environment`
