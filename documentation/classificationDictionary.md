@@ -37,7 +37,8 @@ The taxon containing all insect-produced sounds: flight buzzes, chirps, timballi
 
 ### buzz
 The buzzing hum of insect flight. Most detections appear to be fly-bys, which produce an audible doppler shift. Flower visitations have a two-buzz “visit…leave” pattern. Visitations are not labeled differently than fly-bys, as the frame length of buzzdetect is unlikely to capture this pattern. Some insects (particularly low ones, perhaps bumble bees) hover quite close to the microphone for seconds on end, sometimes producing a rasp of wings on the microphone surface.
-These categories are, as of this version, entirely relative to honey bee flight. Uncertain classifiers should find reference audio or seek the ear of an expert!
+
+The `ins_buzz_high` and `ins_buzz_low` categories are, as of this version, entirely relative to honey bee flight. Uncertain classifiers should find reference audio or seek the ear of an expert!
 
 #### LABEL: ins_buzz_bee (honey bee)
 Honey bee (Apis mellifera) flight. 
