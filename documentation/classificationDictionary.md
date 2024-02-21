@@ -22,6 +22,16 @@ The hierarchies are reflected below with nested headings. Terminal ranks—that 
 
 Labels are made by concatenating ranks with underscores. For example, the taxonomy of a propeller plane is: mechanical/plane/propeller and would be labeled as mech_plane_prop.
 
+### "RECLASSIFY"
+When the class dictionary undergoes changes, it can break previous labels.
+For example, when `mech_auto` was split into `mech_auto_truck` and `mech_auto_car`, all previous classifications were left ambiguous.
+Ideally, all of these files would be manually reviewed and reclassified. Pragmatically, this is often too large a task to undertake immediately.
+For the intervening time, the ambiguous labels are renamed as specifically as possible and tagged with "_RECLASSIFY". Thus, `mech_auto` becomes `mech_auto_RECLASSIFY`.
+This allows us to train future models flexibly. The metadata for a model could drop everything tagged with "_RECLASSIFY", use these labels as-is or merge all `mech_auto_*` labels back into `mech_auto`
+
+Some labels in the dataset are simply `RECLASSIFY`. These come from previous labels that were too general to be useful. For example, early iterations of the training set used classifications of `other` and `misc`.
+These files were found to represent any number of sounds from `ambient_day` to `ambient_scraping` to `human`.
+
 ## ins (insect)
 The taxon containing all insect-produced sounds: flight buzzes, chirps, timballing, etc. While we hope to expand these categories in the future, this version of the class dictionary is focused on the detection of honey bees, so categories are only as specific as we feel necessary to distinguish honey bees from other insects.
 
