@@ -1,17 +1,16 @@
 # So much to do...
 ## Before v1.0
 ### Essential
-* Rewrite CLI options and test all actions
-* Write CLI help
-* Rewrite README documentation
-* Migrate classification dictionary into a .md in git repository
-* Re-name labels to fit with class dictionary 2.0
+* Rewrite CLI options and test all actions [finished on main!]
+* Write CLI help [finished on main! at least for arguments]
+* Rewrite README documentation [finished on main!]
+* Migrate classification dictionary into a .md in git repository [finished on main!]
+* Re-name labels to fit with class dictionary 2.0 [finished on main!]
      - For classes that were split, just leave the labels that haven't been reclassified at the finest known classification. E.g., "mech_auto_RECLASSIFY" can become mech_auto
      - RECLASSIFY is a mix of human and scrapes; mostly human. Just call human for now?
 
 ### Optional
 * Write docstrings for functions
-* Write custom loss function
 
 ## Code
 ### Overall
