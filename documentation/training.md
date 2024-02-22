@@ -38,7 +38,7 @@ This also preserves information about correlation between training files. Traini
 
   The duration of the audio file in seconds.
 
-* **filepath**
+* **path_audio**
 
   The relative path to the audio file with the root directory as the project directory.
 
