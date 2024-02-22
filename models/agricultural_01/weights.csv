@@ -1,0 +1,17 @@
+Unnamed: 0,classification,classification_semantic,frames_total,weight
+1,ambient_day,ambient,3371,1.08757563674479
+2,ambient_night,ambient,2448,1.40751370834663
+3,ambient_rain,ambient,188,3.9740983891489
+4,ambient_scraping,ambient,437,3.13060715688326
+5,goose,goose,27,5.91470348597452
+6,human,human,138,4.28328666682164
+7,ins_buzz_bee,buzz,626,2.77118998087875
+8,ins_buzz_high,buzz,56,5.1851886612437
+9,ins_buzz_low,buzz,285,3.5580511717102
+10,ins_trill,insect_trill,208,3.87300227227753
+11,mech_auto,vehicle,326,3.42364297061214
+12,mech_combine,vehicle,919,2.38725422962316
+13,mech_hum_traffic,vehicle,396,3.22912614072437
+14,mech_plane,vehicle,360,3.32443632052869
+15,mech_siren,siren,146,4.22693373027051
+16,mech_train,train,71,4.94786047493753
