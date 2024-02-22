@@ -31,6 +31,7 @@
 * Split analyze_data() into extract_embeddings() and analyze_embeddings()
 * Use full paths (not clipped) at verbosity 2
 * Try stretching audio; YAMNet expects (0.960*16,000) samples. Can we instead feed it 0.348s of 44.1KHz audio? BirdNET expects 3s of 48KHz audio...probably nothing we can do to satisfy that with a smaller frame length.
+* Parallel processing: can I account for the edge case where chunk size is _too_ large? E.g., you have 8 cores, each taking chunks of 3600 seconds, but only a single file that's 3600 seconds long. Optimal would be reducing chunk size.
 
 ## Machine Learning Design
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
