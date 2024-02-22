@@ -27,7 +27,7 @@ def loadup(modelname):
 
 
 def get_yamnet():
-    os.environ["TFHUB_CACHE_DIR"]="./yamnet"
+    os.environ["TFHUB_CACHE_DIR"]="./embedders/yamnet"
     yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
 
     return yamnet
