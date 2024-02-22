@@ -31,7 +31,7 @@ The level of detail printed to the terminal during analysis. Events are logged t
 ## Training
 Train new models using the `train action`; e.g. `python buzzdetect.py train ...`
 
-See detailed training documentation [here](https://github.com/OSU-Bee-Lab/buzzdetect/blob/main/documentation/training.md)https://github.com/OSU-Bee-Lab/buzzdetect/blob/main/documentation/training.md.
+See detailed training documentation [here](https://github.com/OSU-Bee-Lab/buzzdetect/blob/main/documentation/training.md).
 
 #### modelname (required)
 The name of the model to be trained. The model will be saved in the directory: `./models/[modelname]`
