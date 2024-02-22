@@ -30,9 +30,9 @@ You are now ready to run your first analysis!
 
 ### Analyzing audio
 1. buzzdetect looks for audio files to analyze in the `./audio` subdirectory. Place the audio you want to analyze in this directory.
-       - Audio files can be of any format that [the soundfile package](https://python-soundfile.readthedocs.io) supports; see supported types [here](http://www.mega-nerd.com/libsndfile/#Features).
-       - Audio files do not need to be in the root level of the `./audio` subdirectory. You can have them stored in any structure you like. buzzdetect will clone the input directory structure to the output folder. For example, the results of the audio file `./audio_in/visitation_experiment/block 1/recorder4.wav` would be written to `./models/[model used in analysis]/output/visitation_experiment/block 1/recorder4_buzzdetect.csv`
-2. Open a terminal in the project directory and activate the conda environment by running the command `conda activate ./environment`
+     - Audio files can be of any format that [the soundfile package](https://python-soundfile.readthedocs.io) supports; see supported types [here](http://www.mega-nerd.com/libsndfile/#Features).
+     - Audio files do not need to be in the root level of the `./audio` subdirectory. You can have them stored in any structure you like. buzzdetect will clone the input directory structure to the output folder. For example, the results of the audio file `./audio_in/visitation_experiment/block 1/recorder4.wav` would be written to `./models/[model used in analysis]/output/visitation_experiment/block 1/recorder4_buzzdetect.csv`
+3. Open a terminal in the project directory and activate the conda environment by running the command `conda activate ./environment`
 5. Analyze the audio files with the following command: `python buzzdetect.py analyze --modelname [model to use] --cpus [number of cpus]`
     - See the comprehensive command-line documentation [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_CLI.md) for additional configuration options.
 6. The results will be output as .csv files in the `./output` subdirectory of the model's directory.
