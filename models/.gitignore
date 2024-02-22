@@ -1,3 +1,4 @@
-# Ignore models in archive directory and model output files
+# Ignore models in archive directory, test models, and model output files
 archive/
+test/
 */output
