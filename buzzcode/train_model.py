@@ -25,12 +25,6 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
         metadata_name = metadata_name + '.csv'
     metadata = pd.read_csv(os.path.join(dir_metadata, metadata_name))
 
-    # trim leading slash, if present, from idents for os.path.join
-    metadata['path_relative'] = [re.sub('^/', '', i) for i in metadata['path_relative']]
-
-    if 'path_audio' not in metadata.columns:
-        metadata['path_audio'] = [os.path.join(dir_audio, p) for p in metadata['path_relative']]
-
     if 'fold' not in metadata.columns:
         metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
 
@@ -69,7 +63,6 @@ def generate_model(modelname, metadata_name="metadata_raw", weights_name=None, e
     #
     dataset_full = tf.data.Dataset.from_tensor_slices((metadata['path_audio'], metadata['target'], metadata['fold']))
 
-    # I desparately want to allow caching of embeddings, but I can't read from paths stored in tensors
     def prep_ds(path_audio, label, fold):
         audio_data = load_audio_tf(path_audio)
         scores, embeddings, spectrogram = yamnet(audio_data)
