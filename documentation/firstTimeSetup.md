@@ -11,8 +11,8 @@ The project directory contains a file named [environment.yml](https://github.com
 You can install your conda environment wherever you wish, but in this guide, we will install it in the same directory as the buzzdetect project.
 1. Open a terminal in the same directory as your YAML file
 2. Run the command: `conda env create -f environment.yml -p ./environment`
-  - the -p argument is the path where the conda environment will be created. I've chosen to create it as a subdirectory of the project directory. So long as the environment is accessible to all users, location doesn't matter.
-  - if you chose to build the environment elsewhere or in the default location with a name, replace the `./environment` argument in future commands with your chosen path or name
+  - the -p argument is the path where the conda environment will be created. So long as the environment is accessible to all users, location doesn't matter.
+  - if you chose to build the environment elsewhere or in the default location with a name, replace the `./environment` argument in future commands with your chosen path or name.
 3. Conda will create the `./environment` subdirectory and install an environment with all required packages there.
 
 
@@ -20,3 +20,13 @@ You can install your conda environment wherever you wish, but in this guide, we 
 Despite specifying the environment name as the first line of the YAML file, conda doesn't appear to associate the name with the environment when using the -p option. Because of this, we'll have to activate it with the file path.
 1. Activate the conda environment by running `conda activate ./environment`.
 2. Run `conda list`; you should be able to see all of the specified dependencies
+
+
+## 5. Test an audio file
+buzzdetect v1.0 was released with the model [agricultural_01](https://github.com/OSU-Bee-Lab/buzzdetect/tree/main/models/agricultural_01). We'll use this model to make sure analysis is in working order.
+1. Place a short audio file in the `./audio_in` directory
+2. Open a terminal in the project directory
+3. Run the command `conda activate ./environment`
+4. Run the command `python buzzdetect.py analyze --modelname agricultural_01`
+
+You should see the terminal print out information about the analysis; one analyzer will launch and process the file. The results and log file will be written to `./models/agricultural_01/output`.
