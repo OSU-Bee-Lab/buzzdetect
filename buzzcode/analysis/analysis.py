@@ -21,21 +21,26 @@ def loadup(modelname):
 
 # Functions for mapping analysis
 #
-
 def solve_memory(memory_allot, cpus, framelength):
+    memory_perproc = memory_allot/cpus
     memory_tf = 0.350  # memory (in GB) required for single tensorflow process
-    memorydensity_audio = 3600 / 2.4  # seconds per gigabyte of decoded audio (estimate)
 
-    n_analyzers = min(cpus, (memory_allot/memory_tf).__floor__()) # allow as many workers as you have memory for
-    memory_remaining = memory_allot - (memory_tf*n_analyzers)
-    memory_perchunk = min(memory_remaining/cpus, 9)  # hard limiting max memory per chunk to 9G because I haven't tested sizes above that (also there's probably not a performance benefit?)
+    surplus_perproc = memory_perproc - memory_tf
+    memorydensity_audio = 2.4/3600  # gigabytes of memory per second of decoded audio (estimate)
 
-    chunklength = memory_perchunk * memorydensity_audio
+    memory_perframe = framelength*memorydensity_audio
+
+    chunklength = surplus_perproc/memorydensity_audio
 
     if chunklength < framelength:
-        raise ValueError("memory_allot and cpu combination results in illegally small frames")  # illegally smol
+        mem_needed = ((cpus * (memory_tf + memory_perframe))*10).__ceil__()/10
 
-    return chunklength, n_analyzers
+        p = ''
+        if cpus > 1:
+            p = 's'
+        raise ValueError(f"too little memory alloted for CPU count; need at least {mem_needed}GB for {cpus} CPU{p}")
+
+    return chunklength
 
 
 def get_gaps(range_in, coverage_in):

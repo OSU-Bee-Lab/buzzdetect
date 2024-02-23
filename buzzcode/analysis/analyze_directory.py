@@ -32,7 +32,7 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", dir_cac
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
 
-    chunklength, n_analyzers = solve_memory(memory_allot, cpus, framelength=framelength)
+    chunklength = solve_memory(memory_allot, cpus, framelength=framelength)
 
     log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
     path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
@@ -84,8 +84,8 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", dir_cac
     #
     dict_chunk = dict(zip(raws_unfinished, raws_chunklist))
 
-    analyzer_ids = list(range(n_analyzers))
-    analyzers_per_raw = (n_analyzers/len(raws_unfinished)).__ceil__()
+    analyzer_ids = list(range(cpus))
+    analyzers_per_raw = (cpus/len(raws_unfinished)).__ceil__()
     # if more analyzers than raws, repeat the list, wrapping the assignment back to the start
     dict_analyzer = {i: (raws_unfinished*analyzers_per_raw)[i] for i in analyzer_ids}
 
@@ -267,7 +267,7 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", dir_cac
 
     # launch analysis_process; will wait immediately
     proc_analyzers = []
-    for a in range(n_analyzers):
+    for a in range(cpus):
         proc_analyzers.append(
             multiprocessing.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a])))
         proc_analyzers[-1].start()
