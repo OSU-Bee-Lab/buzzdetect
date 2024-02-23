@@ -1,13 +1,14 @@
 README for model: agricultural_01
+
 Date: 2024-02-22
 
-# General
+## General
 This model is the current best performing buzzdetect model as of 2024-02-22. We named this model "agricultural" because our current training data are all from agricultural environments. The model may be able to generalize to other environments, but at the time of writing, this has not been tested.
 
-# Metadata
+## Metadata
 This model uses an "intermediate" level of metadata. The mech_auto_* taxa were merged into the single mech_auto and the mech_plane_* categories were merged into mech_plane.
 
-# Performance
+## Performance
 This model performs exceptionally well on the test set. The true positive rate for ins_buzz_bee (the honey bee label) is 0.87. False positives for honey bees from abiotic noise are low, with FPR reaching 0.01 for only ambient_day and mech_hum_traffic.
 
 High buzzes yield only a 0.31 true positive rate, a rate less than the rate of false honey bee positives given high buzzes. High buzzes have a low false positive rate from non-buzzes.
