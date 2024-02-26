@@ -21,9 +21,34 @@ def get_embedder(embeddername):
         )
 
     elif embeddername.lower() == 'birdnet':
-        import buzzcode.BirdNET as bn
+        from tensorflow import lite as tflite
 
-        embedder = bn.model.embeddings()
+        path_model = 'embedders/birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP32.tflite'
+
+        birdnet = tflite.Interpreter(model_path=path_model, num_threads=1)
+        birdnet.allocate_tensors()
+
+        # Get input and output tensors.
+        input_details = birdnet.get_input_details()
+        output_details = birdnet.get_output_details()
+
+        # Get input tensor index
+        input_index = input_details[0]["index"]
+
+        #  drops output layer, returning embeddings instead of classifications
+        output_index = output_details[0]["index"] - 1
+
+        def embedder(framelist):
+            # Reshape input tensor
+            birdnet.resize_tensor_input(input_index, [len(framelist), *framelist[0].shape])
+            birdnet.allocate_tensors()
+
+            # Extract feature embeddings
+            birdnet.set_tensor(input_index, np.array(framelist, dtype="float32"))
+            birdnet.invoke()
+            embeddings = birdnet.get_tensor(output_index)
+
+            return embeddings
 
         config = dict(
             embeddername='birdnet',
