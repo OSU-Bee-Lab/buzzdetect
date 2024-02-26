@@ -129,32 +129,3 @@ def translate_results(results, classes, framelength):
     output_df = pd.DataFrame(translate)
 
     return output_df
-
-
-
-def analyze_input_old(model, classes, framelength, inputs):
-    results = []
-
-    framehop = framelength/2
-
-    indices_out = [classes.index(c) for c in classes]
-    scorenames = ['score_' + c for c in classes]
-
-    for i, e in enumerate(inputs):
-        scores = model(e).numpy()[0]
-
-        results_frame = {
-            "start": i * framehop,
-            "end": ((i * framehop) + framelength),
-            "class_predicted": classes[scores.argmax()],
-            "score_predicted": scores[scores.argmax()]
-        }
-
-        results_frame.update({scorenames[i]: scores[i] for i in indices_out})
-
-        results.append(results_frame)
-
-    output_df = pd.DataFrame(results)
-
-    return output_df
-

@@ -1,6 +1,6 @@
 from buzzcode.utils import search_dir
 from buzzcode.audio import load_audio, frame_audio
-from buzzcode.embeddings import get_embedder, extract_embeddings
+from buzzcode.embeddings import get_embedder
 from buzzcode.audio import extract_frequencies
 import soundfile as sf
 import tensorflow as tf
@@ -34,7 +34,7 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
         quit("no compatible audio files found in input directory")
 
     if dir_out is None:
-        dir_out = os.path.join(os.path.dirname(dir_in), 'input_cache')
+        dir_out = os.path.join(os.path.dirname(dir_in), f'inputCache_{embeddername}')
 
     paths_out = [re.sub(dir_in, dir_out, path_in) for path_in in paths_in]
     paths_out = [os.path.splitext(path)[0] + '.npy' for path in paths_out]  # change
@@ -65,9 +65,6 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
         tf.config.threading.set_intra_op_parallelism_threads(1)
         embedder, config = get_embedder(embeddername)
 
-        framelength = config['framelength']
-        sr_embedder = config['samplerate']
-
         assignment = q_assignments.get()
         path_in = assignment[0]
         path_out = assignment[1]
@@ -76,7 +73,7 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
             print(f"{worker_id}: getting inputs for {re.sub(dir_in, '', path_in)}")
             audio_data, sr_native = load_audio(path_in)
 
-            if len(audio_data)/sr_native < framelength:
+            if len(audio_data)/sr_native < config['framelength']:
                 print(f"{worker_id}: skipping inputs for {re.sub(dir_in, '', path_in)}; sub-frame audio segment")
 
                 assignment = q_assignments.get()
@@ -107,5 +104,5 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
     print('done caching! :)')
 
 if __name__ == '__main__':
-    cache_input(8, './training/audio', 'yamnet', conflict='overwrite')
+    cache_input(8, './training/audio', 'yamnet', conflict='skip')
 
