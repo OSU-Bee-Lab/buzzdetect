@@ -24,9 +24,6 @@ def load_audio(path_audio, time_start=0, time_stop=None, resample_rate=None):
 
     return audio_data, sr
 
-path_audio = './localData/buzz_plane.wav'
-audio_data, samplerate = load_audio(path_audio, time_stop=3)
-
 
 def frame_audio(audio_data, framelength, samplerate, framehop=0.5):
     framelength_samples = int(framelength*samplerate)
