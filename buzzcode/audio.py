@@ -2,6 +2,7 @@ import librosa
 import soundfile as sf
 import numpy as np
 
+
 def load_audio(path_audio, time_start=0, time_stop=None, resample_rate=None):
     track = sf.SoundFile(path_audio)
 
@@ -19,8 +20,8 @@ def load_audio(path_audio, time_start=0, time_stop=None, resample_rate=None):
     audio_data = track.read(frames_to_read)
 
     if resample_rate is not None:
-        audio_resample = librosa.resample(y=audio_data, orig_sr=sr, target_sr=resample_rate)  # overwrite for memory purposes
-        return audio_resample, resample_rate
+        audio_data = librosa.resample(y=audio_data, orig_sr=sr, target_sr=resample_rate)
+        sr = resample_rate
 
     return audio_data, sr
 
