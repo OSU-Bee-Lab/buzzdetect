@@ -1,3 +1,7 @@
+import multiprocessing
+import os
+import sys
+
 import librosa
 import soundfile as sf
 import numpy as np
@@ -74,3 +78,68 @@ def extract_frequencies(audio_data, sr=44100, n_freq=3, freq_range=(300, 600)):
 
     return max_freqs
 
+
+def snip_audio(sniplist, cpus, conflict_out='skip'):
+    """ takes sniplist as list of tuples (path_raw, path_snip, start, end) and cuts those snips out of larger raw
+    audio files."""
+    raws = list(set([t[0] for t in sniplist]))
+    snips = list(set([t[1] for t in sniplist]))
+
+    control_dict = {}
+    for raw in raws:
+        rawsnips = [t for t in sniplist if t[0] == raw]
+        rawsnips = sorted(rawsnips, key=lambda x: x[2])  # sort for sequential seeking
+        control_dict.update({raw: rawsnips})
+
+    q_raw = multiprocessing.Queue()
+
+    for raw in raws:
+        q_raw.put(raw)
+
+    for i in range(cpus):
+        q_raw.put("terminate")
+
+    dirs_out = list(set([os.path.dirname(snip) for snip in snips]))
+    for d in dirs_out:
+        os.makedirs(d, exist_ok=True)
+
+    def worker_snipper(worker_id):
+        print(f'snipper {worker_id}: starting')
+
+        # Raw loop
+        #
+        while True:
+            raw_assigned = q_raw.get()
+            if raw_assigned == 'terminate':
+                print(f"snipper {worker_id}: received terminate signal; exiting")
+                sys.exit(0)
+
+            print(f'snipper {worker_id}: starting on raw {raw_assigned}')
+            sniplist_assigned = control_dict[raw_assigned]
+
+            track = sf.SoundFile(raw_assigned)
+            samplerate_native = track.samplerate
+
+            # snip loop
+            #
+            for path_raw, path_snip, start, end in sniplist_assigned:
+                if os.path.exists(path_snip) and conflict_out == 'skip':
+                    continue
+
+                # print(f'snipper {worker_id}: snipping {path_snip}')
+                start_frame = round(samplerate_native * start)
+                frames_to_read = round(samplerate_native * (end - start))
+                track.seek(start_frame)
+
+                audio_data = track.read(frames_to_read)
+
+                sf.write(path_snip, audio_data, samplerate_native)
+
+    process_list = [multiprocessing.Process(target=worker_snipper, args=[c]) for c in range(cpus)]
+    for p in process_list:
+        p.start()
+
+    for p in process_list:
+        p.join()
+
+    print('snipping finished!')

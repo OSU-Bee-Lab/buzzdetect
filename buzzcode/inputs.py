@@ -1,6 +1,6 @@
-from buzzcode.tools import search_dir
+from buzzcode.utils import search_dir
 from buzzcode.audio import load_audio, frame_audio
-from buzzcode.preprocessing.embeddings import get_embedder, extract_embeddings
+from buzzcode.embeddings import get_embedder, extract_embeddings
 from buzzcode.audio import extract_frequencies
 import soundfile as sf
 import tensorflow as tf

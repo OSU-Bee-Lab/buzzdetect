@@ -1,5 +1,5 @@
-from buzzcode.preprocessing.embeddings import get_embedder
-from buzzcode.preprocessing.preprocess import extract_input
+from buzzcode.embeddings import get_embedder
+from buzzcode.inputs import extract_input
 from buzzcode.analysis.analysis import solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, translate_results
 from buzzcode.audio import load_audio, frame_audio
 import tensorflow as tf
@@ -13,7 +13,7 @@ import json
 import soundfile as sf
 import numpy as np
 from datetime import datetime
-from buzzcode.tools import search_dir, Timer, clip_name
+from buzzcode.utils import search_dir, Timer, clip_name
 
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)

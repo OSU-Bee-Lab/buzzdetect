@@ -4,8 +4,8 @@ import numpy as np
 import os
 import re
 import json
-from buzzcode.tools import save_pickle
-from buzzcode.preprocessing.embeddings import get_embedder
+from buzzcode.utils import save_pickle
+from buzzcode.embeddings import get_embedder
 
 
 # could maybe be generalized into frame_audio? also I'm sure this could get way faster, but kludge for now!
@@ -108,6 +108,10 @@ def generate_model(modelname, embeddername='yamnet', metadata_name="metadata_str
     # TODO: just generate the cache files!
     metadata['path_inputs'] = [re.sub(dir_audio, dir_cache, path) for path in metadata['path_audio']]
     metadata['path_inputs'] = [os.path.splitext(emb)[0] + '.npy' for emb in metadata['path_inputs']]
+
+    metadata_noinputs = metadata[[not os.path.exists(p) for p in metadata['path_inputs']]]
+
+
 
     metadata = metadata[[os.path.exists(p) for p in metadata['path_inputs']]]
 

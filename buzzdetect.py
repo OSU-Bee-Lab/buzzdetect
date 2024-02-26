@@ -1,6 +1,6 @@
 import argparse
 import sys
-from buzzcode.tools import str2bool
+from buzzcode.utils import str2bool
 
 # custom class credit: Steven Bethard
 class MyParser(argparse.ArgumentParser):
