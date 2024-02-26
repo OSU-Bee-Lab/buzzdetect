@@ -11,15 +11,17 @@ import re
 import os
 
 
-def extract_input(frame_samples, embedder, sr_native, sr_embedder):
+def extract_input(frames, sr_native, embedder, config):
     # if i always want to use beeband and global, I could roll both into a single dominant_frequencies analysis
-    frequencies_beeband = extract_frequencies(frame_samples, sr=sr_native)
-    frequency_global = extract_frequencies(frame_samples, sr=sr_native, n_freq=1, freq_range=(0, sr_native))
+    frequencies_beeband = [extract_frequencies(frame, sr=sr_native) for frame in frames]
+    frequency_global = [extract_frequencies(frame, sr=sr_native, n_freq=1, freq_range=(0, sr_native)) for frame in frames]
 
-    frame_resample = librosa.resample(frame_samples, orig_sr=sr_native, target_sr=sr_embedder)
-    embeddings = extract_embeddings(frame_resample, embedder)
+    if sr_native != config['samplerate']:
+        frames = [librosa.resample(frame, orig_sr=sr_native, target_sr=config['samplerate']) for frame in frames]
 
-    inputs = np.concatenate((embeddings, frequencies_beeband, frequency_global))
+    embeddings = embedder(frames)
+
+    inputs = [np.concatenate((e, fb, fg)) for e, fb, fg in zip(embeddings, frequencies_beeband, frequency_global)]
 
     return inputs
 
@@ -82,8 +84,8 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
                 path_out = assignment[1]
                 continue
 
-            frames = frame_audio(audio_data, framelength, sr_native)
-            inputs = np.array([extract_input(f, embedder, sr_native, sr_embedder) for f in frames], dtype=np.float32)
+            frames = frame_audio(audio_data, config['framelength'], sr_native)
+            inputs = extract_input(frames, sr_native, embedder, config)
 
             np.save(path_out, inputs)
 

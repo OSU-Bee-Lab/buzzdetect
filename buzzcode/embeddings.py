@@ -8,9 +8,15 @@ def get_embedder(embeddername):
         os.environ["TFHUB_CACHE_DIR"]="./embedders/yamnet"
         yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
 
-        def embedder(data):
-            embeddings = yamnet(data)[1]  # element 1 is embeddings
-            embeddings = np.array(embeddings)[0, ]  # numpy converts to (1024,1) by default
+        def embedder(frames):
+            """
+            :param frames: a list where each element is a numpy array of audio samples
+            :return: a list of equal length to the input where each element is a numpy array of embedding values
+            """
+
+            # annoyingly, YAMNet doesn't seem to like taking arrays as inputs
+            embeddings = [yamnet(frame)[1] for frame in frames]  # element 1 of yamnet output is embeddings
+            embeddings = [np.array(e).squeeze() for e in embeddings]
             return embeddings
 
         config = dict(
@@ -38,15 +44,21 @@ def get_embedder(embeddername):
         #  drops output layer, returning embeddings instead of classifications
         output_index = output_details[0]["index"] - 1
 
-        def embedder(framelist):
+        def embedder(frames):
+            """
+            :param frames: a list where each element is a numpy array of audio samples
+            :return: a list of equal length to the input where each element is a numpy array of embedding values
+            """
+
             # Reshape input tensor
-            birdnet.resize_tensor_input(input_index, [len(framelist), *framelist[0].shape])
+            birdnet.resize_tensor_input(input_index, [len(frames), *frames[0].shape])
             birdnet.allocate_tensors()
 
             # Extract feature embeddings
-            birdnet.set_tensor(input_index, np.array(framelist, dtype="float32"))
+            birdnet.set_tensor(input_index, np.array(frames, dtype="float32"))
             birdnet.invoke()
             embeddings = birdnet.get_tensor(output_index)
+            embeddings = list(embeddings)
 
             return embeddings
 
@@ -62,8 +74,3 @@ def get_embedder(embeddername):
         return
 
     return embedder, config
-
-
-def extract_embeddings(frame_data, embedder):
-    embeddings = embedder(frame_data)
-    return embeddings
