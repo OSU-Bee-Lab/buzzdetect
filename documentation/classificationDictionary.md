@@ -1,4 +1,4 @@
-# Buzzdetect Classification Dictionary
+# buzzdetect Classification Dictionary
 Version 2.1.1
 
 ### Version 2.1.1
