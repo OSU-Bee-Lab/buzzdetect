@@ -1,12 +1,12 @@
 # Buzzdetect Classification Dictionary
-Version 2.1 (in progress)
+Version 2.1.1
 
-### Version 2.1 changelist
+### Version 2.1.1
 * Added 
-   * ambient_bang
-   * ambient_rustle
+   * frog_* and frog_tree
+   * bird_*
 * Renamed
-   * mech_hum to mech_hum_traffic to make room for future non-traffic hums.
+   * goose to bird_goose
 
 ## Overview
 This dictionary documents all classes of interest for the buzzdetect training set. The dictionary headers are given in the label format with semantic names in parenthesis. E.g., the insect rank is given as “ins (insects)”. Terminal ranks are given with their full label identity. E.g., the honey bee rank has the epithet “bee”, but is listed with the full label: “ins_buzz_bee (honey bee)”
@@ -21,6 +21,11 @@ At this time, buzzdetect does not use a hierarchical classification model. Nonet
 The hierarchies are reflected below with nested headings. Terminal ranks—that is, the label applied to the training data—are tagged with `LABEL: `.
 
 Labels are made by concatenating ranks with underscores. For example, the taxonomy of a propeller plane is: mechanical/plane/propeller and would be labeled as mech_plane_prop.
+
+### Simultaneity
+Starting on 2024-02-26, we are labeling simultaneous sounds. All perceptible sounds in an audio segment will be labeled in decreasing order of prominence with each label separated by a semicolon.
+For example, a recording of ambient noise at night with very faint crickets in the background would be labeled as `ambient_night; ins_trill`.
+The faint sound of a honey bee buzz with moderate human speech and a loud jet plane passing overhead would be labeled as `mech_plane_jet; human; ins_buzz_bee`.
 
 ### "RECLASSIFY"
 When the class dictionary undergoes changes, it can break previous labels.
@@ -57,10 +62,13 @@ Flight buzzes that are lower in pitch than that of the honey bee. Perhaps bumble
 Sharp, nearby chirping or tymbaling as of crickets, cicadas, katydids.
 Note: a distant background of crickets or cicadas should be classified as ambient.
 
-## goose
-#### LABEL: goose
+## bird
+#### LABEL: bird_goose
 goose
 
+## frog
+### LABEL: frog_tree
+tree frogs
 
 ## human
 #### LABEL: human
