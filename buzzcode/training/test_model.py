@@ -1,17 +1,23 @@
 from buzzcode.utils import setthreads
-setthreads(1)
-
 import pandas as pd
 import os
 import re
 import multiprocessing
 import numpy as np
+import json
 from buzzcode.analysis.analyze_directory import loadup, translate_results
+setthreads(1)
 
-# modelname = 'freq_128'; cpus=6; max_per_class=100
+
+# modelname = 'agricultural_01'; cpus=6; max_per_class=100
 def analyze_testfold(modelname, cpus, max_per_class = 100):
     dir_model = os.path.join("models", modelname)
-    dir_cache = './training/input_cache_freq'
+
+    with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
+        config = json.load(file)
+
+    embeddername = config['embeddername']
+    dir_cache = './training/inputCache_' + embeddername
 
     dir_out = os.path.join(dir_model, "output_testFold")
 
@@ -47,7 +53,7 @@ def analyze_testfold(modelname, cpus, max_per_class = 100):
         q_assignments.put(('TERMINATE', 'TERMINATE'))
 
     def analyzer_cache(worker_id):
-        model, config = loadup(modelname)
+        model, _ = loadup(modelname)
         classes = config['classes']
         framelength = config['framelength']
 
