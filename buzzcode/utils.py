@@ -2,6 +2,7 @@ import os
 import re
 import argparse
 import pickle
+import warnings
 from datetime import datetime
 
 
@@ -76,3 +77,20 @@ def load_pickle(path_pickle):
         obj = pickle.load(file_pickle)
 
     return obj
+
+
+def setthreads(threads_desired=1):
+    import tensorflow as tf
+    threads_current = tf.config.threading.get_inter_op_parallelism_threads()
+
+    if threads_current == threads_desired:
+        return
+
+    elif threads_current == 0:
+        tf.config.threading.set_inter_op_parallelism_threads(1)
+        tf.config.threading.set_intra_op_parallelism_threads(1)
+
+    else:
+        warnings.warn(f'tensorflow threads already initialized to {threads_current}; cannot set')
+
+

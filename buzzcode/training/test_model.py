@@ -1,6 +1,5 @@
-import tensorflow as tf
-tf.config.threading.set_inter_op_parallelism_threads(1)
-tf.config.threading.set_intra_op_parallelism_threads(1)
+from buzzcode.utils import setthreads
+setthreads(1)
 
 import pandas as pd
 import os

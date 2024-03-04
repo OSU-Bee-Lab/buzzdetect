@@ -1,3 +1,6 @@
+from buzzcode.utils import search_dir, Timer, clip_name, setthreads
+setthreads(1)
+
 from buzzcode.embeddings import get_embedder
 from buzzcode.inputs import extract_input
 from buzzcode.analysis.analysis import solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup, translate_results
@@ -13,10 +16,6 @@ import json
 import soundfile as sf
 import numpy as np
 from datetime import datetime
-from buzzcode.utils import search_dir, Timer, clip_name
-
-tf.config.threading.set_inter_op_parallelism_threads(1)
-tf.config.threading.set_intra_op_parallelism_threads(1)
 
 # modelname = "frequency_aware"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; paths_audio = None
 def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", dir_cache = None, paths_audio = None, dir_out=None, verbosity=1):

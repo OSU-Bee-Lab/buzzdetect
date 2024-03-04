@@ -1,4 +1,5 @@
-from buzzcode.utils import search_dir
+from buzzcode.utils import search_dir, setthreads
+setthreads(1)
 from buzzcode.audio import load_audio, frame_audio
 from buzzcode.embeddings import get_embedder
 from buzzcode.audio import extract_frequencies
@@ -61,8 +62,6 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
 
     def worker_cacher(worker_id):
         print(f"cacher {worker_id}: launching")
-        tf.config.threading.set_inter_op_parallelism_threads(1)
-        tf.config.threading.set_intra_op_parallelism_threads(1)
         embedder, config = get_embedder(embeddername)
 
         assignment = q_assignments.get()

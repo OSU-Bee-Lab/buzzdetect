@@ -1,3 +1,5 @@
+from buzzcode.utils import save_pickle, setthreads
+setthreads(1)
 import tensorflow as tf
 import pandas as pd
 import numpy as np
@@ -143,7 +145,8 @@ def generate_model(modelname, embeddername='yamnet', metadata_name="metadata_str
             Tout=tf.float64,
         )
 
-        embeddings = tf.convert_to_tensor(embed_array)
+        # convert numpy array to tensor
+        embeddings = tf.convert_to_tensor(embeddings)
         n_embeddings = tf.shape(embeddings)[0]
 
         return embeddings, tf.repeat(target, n_embeddings), tf.repeat(fold, n_embeddings)
