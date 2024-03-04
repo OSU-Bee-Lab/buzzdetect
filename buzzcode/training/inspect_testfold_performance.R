@@ -58,34 +58,6 @@ inspect_model <- function(modelname, write = T){
         select(metadata, stub_audio, classification)
       )
 
-    # data_long <- data %>%
-    #   pivot_longer(
-    #     cols = starts_with("score_"),
-    #     names_to = "target_name",
-    #     values_to = "target_activation"
-    #   ) %>%
-    #   mutate(
-    #     target_name = str_remove(target_name, "score_"),
-    #     is_correct = target_name == classification
-    #   ) %>%
-    #   filter(!is.na(is_correct))
-    # 
-    # 
-    # data_falseneg <- data %>%
-    #   filter(classification == "ins_buzz_bee", class_predicted != "ins_buzz_bee") %>%
-    #   mutate(
-    #     across(
-    #       starts_with("score_"),
-    #       ~ .x - score_ins_buzz_bee
-    #     )
-    #   ) %>%
-    #   select(!c(stub_audio)) %>%
-    #   pivot_longer(
-    #     cols = starts_with("score_"),
-    #     names_to = "target_name",
-    #     values_to = "target_activation"
-    #   )
-    
     print('done loading data')
 
     
@@ -174,11 +146,19 @@ inspect_model <- function(modelname, write = T){
       
       get_sensitivity <- function(class_in){
         # sensitivity = p(positive predicted | positive actual)
-        sub <- confusion_table %>% 
-          filter(actual %in% class_in) %>%  # I'm using %in% so you can check multi-class sensitivity
-          filter(actual == predicted)
+        sub_givenPositive <- confusion_table %>% 
+          filter(actual %in% class_in)
         
-        sensitivity <- mean(sub$proportion)
+        sum_given <- sub_givenPositive %>% 
+          .$proportion %>% 
+          sum()
+        
+        sum_predicted <- sub_givenPositive %>% 
+          filter(predicted %in% class_in) %>% 
+          .$proportion %>% 
+          sum()
+        
+        sensitivity <- sum_predicted/sum_given
         
         return(sensitivity)
       }
@@ -189,19 +169,22 @@ inspect_model <- function(modelname, write = T){
         # I'll use proportions instead; this makes an imperfect real-world specificity; it would be better
         # to weight each class according to it's real-world occurrence, but that's not really possible.
         
-        # sub for negative actuals
-        sub <- confusion_table %>% 
+        sub_givenNegative <- confusion_table %>% 
           filter(!(actual %in% class_in))
         
-        # sum the total possible proportions
-        total <- sum(sub$proportion)  # total = n(total classes) - n(predicted classes)
+        # sum of the set of all negative proportions
+        sum_given <- sub_givenNegative %>% 
+          .$proportion %>% 
+          sum()
         
-        # sum the negative prediction proportions
-        negatives <- sub %>% 
+        # sum of the set of predicted negatives within negatives
+        sum_predicted <- sub_givenNegative %>% 
           filter(!(predicted %in% class_in)) %>% 
-          {sum(.$proportion)}
+          .$proportion %>% 
+          sum()
         
-        specificity <- negatives/total
+        
+        specificity <- sum_predicted/sum_given
         
         return(specificity)
       }
@@ -212,27 +195,29 @@ inspect_model <- function(modelname, write = T){
         # so what? They're rare. Let's look at the really common classes
         
         # note: won't work for all metadata
-        
-        # sub for negative actuals of relevant categories
-        sub <- confusion_table %>% 
+        sub_givenNegative <- confusion_table %>% 
+          filter(!(actual %in% class_in)) %>% 
           filter(
-            !(actual %in% class_in),  # get negatives
             actual %in% c('ambient_day', 'ambient_scraping') |  # these ambient sounds are the most common I've heard
-              str_detect(actual, 'mech_auto') |  # cars are very common
-              str_detect(actual, 'mech_plane')  # planes are very common
-          )
+            str_detect(actual, 'mech_auto') |  # cars are very common
+            str_detect(actual, 'mech_plane')  # planes are very common
+        )
         
-        # sum the total possible proportions
-        total <- sum(sub$proportion)  # total = n(common classes)
+        # sum of the set of all negative proportions
+        sum_given <- sub_givenNegative %>% 
+          .$proportion %>% 
+          sum()
         
-        # sum the negative prediction proportions
-        negatives <- sub %>% 
+        # sum of the set of predicted negatives within negatives
+        sum_predicted <- sub_givenNegative %>% 
           filter(!(predicted %in% class_in)) %>% 
-          {sum(.$proportion)}
+          .$proportion %>% 
+          sum()
         
-        specificity_common <- negatives/total
         
-        return(specificity_common)
+        specificity <- sum_predicted/sum_given
+        
+        return(specificity)
       }
       
       metricsTable <- data.frame(
@@ -264,8 +249,8 @@ inspect_model <- function(modelname, write = T){
           x = metric,
           y = class,
           fill = value,
-          label = round(value, 2) %>% 
-            format(nsmall=2)
+          label = round(value, 3) %>% 
+            format(nsmall=3)
         )
       ) +
         geom_tile(color = "#0d0429", linewidth = 1.3) +
@@ -299,7 +284,7 @@ inspect_model <- function(modelname, write = T){
 }
 
 modelnames <- list.files('./models') %>% 
-  .[!.%in%c('archive', 'inspection')]
+  .[!.%in%c('archive', 'test')]
 
 full <- mclapply(
   modelnames,
@@ -307,23 +292,3 @@ full <- mclapply(
   write = T,
   mc.cores=cpus
 )
-
-names(full) <- modelnames
-
-confusions <- lapply(
-  modelnames,
-  function(m){
-    full[[m]][[2]] %>% 
-      as.data.frame() %>% 
-      mutate(
-        model = m
-      )
-  }
-) %>% 
-  bind_rows() %>% 
-  mutate(
-    weight = str_extract(model, '(.*)Weight_', group =1),
-    metadata = str_extract(model, '_(.*)Meta', group = 1)
-  )
-
-write.csv(confusions, file.path(dir_out, 'confusion_all.csv'), row.names = F)
