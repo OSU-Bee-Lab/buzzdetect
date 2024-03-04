@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import re
 import numpy as np
-
+from buzzcode.utils import search_dir
 
 # Functions for handling models
 #
@@ -129,3 +129,37 @@ def translate_results(results, classes, framelength):
     output_df = pd.DataFrame(translate)
 
     return output_df
+
+
+# ahhh crap. As is, this will ignore merged chunks.
+def merge_chunks(dir_in):
+    paths_chunks = search_dir(dir_in, ['_s\\d+_buzzchunk.csv'])
+    paths_stitched = search_dir(dir_in, ['_buzzdetect.csv'])
+
+    chunkdf = pd.DataFrame()
+    chunkdf['path_chunk'] = paths_chunks
+    paths_split = [re.search('(.*)_s(\\d+)_buzzchunk\\.csv$', p).groups((1,2)) for p in chunkdf['path_chunk']]
+    chunkdf['raw'] = [p[0] for p in paths_split]
+    chunkdf['time_start'] = [p[1] for p in paths_split]
+
+    raws = chunkdf['raw'].unique()
+
+    for raw in raws:
+        chunks = chunkdf[chunkdf['raw'] == raw]
+
+        results = [pd.read_csv(c) for c in chunks['path_chunk']]
+
+        # if there already exists a stitched raw, add it to the results list
+        path_raw = raw + '_buzzdetect.csv'
+        if os.path.exists(path_raw):
+            results.append(pd.read_csv(path_raw))
+
+        results = pd.concat(results).sort_values(by = 'start')
+        path_out = raw + '_buzzdetect.csv'
+        results.to_csv(path_out, index=False)
+
+        # remove old results
+        for c in chunks['path_chunk']:
+            os.remove(c)
+
+
