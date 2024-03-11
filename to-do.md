@@ -32,6 +32,7 @@ but this stackoverflow discussion indicates it's possible.
        - Vary amplitude of
        - If I'm sure labels are tight to buzzes, add rightmost frame to audio
        - Smaller framehop for buzzes?
+* Add dropout
 
 ### New directions
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
