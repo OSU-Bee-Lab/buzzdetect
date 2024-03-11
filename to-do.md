@@ -22,6 +22,20 @@
 * If I'm really supporting multiple embedders, I need to have separate output dirs for each embedder
 
 ## Machine Learning Design
+### Tuning the existing model
+* Use a cost matrix to differentially weight misclassification.
+I thought this was impossible because it would make the loss function non-differentiable,
+but this stackoverflow discussion indicates it's possible.
+* Implement data augmentation
+       - Overlapping buzzes with ambient and other sounds
+       - Add gaussian noise to buzz? Might be more generalized than agricultural ambient noise
+       - Vary amplitude of
+       - If I'm sure labels are tight to buzzes, add rightmost frame to audio
+       - Smaller framehop for buzzes?
+
+### New directions
 * Add dense layer for hierarchical categorization (categorize buzz, then within buzz categorize insect)
-* Move away from YAMNet embeddings? First layer uses YAMNet, second is fully bespoke?
-* Try random forest
+  - Move away from YAMNet embeddings? First layer uses YAMNet, second is fully bespoke?
+* Random forest model
+* Multiple-event classification, especially if I can do something like [Phan et al., 2019](https://arxiv.org/abs/1811.01092).
+The major downside is that the majority of our dataset is not labeled for simultaneous events.
