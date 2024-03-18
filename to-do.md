@@ -9,6 +9,8 @@
 * Allow option to run test_model.py after building model
      - Will I get tensorflow problems when multithreading?
      - Isn't this already being done in training? Can I just save those results?
+ 
+* Allow different framehops for training
 
 ### analysis
 * Redefine chunks to be a number of frames? A number of audio samples (probs better for memory estimation)?
