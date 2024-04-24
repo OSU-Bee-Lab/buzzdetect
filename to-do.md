@@ -16,6 +16,8 @@
        - Smaller framehop for buzzes?
 
 ### analysis
+* Add pre-embedding of entire audio files
+  - Shouldn't need too much RAM allotment. 260,000 frames ~= 1,080MB. 1h of audio at 0.5 framehop = 7500 frames. Should be under 32MB data.
 * Redefine chunks to be a number of audio samples (for memory estimation)
 * Work in frame numbers instead of timestamps? Where frame 1, 2, 3, 4 is ~2.5s of audio because of overlap
      - Timestamps are getting messy in the CSV (e.g., '4923.999999999') and I think this may cause problems when picking an analysis back up
