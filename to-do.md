@@ -4,7 +4,7 @@
 * Make guide for managing training data and training new models. Make way for other researchers to share training data.
 
 ## Code
-## General
+### general
 * Change framelength to be number of samples, not time (makes some operations like)
 
 ### training
