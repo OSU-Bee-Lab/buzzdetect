@@ -1,9 +1,12 @@
-import os
-import re
+from datetime import datetime
+import numpy as np
 import argparse
 import pickle
 import warnings
-from datetime import datetime
+import os
+import re
+
+
 
 
 class Timer:
@@ -80,6 +83,9 @@ def load_pickle(path_pickle):
 
 
 def setthreads(threads_desired=1):
+    if threads_desired < 1:
+        warnings.warn(f'cannot set threadcount below 1; continuing without modification')
+
     import tensorflow as tf
     threads_current = tf.config.threading.get_inter_op_parallelism_threads()
 
@@ -94,3 +100,23 @@ def setthreads(threads_desired=1):
         warnings.warn(f'tensorflow threads already initialized to {threads_current}; cannot set')
 
 
+def make_chunklist(duration, chunklength, chunk_overlap=0, chunk_min=0):
+    if chunk_overlap > chunklength:
+        raise ValueError('chunk overlap must be less than chunk length')
+
+    if chunklength > duration:
+        return [(0, duration)]
+
+    chunklist = []
+    chunk_start = 0
+    chunk_stop = chunklength
+    while chunk_stop < duration:
+        chunklist.append((chunk_start, chunk_stop))
+
+        chunk_start = chunk_stop - chunk_overlap
+        chunk_stop = chunk_start + chunklength
+        if (duration - chunk_stop) <= chunk_min:
+            chunklist.append((chunk_start, duration))
+            break
+
+    return chunklist

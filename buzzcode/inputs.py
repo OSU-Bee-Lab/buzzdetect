@@ -1,5 +1,4 @@
 from buzzcode.utils import search_dir, setthreads
-setthreads(1)
 from buzzcode.audio import load_audio, frame_audio
 from buzzcode.embeddings import get_embedder
 from buzzcode.audio import extract_frequencies
@@ -11,26 +10,31 @@ import librosa
 import re
 import os
 
+setthreads(1)
 
+# I'm temporarily turning off frequency extraction until I get model training sorted
 def extract_input(frames, sr_native, embedder, config):
     # if i always want to use beeband and global, I could roll both into a single dominant_frequencies analysis
-    frequencies_beeband = [extract_frequencies(frame, sr=sr_native) for frame in frames]
-    frequency_global = [extract_frequencies(frame, sr=sr_native, n_freq=1, freq_range=(0, sr_native)) for frame in frames]
+    # frequencies_beeband = [extract_frequencies(frame, sr=sr_native) for frame in frames]
+    # frequency_global = [extract_frequencies(frame, sr=sr_native, n_freq=1, freq_range=(0, sr_native)) for frame in frames]
 
     if sr_native != config['samplerate']:
         frames = [librosa.resample(frame, orig_sr=sr_native, target_sr=config['samplerate']) for frame in frames]
 
     embeddings = embedder(frames)
 
-    inputs = [np.concatenate((e, fb, fg)) for e, fb, fg in zip(embeddings, frequencies_beeband, frequency_global)]
+    # inputs = [np.concatenate((e, fb, fg)) for e, fb, fg in zip(embeddings, frequencies_beeband, frequency_global)]
+    inputs = embeddings
 
     return inputs
 
 
 # cpus=2; dir_in = './training/audio'; dir_out = None; conflict='overwrite'; worker_id=0; embeddername='yamnet'
 # WARNING: cannot handle files larger than memory
-def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=None):
-    paths_in = search_dir(dir_in, list(sf.available_formats()))
+def cache_input(cpus, dir_in, paths_in = None, embeddername='yamnet', conflict='skip', dir_out=None):
+    if paths_in is None:
+        paths_in = search_dir(dir_in, list(sf.available_formats()))
+
     if len(paths_in) == 0:
         quit("no compatible audio files found in input directory")
 
@@ -80,12 +84,26 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
                 path_out = assignment[1]
                 continue
 
+            print('framing')
             frames = frame_audio(audio_data, config['framelength'], sr_native)
-            inputs = extract_input(frames, sr_native, embedder, config)
 
+            print('extracting inputs')
+            # inputs = extract_input(frames, sr_native, embedder, config)
+
+            if sr_native != config['samplerate']:
+                frames = [librosa.resample(frame, orig_sr=sr_native, target_sr=config['samplerate']) for frame in frames]
+
+            inputs = embedder(frames)
+
+            inputs = np.array(inputs, dtype=np.float64)
+
+            print('saving')
             np.save(path_out, inputs)
 
+            print('getting new assignment')
             assignment = q_assignments.get()
+
+            print('assignment got')
             path_in = assignment[0]
             path_out = assignment[1]
 
@@ -101,7 +119,4 @@ def cache_input(cpus, dir_in, embeddername='yamnet', conflict='skip', dir_out=No
         cachers[c].join()
 
     print('done caching! :)')
-
-if __name__ == '__main__':
-    cache_input(8, './training/audio', 'yamnet', conflict='skip')
 

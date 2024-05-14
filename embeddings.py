@@ -185,4 +185,4 @@ def embed_directory(dir_audio='./localData/raw experiment audio', embeddername='
     print('done!')
 
 if __name__ == '__main__':
-    embed_directory(cpus=4)
+    embed_directory(cpus=2)

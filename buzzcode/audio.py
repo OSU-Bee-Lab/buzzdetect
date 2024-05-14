@@ -34,7 +34,7 @@ def frame_audio(audio_data, framelength, samplerate, framehop=0.5):
     framelength_samples = int(framelength*samplerate)
     audio_samples = len(audio_data)
     if audio_samples < framelength_samples:
-        quit("sub-frame audio given")
+        raise ValueError('sub-frame audio given')
 
     frames = []
     frame_start = 0

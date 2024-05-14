@@ -23,7 +23,7 @@ parser_analyze.add_argument('--modelname', help='the name of the directory holdi
 parser_analyze.add_argument('--cpus', required=True, type=int)
 parser_analyze.add_argument('--memory', required=True, type=float)
 parser_analyze.add_argument('--classes', required=False, type=str) # give as...comma-separated list?
-parser_analyze.add_argument('--dir_raw', required=False, default="./audio_in", type=str)
+parser_analyze.add_argument('--dir_audio', required=False, default="./audio_in", type=str)
 parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
 parser_analyze.add_argument('--verbosity', required=False, default=1, type=int)
 
@@ -47,13 +47,13 @@ if (args.action == "train"):
 
 elif (args.action == "analyze"):
     print(f"analyzing audio in {args.dir_raw} with model {args.modelname}")
-    from buzzcode.analyze import analyze_batch
+    from buzzcode.analysis.analyze_audio import analyze_batch
 
     analyze_batch(
         modelname=args.modelname,
         cpus=args.cpus,
         memory_allot=args.memory,
-        dir_raw=args.dir_raw,
+        dir_audio=args.dir_audio,
         dir_out=args.dir_out,
         verbosity=args.verbosity,
     )

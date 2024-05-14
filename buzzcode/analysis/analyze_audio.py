@@ -3,7 +3,7 @@ setthreads(1)
 
 from buzzcode.embeddings import get_embedder
 from buzzcode.inputs import extract_input
-from buzzcode.analysis.analysis import (solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup,
+from buzzcode.analysis.analysis import (solve_memory, get_gaps, get_coverage_REWORK, gaps_to_chunklist, loadup,
                                         translate_results, merge_chunks)
 from buzzcode.audio import load_audio, frame_audio
 import os
@@ -15,7 +15,7 @@ import json
 import soundfile as sf
 import numpy as np
 from datetime import datetime
-import warnings
+
 
 #  modelname = "agricultural_01"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; paths_audio = None
 def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes_out = None, paths_audio = None, dir_out=None, verbosity=1):
@@ -59,7 +59,7 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes
     for path in paths_audio:
         audio_duration = librosa.get_duration(path=path)
 
-        coverage = get_coverage(path, dir_audio, dir_out)
+        coverage = get_coverage_REWORK(path, dir_audio, dir_out)
         if len(coverage) == 0:
             coverage = [(0, 0)]
 

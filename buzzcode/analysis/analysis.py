@@ -88,7 +88,19 @@ def gaps_to_chunklist(gaps_in, chunklength):
     return chunklist_master
 
 
-def get_coverage(path_raw, dir_raw, dir_out):
+def melt_coverage(cover_df):
+    ''' where cover_df is a dataframe with start and end columns '''
+    cover_df.sort_values("start", inplace=True)
+    cover_df["coverageGroup"] = (cover_df["start"] > cover_df["end"].shift()).cumsum()
+    df_coverage = cover_df.groupby("coverageGroup").agg({"start": "min", "end": "max"})
+
+    coverage = list(zip(df_coverage['start'], df_coverage['end']))
+
+    return coverage  # list of tuples
+
+
+def get_coverage_REWORK(path_raw, dir_raw, dir_out):
+    # TODO: shift useage over to the new, generalized melt_coverage
     out_suffix = "_buzzdetect.csv"
 
     raw_base = os.path.splitext(path_raw)[0]
@@ -104,28 +116,22 @@ def get_coverage(path_raw, dir_raw, dir_out):
 
     coverage = list(zip(df_coverage['start'], df_coverage['end']))
 
-    return coverage # list of tuples
+    return coverage  # list of tuples
 
 
 # Functions for applying transfer model
 #
 
-def translate_results(results, classes, framelength):
-    scorenames = ['score_' + c for c in classes]
-
+def translate_results(results, classes):
+    # as I move from DataFrames to dicts, this function is becoming less useful...
     translate = []
     for i, scores in enumerate(results):
         results_frame = {
-            "start": i * (framelength/2),
-            "end": ((i * (framelength/2)) + framelength),
-            "class_predicted": classes[scores.argmax()],
-            "score_predicted": scores[scores.argmax()]
+            "class_max": classes[scores.argmax()]  # I think I'll deprecate this eventually, but it remains interesting for now
         }
 
-        results_frame.update({scorenames[i]: scores[i] for i in range(len(classes))})
-
+        results_frame.update({classes[i]: scores[i] for i in range(len(classes))})
         translate.append(results_frame)
-
     output_df = pd.DataFrame(translate)
 
     return output_df

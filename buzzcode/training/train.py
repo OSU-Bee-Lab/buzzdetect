@@ -1,210 +1,182 @@
-from buzzcode.utils import save_pickle, setthreads
-setthreads(1)
+from buzzcode.utils import save_pickle, load_pickle, setthreads
+import matplotlib.pyplot as plt
 import tensorflow as tf
 import pandas as pd
 import numpy as np
+import shutil
 import os
-import re
 import json
-from buzzcode.utils import save_pickle
-from buzzcode.embeddings import get_embedder
+setthreads(1)
 
-
-# could maybe be generalized into frame_audio? also I'm sure this could get way faster, but kludge for now!
-def count_frames(duration, framelength, framehop=0.5):
-    frames = []
-    frame_start = 0
-    frame_end = framelength
-    step = framelength*framehop
-
-    while frame_end <= duration:
-        frames.append((frame_start, frame_end))
-        frame_start += step
-        frame_end += step
-
-    return len(frames)
-
-def weight_inverseproportional(metadata, framelength):
-    weightdf = pd.DataFrame()
-    weightdf['classification'] = metadata['classification'].unique()
-
-    def count_class_frames(classification_in):
-        #  don't include test information in weighting
-        sub = metadata[(metadata['classification'] == classification_in) & (metadata['fold'] != 5)]
-        framecounts = [count_frames(d, framelength, 0.5) for d in sub['duration']]
-
-        return sum(framecounts)
-
-    weightdf['frames'] = [count_class_frames(c) for c in weightdf['classification']]
-
-    frames_total = sum(weightdf['frames'])
-
-    weightdf['weight'] = [np.log(frames_total / f) for f in weightdf['frames']]
-
-    weightdf = weightdf.sort_values(by='classification')
-
-    return weightdf
-
-
-def weight_fractional(metadata, framelength):
-    weightdf = pd.DataFrame()
-    weightdf['classification'] = metadata['classification'].unique()
-
-    def count_class_frames(classification_in):
-        #  don't include test information in weighting
-        sub = metadata[(metadata['classification'] == classification_in) & (metadata['fold'] != 5)]
-        framecounts = [count_frames(d, framelength, 0.5) for d in sub['duration']]
-
-        return sum(framecounts)
-
-    weightdf['frames'] = [count_class_frames(c) for c in weightdf['classification']]
-
-    frames_max = max(weightdf['frames'])
-
-    weightdf['weight'] = [(frames_max / f) for f in weightdf['frames']]
-
-    weightdf = weightdf.sort_values(by='classification')
-
-    return weightdf
-
-
-# modelname = 'test'; metadata_name="metadata_strict"; weights_name=None; epochs_in=3
-def generate_model(modelname, embeddername='yamnet', metadata_name="metadata_strict", epochs_in=100):
-    input_size = 1028  # not sure how to handle this; input shape will be fixed for any one model but is still in flux
-
+# modelname = 'test'; setname = 'yamnet_droptraffic_general_semi'; epochs_in=100; test=True
+def train_model(modelname, setname, epochs_in=100, test=True):
     dir_model = os.path.join("./models/", modelname)
     if os.path.exists(dir_model) and modelname != 'test':
         raise FileExistsError(
             'a model folder with this name already exists; delete or rename the existing model folder and re-run')
     os.makedirs(dir_model, exist_ok=True)
 
-    dir_training = './training'
-    dir_metadata = os.path.join(dir_training, 'metadata')
-    dir_audio = os.path.join(dir_training, 'audio')
-    dir_cache = os.path.join(dir_training, 'input_cache_freq')
+    dir_set = './training/sets/translated/' + setname
+    shutil.copy(os.path.join(dir_set, 'annotations.csv'), os.path.join(dir_model, 'annotations.csv'))
 
-    embedder, config = get_embedder(embeddername)
-    framelength = config['framelength']
+    with open(os.path.join(dir_set, 'config.txt'), 'r') as f:
+        config = json.load(f)
 
-    config.update({'input_size': input_size})
+    classes = config['classes']
 
-    # METADATA ----
+    # Load cache and make dataset
     #
+    # 0: inputs; 1:targets; 2:folds_raw; 3:labels
+    dataset_all_raw = load_pickle(os.path.join(dir_set, 'data'))
 
-    # prep
+    fold_dict = {1: 'train', 2: 'train', 3: 'train', 4: 'validation', 5: 'test'}
+
+    # input semantic fold, return dataset
+    def datasetter(fold_in):
+        data_sub = [s for s in dataset_all_raw if fold_dict[s['fold']] == fold_in]
+        return data_sub
+
+    dataset_val_raw = datasetter('validation')
+    dataset_train_raw = datasetter('train')
+
+    # ADJUSTING TRAINING VOLUME ----
     #
-    if not bool(re.search('\\.csv$', metadata_name)):
-        metadata_name = metadata_name + '.csv'
-    metadata = pd.read_csv(os.path.join(dir_metadata, metadata_name))
+    def count_frames(target_in, set_in):
+        targets = [s['targets'][target_in] for s in set_in]
+        frames_target = sum(targets)
+        return frames_target
 
-    # trim leading slash, if present, from idents for os.path.join
-    metadata['path_relative'] = [re.sub('^/', '', i) for i in metadata['path_relative']]
-
-    if 'path_audio' not in metadata.columns:
-        metadata['path_audio'] = [os.path.join(dir_audio, p) for p in metadata['path_relative']]
-
-    if 'fold' not in metadata.columns:
-        metadata['fold'] = np.random.randint(low=1, high=6, size=len(metadata))
-
-    # drop inputs that haven't been cached
-    # TODO: just generate the cache files!
-    metadata['path_inputs'] = [re.sub(dir_audio, dir_cache, path) for path in metadata['path_audio']]
-    metadata['path_inputs'] = [os.path.splitext(emb)[0] + '.npy' for emb in metadata['path_inputs']]
-
-    metadata_noinputs = metadata[[not os.path.exists(p) for p in metadata['path_inputs']]]
-
-
-
-    metadata = metadata[[os.path.exists(p) for p in metadata['path_inputs']]]
+    # temporarily turning off evening of dataset; gonna try different conversions first
+    # def even_dataset(set_in):
+    #     volumes = pd.DataFrame()
+    #     volumes['class'] = classes
+    #     volumes['target'] = range(len(classes))
+    #     volumes['frames'] = [count_frames(t, set_in) for t in volumes['target']]
+    #
+    #     buzz_frames = volumes.loc[volumes['class'] == 'ins_buzz', 'frames'].item()
+    #     volumes['frame_ratio'] = [buzz_frames/f for f in volumes['frames']]  # ratio of buzz frames to train frames
+    #
+    #     dataset_sub = []
+    #     # subset loop
+    #     for c in classes:
+    #         if volumes.loc[volumes['class'] == c, 'frame_ratio'].item() >= 1:
+    #             print(f'class {c} has fewer frames than buzz; skipping')
+    #             continue
+    #
+    #         print(f'subsetting class {c}')
+    # TODO: adjust val set also so validation loss isn't biased towards planes
 
     # WEIGHTING ----
     #
-    weightdf = weight_inverseproportional(metadata, framelength)
-    weightdf.to_csv(os.path.join(dir_model, "weights.csv"), index=False)
+    frames_total = len(dataset_train_raw)
 
-    dict_weight = {index: weight for index, weight in enumerate(weightdf['weight'])}
-    dict_names = {name: index for index, name in enumerate(weightdf['classification'])}
+    def weighter(target_in):
+        frames_target = count_frames(target_in, dataset_train_raw)
+        if frames_target == 0:
+            print(f'Warning: no frames found for class {classes[target_in]}')
+            return 1
 
-    config.update({'classes': weightdf['classification'].tolist()})
+        weight = frames_total/(frames_target*len(classes))  # still overweights huge classes
 
-    # hmm this is throwing an error when it wasn't before; because subsetting for existing files?
-    metadata['target'] = [dict_names[c] for c in metadata['classification']]  # add model internal target number
+        return frames_target, weight
 
-    # write metadata
-    metadata.to_csv(os.path.join(dir_model, "metadata.csv"), index=False)
+    weights = pd.DataFrame()
+    weights['target'] = range(len(classes))
+    weights['class'] = classes
+    weights_frames, weights_weights = zip(*[weighter(c) for c in weights['target']])
+    weights['frames'] = weights_frames
+    weights['weight'] = weights_weights
+    weights.to_csv(os.path.join(dir_model, 'weights.csv'))
 
-    # dataset creation
+    weight_dict = {t: w for t, w in zip(weights['target'], weights['weight'])}  # I guess I could just enumerate
+
+    # Turning datasets into tensorflow datasets
     #
-    dataset_full = tf.data.Dataset.from_tensor_slices(
-        (metadata['path_inputs'], metadata['target'], metadata['fold']))
+    size_shuffle = 1000
+    size_batch = 4096
+    config.update(
+        {'size_shuffle': size_shuffle, 'size_batch': size_batch}
+    )
 
-    def load_embed(path_inputs, target, fold):
-        embed_array = tf.numpy_function(
-            func=lambda y: np.array(np.load(y.decode("utf-8"), allow_pickle=True)),
-            inp=[path_inputs],
-            Tout=tf.float64,
-        )
+    def set_to_tfset(set_in):
+        inputs, targets = zip(*[(s['embeddings'], s['targets']) for s in set_in])
+        inputs = list(inputs)  # TODO: check if necessary for tf.data.Dataset.from_tensor_slices
+        targets = list(targets)
 
-        # convert numpy array to tensor
-        embeddings = tf.convert_to_tensor(embeddings)
-        n_embeddings = tf.shape(embeddings)[0]
+        dataset_tf = tf.data.Dataset.from_tensor_slices((inputs, targets))
+        dataset_tf = dataset_tf.cache().shuffle(size_shuffle).batch(size_batch).prefetch(tf.data.AUTOTUNE)
 
-        return embeddings, tf.repeat(target, n_embeddings), tf.repeat(fold, n_embeddings)
+        return dataset_tf
 
-    dataset_full = dataset_full.map(lambda paths, labels, folds: load_embed(paths, labels, folds)).unbatch()
-
-    def set_shape(embeddings, target, fold):
-        embeddings.set_shape(input_size)
-
-        return embeddings, target, fold
-
-    dataset_full = dataset_full.map(lambda embeddings, labels, folds: set_shape(embeddings, labels, folds))
-
-    # Split the data
-    #
-    dataset_cache = dataset_full.cache()
-    dataset_train = dataset_cache.filter(lambda embedding, label, fold: fold < 4)
-    dataset_val = dataset_cache.filter(lambda embedding, label, fold: fold == 4)
-
-    # remove the folds column now that it's not needed anymore
-    remove_fold_column = lambda embedding, label, fold: (embedding, label)
-    dataset_train = dataset_train.map(remove_fold_column)
-    dataset_val = dataset_val.map(remove_fold_column)
-
-    dataset_train = dataset_train.cache().shuffle(1000).batch(32).prefetch(tf.data.AUTOTUNE)
-    dataset_val = dataset_val.cache().batch(32).prefetch(tf.data.AUTOTUNE)
+    # These steps take a while, but I think that's unavoidable due to dataset size
+    dataset_tf_train = set_to_tfset(dataset_train_raw)
+    dataset_tf_val = set_to_tfset(dataset_val_raw)
 
     # Model creation
     #
-    model = tf.keras.Sequential([
-        tf.keras.layers.BatchNormalization(axis=-1, name='normalization'),
-        tf.keras.layers.Input(shape=input_size, dtype=tf.float32, name='input'),
-        tf.keras.layers.Dense(512, activation='relu'),
-        # tf.keras.layers.Dense(256, activation='relu'),
-        tf.keras.layers.Dense(len(weightdf))
-    ], name=modelname)
+    model = tf.keras.Sequential(name=modelname)
+    model.add(tf.keras.layers.Input(shape=(1024,), dtype=tf.float32, name='input'))
+    model.add(tf.keras.layers.Dense(len(classes)))
 
-    model.compile(loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+    callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                patience=5,
+                                                min_delta=0.01,
+                                                restore_best_weights=True)
+
+    model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+                  # TODO: test the new loss function to see if it's working how I would expect
                   optimizer="adam",
                   metrics=['accuracy'])
 
-    callback = tf.keras.callbacks.EarlyStopping(monitor='loss',
-                                                patience=3,
-                                                restore_best_weights=True)
-
-    history = model.fit(dataset_train,
-                        epochs=epochs_in,  # would rather solely rely on early stopping
-                        validation_data=dataset_val,
+    history = model.fit(dataset_tf_train,
+                        epochs=epochs_in,
+                        validation_data=dataset_tf_val,
                         callbacks=callback,
-                        class_weight=dict_weight)
+                        class_weight=weight_dict)
+
+    # TODO: restore weights from where patience ran out, not where val_loss was minimum (worried about overfitting)
+    # TODO: then, increase patience
+    epoch_stopped = callback.stopped_epoch
+    epoch_loss = history.history['val_loss'][epoch_stopped]
+    loss_max = max(history.history['val_loss'])
+
+    plt.plot()
+    ax = plt.gca()
+    ax.set_ylim([0, loss_max])
+    plt.title(f'training loss curves for model {modelname}')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.legend(['training', 'validation'], loc='upper left')
+
+    plt.annotate(f'stopped at epoch {epoch_stopped} with val_loss: {round(epoch_loss, 3)}', (0,0.05))
+    plt.vlines(x=epoch_stopped, ymin=0, ymax=loss_max)
+
+    path_plot = os.path.join(dir_model, 'loss_curves.png')
+    plt.savefig(path_plot)
+    plt.close()
 
     save_pickle(os.path.join(dir_model, 'history'), history)
-
     model.save(os.path.join(dir_model), include_optimizer=True)
     with open(os.path.join(dir_model, 'config.txt'), 'x') as f:
         f.write(json.dumps(config))
 
+    # testing
+    #
+    # TODO: add analysis of pre-embedded 11m
+    # TODO: add affinity to weights
+    if test:
+        from buzzcode.analysis.analyze_audio import translate_results
+        path_testfold = os.path.join(dir_model, '/tests/output_testfold.csv')
 
-if __name__ == "__main__":
-    modelprompt = input("Input model name: ")
-    generate_model(modelprompt)
+        dataset_test = datasetter('test')
+
+        inputs_test = [s['embeddings'] for s in dataset_test]
+        labels_test = ['; '.join(s['labels_conv']) for s in dataset_test]
+
+        results = model(np.array(inputs_test))
+        output = translate_results(np.array(results), classes)
+        output.insert(loc=2, column='classes_actual', value=labels_test)
+        output.to_csv(path_testfold, index=False)
+
