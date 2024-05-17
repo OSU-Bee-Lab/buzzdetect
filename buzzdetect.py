@@ -20,11 +20,12 @@ subparsers = parser.add_subparsers(help='sub-command help', dest='action', requi
 # analyze
 parser_analyze = subparsers.add_parser('analyze', help='analyze all audio files in a directory')
 parser_analyze.add_argument('--modelname', help='the name of the directory holding the model data', required=True, type=str)
-parser_analyze.add_argument('--cpus', required=True, type=int)
-parser_analyze.add_argument('--memory', required=True, type=float)
-parser_analyze.add_argument('--classes', required=False, type=str) # give as...comma-separated list?
+parser_analyze.add_argument('--cpus', required=False, type=int, default=1)
+parser_analyze.add_argument('--memory', required=False, type=float, default=0.5)
+parser_analyze.add_argument('--gpu', required=False, type=str, default='false')
+parser_analyze.add_argument('--vram', required=False, type=float, default=None)
+parser_analyze.add_argument('--detail', required=False, type=str, default='rich')
 parser_analyze.add_argument('--dir_audio', required=False, default="./audio_in", type=str)
-parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
 parser_analyze.add_argument('--verbosity', required=False, default=1, type=int)
 
 # train
@@ -46,14 +47,16 @@ if (args.action == "train"):
     generate_model(args.modelname, args.trainingset, args.epochs)
 
 elif (args.action == "analyze"):
-    print(f"analyzing audio in {args.dir_raw} with model {args.modelname}")
+    print(f"analyzing audio in {args.dir_audio} with model {args.modelname}")
     from buzzcode.analysis.analyze_audio import analyze_batch
 
     analyze_batch(
         modelname=args.modelname,
         cpus=args.cpus,
-        memory_allot=args.memory,
+        RAM=args.memory,
+        gpu=str2bool(args.gpu),
+        VRAM=args.vram,
         dir_audio=args.dir_audio,
-        dir_out=args.dir_out,
+        result_detail=args.detail,
         verbosity=args.verbosity,
     )
