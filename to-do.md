@@ -31,6 +31,9 @@
 * Add progress bar/estimated time to completion (dependent on verbosity?)
 
 ## Machine Learning Design
+### YAMNet
+* Pare down YAMNet design; we've been using a pretty pre-packaged solution that does some internal framing itself; there's likely overhead since I'm pre-framing.
+Check out [the github](https://github.com/tensorflow/models/blob/master/research/audioset/yamnet/inference.py) and see if we can use the raw model.
 ### New directions
 * Random forest model
 * [Phan et al., 2019](https://arxiv.org/abs/1811.01092) have a wicked cool model...arguably more suited to our kind of analysis.
