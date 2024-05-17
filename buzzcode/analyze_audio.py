@@ -24,6 +24,57 @@ warnings.warn(
 #  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'
 def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop', dir_audio="./audio_in", verbosity=1,
                   result_detail='rich'):
+
+    # Logging
+    #
+    q_log = multiprocessing.Queue()
+
+    def printlog(item, item_verb=0, do_log=True):
+        time_current = datetime.now()
+
+        if do_log:
+            q_log.put(f"{time_current} - {item} \n")
+
+        if item_verb <= verbosity:
+            print(item)
+
+        return item
+
+
+
+    def worker_logger():
+        workers_running = cpus
+        while workers_running > 0:
+            log_item = q_log.get(block=True)
+            if log_item == 'TERMINATE':
+                workers_running -= 1
+                continue
+
+            file_log = open(path_log, "a")
+            file_log.write(log_item)
+            file_log.close()
+
+        # on terminate, clean up chunks
+        for c in control:
+            base_out = c['path_audio']
+            base_out = os.path.splitext(base_out)[0]
+            base_out = re.sub(dir_audio, dir_out, base_out)
+
+            stitch_partial(base_out, c['duration_audio'])
+
+        timer_total.stop()
+        closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
+
+        print(closing_message)
+        file_log = open(path_log, "a")
+        file_log.write(closing_message)
+        file_log.close()
+
+    proc_logger = multiprocessing.Process(target=worker_logger)
+    proc_logger.start()
+
+    # File handling
+    #
     timer_total = Timer()
 
     dir_model = os.path.join("models", modelname)
@@ -58,11 +109,15 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
 
     # start logger early and make these exit prints printlogs?
     if len(paths_audio) == 0:
-        print(
+        printlog(
             f"no compatible audio files found in raw directory {dir_audio} \n"
             f"audio format must be compatible with soundfile module version {sf.__version__} \n"
-            "exiting analysis"
+            "exiting analysis",
+            0
         )
+        for c in range(cpus):
+            q_log.put('TERMINATE')
+
         return
 
     control = []
@@ -133,7 +188,9 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
             df.to_csv(path_stitched, index=False)
 
     if not control:
-        print(f"all files in {dir_audio} are fully analyzed; exiting analysis")  # TODO: printlog this
+        printlog(f"all files in {dir_audio} are fully analyzed; exiting analysis",0)
+        for c in range(cpus):
+            q_log.put('TERMINATE')
         return
 
     # streamer
@@ -148,11 +205,11 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
     for _ in range(streamers_concurrent):
         q_control.put('TERMINATE')
 
-    def worker_streamer(worker_id):
+    def worker_streamer(id_streamer):
         c = q_control.get()
         while c != 'TERMINATE':
             printlog(
-                f"streamer {worker_id}: starting on {c['path_audio']}",
+                f"streamer {id_streamer}: starting on {c['path_audio']}",
                 1
             )
 
@@ -179,6 +236,7 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
                         f"unexpectedly small read at time {chunk[0]} for file {c['path_audio']}")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
 
                 samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=config['samplerate'])
+
                 assignment = {
                     'path_audio': c['path_audio'],
                     'chunk': chunk,
@@ -186,9 +244,12 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
                     'samples': samples
                 }
 
-                q_assignments.put(assignment)
+                ######### Temporary debug #########
+                if q_assignments.qsize() == buffer_max:
+                    print(f"!!! streamer {id_streamer} waiting for free buffer !!!")
+                ######### Temporary debug #########
 
-            printlog(f"streamer {worker_id}: fully buffered {c['path_audio']}")
+                q_assignments.put(assignment)
 
     # analyzer
     # 
@@ -209,7 +270,7 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
         while assignment != 'TERMINATE':
             timer_analysis.restart()
 
-            printlog(f"analyzer {id_analyzer}: analyzing {assignment['path_audio']}, chunk {assignment['chunk']}", 1)
+            printlog(f"analyzer {id_analyzer}: analyzing {assignment['path_audio']}, chunk {assignment['chunk']}", 2,do_log=False)
 
             embeddings = embedder(assignment['samples'])
             results = model(embeddings)
@@ -256,54 +317,17 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
                 f"analyzer {id_analyzer}: analyzed {assignment['path_audio']}, "
                 f"chunk {assignment['chunk']} "
                 f"in {timer_analysis.get_total()}s (rate: {analysis_rate})",
-                1)
+                2, do_log=False)
+
+            ######### Temporary debug #########
+            if q_assignments.qsize() == 0:
+                print(f"!!! analyzer {id_analyzer} waiting for assignment !!!")
+            ######### Temporary debug #########
 
             assignment = q_assignments.get()
 
         printlog(f"analyzer {id_analyzer}: terminating")
         q_log.put('TERMINATE')
-
-    # logging
-    #
-    q_log = multiprocessing.Queue()
-
-    def printlog(item, item_verb=0):
-        time_current = datetime.now()
-        q_log.put(f"{time_current} - {item} \n")
-
-        if item_verb <= verbosity:
-            print(item)
-
-        return item
-
-    def worker_logger():
-        workers_running = cpus
-        while workers_running > 0:
-            log_item = q_log.get(block=True)
-            if log_item == 'TERMINATE':
-                workers_running -= 1
-                continue
-
-            file_log = open(path_log, "a")
-            file_log.write(log_item)
-            file_log.close()
-            log_item = q_log.get(block=True)
-
-        # on terminate, clean up chunks
-        for c in control:
-            base_out = c['path_audio']
-            base_out = os.path.splitext(base_out)[0]
-            base_out = re.sub(dir_audio, dir_out, base_out)
-
-            stitch_partial(base_out, c['duration_audio'])
-
-        timer_total.stop()
-        closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
-
-        print(closing_message)
-        file_log = open(path_log, "a")
-        file_log.write(closing_message)
-        file_log.close()
 
     # Go!
     #
@@ -328,9 +352,6 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
         proc_streamers.append(multiprocessing.Process(target=worker_streamer, name=f'streamer_proc{s}', args=[s]))
         proc_streamers[-1].start()
         pass
-
-    proc_logger = multiprocessing.Process(target=worker_logger)
-    proc_logger.start()
 
     # wait for analysis to finish
     proc_logger.join()
