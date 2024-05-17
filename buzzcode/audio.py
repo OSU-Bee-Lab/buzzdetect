@@ -23,6 +23,9 @@ def load_audio(path_audio, time_start=0, time_stop=None, resample_rate=None):
     track.seek(start_frame)
     audio_data = track.read(frames_to_read)
 
+    if audio_data.shape[1] > 1:  # if multi-channel, convert to mono
+        audio_data = np.mean(audio_data, axis=-1)
+
     if resample_rate is not None:
         audio_data = librosa.resample(y=audio_data, orig_sr=sr, target_sr=resample_rate)
         sr = resample_rate
