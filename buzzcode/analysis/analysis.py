@@ -23,17 +23,21 @@ def loadup(modelname):
 # Functions for mapping analysis
 #
 # TODO: fine-tune solve_memory for current codebase; large chunks are now more benficial than before (esp. on GPU)
-# TODO: make separate solve_memory for GPU?
-def solve_memory(memory_allot, cpus, framelength):
-    memory_perproc = memory_allot / cpus
+# TODO: make separate solve_memory for GPU
+# TODO: this doesn't account for framehop
+def solve_memory(RAM, cpus, framelength, VRAM=None):
+    memory_perproc = RAM / cpus
     memory_tf = 0.350  # memory (in GB) required for single tensorflow process
 
     surplus_perproc = memory_perproc - memory_tf
     memorydensity_audio = 2.4 / 3600  # gigabytes of memory per second of decoded audio (estimate)
 
     memory_perframe = framelength * memorydensity_audio
-
     chunklength = surplus_perproc / memorydensity_audio
+
+    if VRAM is not None:
+        chunklength_gpu = VRAM/memorydensity_audio
+        chunklength = min(chunklength, chunklength_gpu)
 
     if chunklength < framelength:
         mem_needed = ((cpus * (memory_tf + memory_perframe)) * 10).__ceil__() / 10

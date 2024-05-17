@@ -19,7 +19,7 @@ from datetime import datetime
 
 #  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'
 # NOTE: currently set up for only a single gpu
-def analyze_batch(modelname, cpus, memory_allot, gpu=False, embeddername='yamnet_wholehop', dir_audio="./audio_in", paths_audio=None, verbosity=1, result_detail='rich'):
+def analyze_batch(modelname, cpus, RAM, gpu=False, VRAM=None, embeddername='yamnet_wholehop', dir_audio="./audio_in", paths_audio=None, verbosity=1, result_detail='rich'):
     timer_total = Timer()
 
     dir_model = os.path.join("./models", modelname)
@@ -35,7 +35,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, embeddername='yamnet
 
     framelength = config['framelength']
 
-    chunklength = solve_memory(memory_allot, cpus, framelength=framelength)
+    chunklength = solve_memory(RAM=RAM, cpus=cpus, VRAM=VRAM, framelength=framelength)
 
     log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
     path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
@@ -244,7 +244,9 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, embeddername='yamnet
         log_item = q_log.get(block=True)
 
         workers_running = cpus
-        while workers_running > 0:  # TODO: workers_running is hitting 0 before all workers are done
+        print(f'logger: workers running: {workers_running}')
+        while workers_running > 0:  # TODO: workers_running is hitting 0 before all workers are done; seems like it hits 0 after the first termination
+            log_item = q_log.get(block=True)
             if log_item == 'terminate':
                 workers_running -= 1
                 continue
@@ -252,7 +254,6 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, embeddername='yamnet
             file_log = open(path_log, "a")
             file_log.write(log_item)
             file_log.close()
-            log_item = q_log.get(block=True)
 
         # on terminate, clean up chunks
         merge_chunks(dir_out)
@@ -272,7 +273,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, embeddername='yamnet
         f"start time: {timer_total.time_start} \n"
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
-        f"memory allotment {memory_allot}\n",
+        f"memory allotment {RAM}\n",
         0)
 
     # launch analysis_process; will wait immediately
@@ -303,4 +304,4 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, embeddername='yamnet
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general', gpu=True, cpus=1, memory_allot=6, verbosity=2)
+    analyze_batch(modelname='model_general', gpu=True, cpus=6, RAM=10, VRAM=1, verbosity=2)
