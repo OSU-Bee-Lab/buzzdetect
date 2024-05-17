@@ -6,11 +6,12 @@ import re
 import numpy as np
 from buzzcode.utils import search_dir
 
+
 # Functions for handling models
 #
 
 def loadup(modelname):
-    dir_model = os.path.join("./models/", modelname)
+    dir_model = os.path.join('./models', modelname)
     model = tf.keras.models.load_model(dir_model)
 
     with open(os.path.join(dir_model, 'config.txt'), 'r') as cfg:
@@ -21,19 +22,21 @@ def loadup(modelname):
 
 # Functions for mapping analysis
 #
+# TODO: fine-tune solve_memory for current codebase; large chunks are now more benficial than before (esp. on GPU)
+# TODO: make separate solve_memory for GPU?
 def solve_memory(memory_allot, cpus, framelength):
-    memory_perproc = memory_allot/cpus
+    memory_perproc = memory_allot / cpus
     memory_tf = 0.350  # memory (in GB) required for single tensorflow process
 
     surplus_perproc = memory_perproc - memory_tf
-    memorydensity_audio = 2.4/3600  # gigabytes of memory per second of decoded audio (estimate)
+    memorydensity_audio = 2.4 / 3600  # gigabytes of memory per second of decoded audio (estimate)
 
-    memory_perframe = framelength*memorydensity_audio
+    memory_perframe = framelength * memorydensity_audio
 
-    chunklength = surplus_perproc/memorydensity_audio
+    chunklength = surplus_perproc / memorydensity_audio
 
     if chunklength < framelength:
-        mem_needed = ((cpus * (memory_tf + memory_perframe))*10).__ceil__()/10
+        mem_needed = ((cpus * (memory_tf + memory_perframe)) * 10).__ceil__() / 10
 
         p = ''
         if cpus > 1:
@@ -74,13 +77,13 @@ def gaps_to_chunklist(gaps_in, chunklength):
 
     for gap in gaps_in:
         gap_length = gap[1] - gap[0]
-        n_chunks = (gap_length/chunklength).__ceil__()
+        n_chunks = (gap_length / chunklength).__ceil__()
         chunkpoints = np.arange(gap[0], gap[1], chunklength).tolist()
 
         chunklist_gap = []
         # can probably list comprehend this
-        for i in range(len(chunkpoints)-1):
-            chunklist_gap.append((chunkpoints[i], chunkpoints[i+1]))
+        for i in range(len(chunkpoints) - 1):
+            chunklist_gap.append((chunkpoints[i], chunkpoints[i + 1]))
 
         chunklist_gap.append((chunkpoints[len(chunkpoints) - 1], gap[1]))
         chunklist_master.extend(chunklist_gap)
@@ -99,8 +102,7 @@ def melt_coverage(cover_df):
     return coverage  # list of tuples
 
 
-def get_coverage_REWORK(path_raw, dir_raw, dir_out):
-    # TODO: shift useage over to the new, generalized melt_coverage
+def get_coverage(path_raw, dir_raw, dir_out, framelength=None, framelength_digits=None):
     out_suffix = "_buzzdetect.csv"
 
     raw_base = os.path.splitext(path_raw)[0]
@@ -110,12 +112,12 @@ def get_coverage_REWORK(path_raw, dir_raw, dir_out):
         return []
 
     out_df = pd.read_csv(path_out)
-    out_df.sort_values("start", inplace=True)
-    out_df["coverageGroup"] = (out_df["start"] > out_df["end"].shift()).cumsum()
-    df_coverage = out_df.groupby("coverageGroup").agg({"start": "min", "end": "max"})
+    if 'end' not in out_df.columns:
+        if framelength is None:
+            raise ValueError('Cannot get coverage; output has no \'end\' column and user did not provide framelength')
+        out_df['end'] = round(out_df['start'] + framelength, framelength_digits)  # round to the 2nd decimal or you get float imprecision
 
-    coverage = list(zip(df_coverage['start'], df_coverage['end']))
-
+    coverage = melt_coverage(out_df)
     return coverage  # list of tuples
 
 
@@ -127,7 +129,8 @@ def translate_results(results, classes):
     translate = []
     for i, scores in enumerate(results):
         results_frame = {
-            "class_max": classes[scores.argmax()]  # I think I'll deprecate this eventually, but it remains interesting for now
+            "class_max": classes[scores.argmax()]
+            # I think I'll deprecate this eventually, but it remains interesting for now
         }
 
         results_frame.update({classes[i]: scores[i] for i in range(len(classes))})
@@ -137,14 +140,13 @@ def translate_results(results, classes):
     return output_df
 
 
-# ahhh crap. As is, this will ignore merged chunks.
 def merge_chunks(dir_in):
     paths_chunks = search_dir(dir_in, ['_s\\d+_buzzchunk.csv'])
     paths_stitched = search_dir(dir_in, ['_buzzdetect.csv'])
 
     chunkdf = pd.DataFrame()
     chunkdf['path_chunk'] = paths_chunks
-    paths_split = [re.search('(.*)_s(\\d+)_buzzchunk\\.csv$', p).groups((1,2)) for p in chunkdf['path_chunk']]
+    paths_split = [re.search('(.*)_s(\\d+)_buzzchunk\\.csv$', p).groups((1, 2)) for p in chunkdf['path_chunk']]
     chunkdf['raw'] = [p[0] for p in paths_split]
     chunkdf['time_start'] = [p[1] for p in paths_split]
 
@@ -160,12 +162,10 @@ def merge_chunks(dir_in):
         if os.path.exists(path_raw):
             results.append(pd.read_csv(path_raw))
 
-        results = pd.concat(results).sort_values(by = 'start')
+        results = pd.concat(results).sort_values(by='start')
         path_out = raw + '_buzzdetect.csv'
         results.to_csv(path_out, index=False)
 
         # remove old results
         for c in chunks['path_chunk']:
             os.remove(c)
-
-

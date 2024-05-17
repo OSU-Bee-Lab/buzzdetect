@@ -2,10 +2,9 @@ from buzzcode.utils import search_dir, Timer, clip_name, setthreads
 setthreads(1)
 
 from buzzcode.embeddings import get_embedder
-from buzzcode.inputs import extract_input
-from buzzcode.analysis.analysis import (solve_memory, get_gaps, get_coverage_REWORK, gaps_to_chunklist, loadup,
+from buzzcode.analysis.analysis import (solve_memory, get_gaps, get_coverage, gaps_to_chunklist, loadup,
                                         translate_results, merge_chunks)
-from buzzcode.audio import load_audio, frame_audio
+from buzzcode.audio import load_audio
 import os
 import re
 import sys
@@ -17,18 +16,22 @@ import numpy as np
 from datetime import datetime
 
 
-#  modelname = "agricultural_01"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; conflict_out="quit"; paths_audio = None
-def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes_out = None, paths_audio = None, dir_out=None, verbosity=1):
+#  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'
+def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop', dir_audio="./audio_in", paths_audio=None, verbosity=1, result_detail='rich'):
     timer_total = Timer()
 
     dir_model = os.path.join("models", modelname)
+    dir_out = os.path.join(dir_model, "output")
+
     with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
         config = json.load(file)
 
-    framelength = config['framelength']
+    with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
+        config_string = file.read()
+        framelength_string = re.search(pattern='framelength\":\ (\d+\.\d+)', string=config_string).group(1)
+        framelength_digits = len(framelength_string.split('.')[1])
 
-    if dir_out is None:
-        dir_out = os.path.join(dir_model, "output")
+    framelength = config['framelength']
 
     chunklength = solve_memory(memory_allot, cpus, framelength=framelength)
 
@@ -59,7 +62,7 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes
     for path in paths_audio:
         audio_duration = librosa.get_duration(path=path)
 
-        coverage = get_coverage_REWORK(path, dir_audio, dir_out)
+        coverage = get_coverage(path, dir_audio, dir_out, framelength, framelength_digits)
         if len(coverage) == 0:
             coverage = [(0, 0)]
 
@@ -78,7 +81,7 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes
             raws_chunklist.append(chunklist)
 
     if len(raws_unfinished) == 0:
-        print(f"all files in {dir_audio} are fully analyzed; exiting analysis")
+        print(f"all files in {dir_audio} are fully analyzed; exiting analysis")  # TODO: printlog this
         sys.exit(0)
 
     # process control
@@ -159,17 +162,10 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes
 
         # ready model
         #
-        embedder, _ = get_embedder('yamnet')  # config already gotten at start
-        model, config = loadup(modelname)
+        model, config_model = loadup(modelname)
+        embedder, config_embedder = get_embedder(embeddername)
 
-        classes = config['classes']
-
-        if classes_out is not None:
-            colnames_out = ["score_" + c for c in classes_out]
-        else:
-            colnames_out = []
-
-        columns_desired = ['start', 'end', 'class_predicted', 'score_predicted'] + colnames_out
+        classes = config_model['classes']
 
         q_request.put(id_analyzer)
         assignment = q_analyze[id_analyzer].get()
@@ -189,20 +185,37 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes
             chunk_duration = time_to - time_from
 
             printlog(f"analyzer {id_analyzer}: analyzing {shortpath_raw} from {round(time_from, 1)}s to {round(time_to, 1)}s", 1)
-            audio_data, sr_native = load_audio(path_raw, time_from, time_to)  # leave resampling to extract_input
+            audio_data, sr_native = load_audio(path_raw, time_from, time_to, resample_rate=config_embedder['samplerate'])  # leave resampling to extract_input
 
-            frames = frame_audio(audio_data, framelength, sr_native, framehop=0.5)
-            inputs = extract_input(frames, sr_native=sr_native, embedder=embedder, config=config)
-            results = model(np.array(inputs))
-            output = translate_results(np.array(results), classes, framelength)
+            embeddings = embedder(audio_data)
+            results = model(embeddings)
 
-            output['start'] = output['start'] + time_from
-            output['end'] = output['end'] + time_from
+            output = translate_results(np.array(results), classes)
 
-            output = output[columns_desired]
+            output.insert(
+                column='start',
+                value=[time_from + i * config_embedder['framelength'] * config_embedder['framehop'] for i in range(len(output))],
+                loc=0
+            )
+
+            # round to avoid float errors
+            output['start'] = round(output['start'], framelength_digits)
+
+            # TODO: tighten up by removing conditional check every chunk
+            if result_detail.lower() == 'sparse':
+                output = output[['start', 'ins_buzz']]
+
+            else:
+                output.insert(
+                    column='end',
+                    value=round(output['start'] + config_embedder['framelength'], framelength_digits),
+                    loc=1
+                )
+
+                # round to avoid float errors
+                output['end'] = round(output['end'], framelength_digits)
 
             output.to_csv(path_out, index=False)
-
             q_request.put(id_analyzer)
 
             timer_analysis.stop()
@@ -221,7 +234,7 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes
         log_item = q_log.get(block=True)
 
         workers_running = cpus
-        while workers_running > 0:
+        while workers_running > 0:  # TODO: workers_running is hitting 0 before all workers are done
             if log_item == 'terminate':
                 workers_running -= 1
                 continue
@@ -276,4 +289,4 @@ def analyze_batch(modelname, cpus, memory_allot, dir_audio="./audio_in", classes
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='agricultural_01', cpus=2, memory_allot=2, verbosity=2)
+    analyze_batch(modelname='model_general', cpus=2, memory_allot=6, verbosity=2)

@@ -5,37 +5,35 @@ from buzzcode.utils import search_dir, Timer, save_pickle, setthreads, make_chun
 from datetime import datetime
 import soundfile as sf
 import json
-import tensorflow_hub as hub
 import numpy as np
 import os
 import re
 setthreads(1)
 
-
+# TODO: generalize to embeddername, framehop (and dynamically build yamnet accordingly)
 def get_embedder(embeddername):
-    if embeddername.lower() == 'yamnet':
-        os.environ["TFHUB_CACHE_DIR"]="./embedders/yamnet"
-        yamnet = hub.load(handle='https://tfhub.dev/google/yamnet/1')
+    if bool(re.search(pattern='yamnet', string=embeddername.lower())):
+        import tensorflow as tf
 
-        def embedder(frames):
-            """
-            :param frames: a list where each element is a numpy array of audio samples
-            :return: a list of equal length to the input where each element is a numpy array of embedding values
-            """
+        embedder = tf.keras.models.load_model('./embedders/' + embeddername, compile=False)
+        model_config = embedder.get_config()
+        frame_config = model_config['layers'][20]['inbound_nodes'][0][3]
+        # representation of framehop and framelength are in... integer centiseconds? ms*10
+        # I'm going to assume this is the true framehop, since it's in the model, and that the input params get rounded
 
-            # annoyingly, YAMNet doesn't seem to like taking arrays as inputs
-            embeddings = [yamnet(frame)[1] for frame in frames]  # element 1 of yamnet output is embeddings
-            embeddings = [np.array(e).squeeze() for e in embeddings]
-            return embeddings
+        framehop = frame_config['frame_step']/frame_config['frame_length']
 
         config = dict(
             embeddername='yamnet',
             framelength=0.96,
+            framehop=framehop,
             samplerate=16000,
             n_embeddings=1024
         )
 
+    # TODO: make work!
     elif embeddername.lower() == 'birdnet':
+        raise ValueError('embedding with birdnet is currently broke :(')
         from tensorflow import lite as tflite
 
         path_model = 'embedders/birdnet/BirdNET_GLOBAL_6K_V2.4_Model_FP32.tflite'
@@ -52,6 +50,13 @@ def get_embedder(embeddername):
 
         #  drops output layer, returning embeddings instead of classifications
         output_index = output_details[0]["index"] - 1
+
+        config = dict(
+            embeddername='birdnet',
+            framelength=3,
+            samplerate=48000,
+            n_embeddings=1024
+        )
 
         def embedder(frames):
             """
@@ -70,13 +75,6 @@ def get_embedder(embeddername):
             embeddings = list(embeddings)
 
             return embeddings
-
-        config = dict(
-            embeddername='birdnet',
-            framelength=3,
-            samplerate=48000,
-            n_embeddings=1024
-        )
 
     else:
         print('ERROR: invalid embedder name')
@@ -186,3 +184,5 @@ def embed_directory(dir_audio='./localData/raw experiment audio', embeddername='
 
 if __name__ == '__main__':
     embed_directory(cpus=4)
+
+

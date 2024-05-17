@@ -30,6 +30,7 @@ def load_audio(path_audio, time_start=0, time_stop=None, resample_rate=None):
     return audio_data, sr
 
 
+# TODO: deprecate? This could be useful, e.g. for spectral analysis. Just gotta make sure we're aligned with YAMNet
 def frame_audio(audio_data, framelength, samplerate, framehop=0.5):
     framelength_samples = int(framelength*samplerate)
     audio_samples = len(audio_data)
