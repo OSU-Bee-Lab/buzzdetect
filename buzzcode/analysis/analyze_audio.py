@@ -13,14 +13,16 @@ import multiprocessing
 import json
 import soundfile as sf
 import numpy as np
+import tensorflow as tf
 from datetime import datetime
 
 
 #  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'
-def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop', dir_audio="./audio_in", paths_audio=None, verbosity=1, result_detail='rich'):
+# NOTE: currently set up for only a single gpu
+def analyze_batch(modelname, cpus, memory_allot, gpu=False, embeddername='yamnet_wholehop', dir_audio="./audio_in", paths_audio=None, verbosity=1, result_detail='rich'):
     timer_total = Timer()
 
-    dir_model = os.path.join("models", modelname)
+    dir_model = os.path.join("./models", modelname)
     dir_out = os.path.join(dir_model, "output")
 
     with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
@@ -157,8 +159,13 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
             q.put("terminate")
 
 
-    def worker_analyzer(id_analyzer):
-        printlog(f"analyzer {id_analyzer}: launching", 1)
+    def worker_analyzer(id_analyzer, processor):
+        if processor == 'CPU':
+            tf.config.set_visible_devices([], 'GPU')
+            visible_devices = tf.config.get_visible_devices()
+            for device in visible_devices:
+                assert device.device_type != 'GPU'
+        printlog(f"analyzer {id_analyzer}: processing on {processor}", 1)
 
         # ready model
         #
@@ -185,7 +192,9 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
             chunk_duration = time_to - time_from
 
             printlog(f"analyzer {id_analyzer}: analyzing {shortpath_raw} from {round(time_from, 1)}s to {round(time_to, 1)}s", 1)
-            audio_data, sr_native = load_audio(path_raw, time_from, time_to, resample_rate=config_embedder['samplerate'])  # leave resampling to extract_input
+            # TODO: load audio has overhead from pointer movement; move to a worker that iterates through a file?
+            # Does this mean my current manager isn't actually helping anything, since sequential reads aren't faster with load_audio!?
+            audio_data, sr_native = load_audio(path_raw, time_from, time_to, resample_rate=config_embedder['samplerate'])
 
             embeddings = embedder(audio_data)
             results = model(embeddings)
@@ -215,6 +224,7 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
                 # round to avoid float errors
                 output['end'] = round(output['end'], framelength_digits)
 
+            os.makedirs(os.path.dirname(path_out), exist_ok=True)
             output.to_csv(path_out, index=False)
             q_request.put(id_analyzer)
 
@@ -267,17 +277,21 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
 
     # launch analysis_process; will wait immediately
     proc_analyzers = []
-    for a in range(cpus):
+
+    for a in range(gpu, cpus):
         proc_analyzers.append(
-            multiprocessing.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a])))
+            multiprocessing.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a, 'CPU'])))
         proc_analyzers[-1].start()
         pass
 
     proc_logger = multiprocessing.Process(target=worker_logger)
     proc_logger.start()
 
-    proc_manager = multiprocessing.Process(target=worker_manager())
+    proc_manager = multiprocessing.Process(target=worker_manager)
     proc_manager.start()
+
+    if gpu:
+        worker_analyzer(0, 'GPU')
 
     # wait for analysis to finish
     proc_logger.join()
@@ -289,4 +303,4 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general', cpus=2, memory_allot=6, verbosity=2)
+    analyze_batch(modelname='model_general', gpu=True, cpus=1, memory_allot=6, verbosity=2)
