@@ -1,6 +1,6 @@
 import argparse
 import sys
-from buzzcode.utils import str2bool
+
 
 # custom class credit: Steven Bethard
 class MyParser(argparse.ArgumentParser):
@@ -46,14 +46,13 @@ if (args.action == "train"):
     generate_model(args.modelname, args.trainingset, args.epochs)
 
 elif (args.action == "analyze"):
-    print(f"analyzing audio in {args.dir_raw} with model {args.modelname}")
-    from buzzcode.analysis.analyze_audio import analyze_batch
+    print(f"analyzing audio in {args.dir_audio} with model {args.modelname}")
+    from buzzcode.analyze_audio import analyze_batch
 
     analyze_batch(
         modelname=args.modelname,
         cpus=args.cpus,
         memory_allot=args.memory,
         dir_audio=args.dir_audio,
-        dir_out=args.dir_out,
         verbosity=args.verbosity,
     )
