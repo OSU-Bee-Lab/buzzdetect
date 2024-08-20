@@ -167,7 +167,7 @@ def train_model(modelname, setname, epochs_in=100, test=True):
     # TODO: add analysis of pre-embedded 11m
     # TODO: add affinity to weights
     if test:
-        from buzzcode.analysis.analyze_audio import translate_results
+        from buzzcode.analyze_audio import translate_results
         path_testfold = os.path.join(dir_model, '/tests/output_testfold.csv')
 
         dataset_test = datasetter('test')

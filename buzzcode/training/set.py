@@ -4,7 +4,7 @@ import pandas as pd
 import soundfile as sf
 from buzzcode.utils import save_pickle, setthreads
 from buzzcode.audio import frame_audio
-from buzzcode.analysis.analysis import melt_coverage
+from buzzcode.analysis import melt_coverage
 from buzzcode.utils import load_pickle
 from datetime import datetime
 import numpy as np
@@ -52,7 +52,7 @@ def create_set_raw(annotationname, augmentationname=None, framehop=0.1, overlap_
 
 
 
-    annotations.to_csv(os.path.join(dir_set, 'annotations.csv'))
+    annotations.to_csv(os.path.join(dir_set, 'annotations.csv'), index=False)
 
     idents = annotations['ident'].unique()
     q_idents = multiprocessing.Queue()
@@ -68,8 +68,8 @@ def create_set_raw(annotationname, augmentationname=None, framehop=0.1, overlap_
 
     def worker_constructor(worker_id):
         # TODO: figure out why I can't import get_embedder in parent context!
-        from buzzcode.embeddings import get_embedder
-        embedder, config = get_embedder(embeddername)
+        from buzzcode.embeddings import load_embedder
+        embedder, config = load_embedder(embeddername)
         q_config.put(config)
 
         framelength = config['framelength']
@@ -250,9 +250,9 @@ def translate_set(setname_raw, conversionname, setname_out=None):
     annotations = pd.read_csv(os.path.join(dir_set_raw, 'annotations.csv'))
     annotations['classification_original'] = annotations['classification']
     annotations['classification'] = [conversion_dict[l] for l in annotations['classification_original']]
-    annotations.to_csv(os.path.join(dir_set_out, 'annotations.csv'))
+    annotations.to_csv(os.path.join(dir_set_out, 'annotations.csv'), index=False)
 
-    conversion.to_csv(os.path.join(dir_set_out, 'conversion.csv'))
+    conversion.to_csv(os.path.join(dir_set_out, 'conversion.csv'), index=False)
 
     with open(os.path.join(dir_set_raw, 'config.txt'), 'r') as f:
         config = json.load(f)

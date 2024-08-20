@@ -7,8 +7,6 @@ import os
 import re
 
 
-
-
 class Timer:
     def __init__(self):
         self.time_start = datetime.now()
@@ -46,25 +44,27 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def search_dir(dir_in, extensions):
-    if not (extensions.__class__ is list and extensions[0].__class__ is str):
-        raise ValueError("input extensions should be list of strings")
-
-    # convert extensions into regex, if they aren't already
-    for i in range(len(extensions)):
-        e = extensions[i]
-        if e[len(e) - 1] != "$":
-            e = e+"$"
-
-        e = e.lower()
-        extensions[i] = e
+def search_dir(dir_in, extensions=None):
+    if extensions is not None and not (extensions.__class__ is list and extensions[0].__class__ is str):
+        raise ValueError("input extensions should be None, or list of strings")
 
     paths = []
     for root, dirs, files in os.walk(dir_in):
         for file in files:
-            if True in [bool(re.search(e, file.lower())) for e in extensions]:
-                paths.append(os.path.join(root, file))
+            paths.append(os.path.join(root, file))
 
+    if extensions is None:
+        return paths
+
+    # convert extensions into regex, if they aren't already
+    for i, extension in enumerate(extensions):
+        if extension[-1] != "$":
+            extension = extension + "$"
+
+        extension = extension.lower()
+        extensions[i] = extension
+
+    paths = [p for p in paths if True in [bool(re.search(e, p.lower())) for e in extensions]]
     return paths
 
 

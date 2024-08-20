@@ -11,7 +11,7 @@ import re
 setthreads(1)
 
 # TODO: generalize to embeddername, framehop (and dynamically build yamnet accordingly)
-def get_embedder(embeddername):
+def load_embedder(embeddername):
     if bool(re.search(pattern='yamnet', string=embeddername.lower())):
         import tensorflow as tf
 
@@ -139,7 +139,7 @@ def embed_directory(dir_audio='./localData/raw experiment audio', embeddername='
     q_config = multiprocessing.Queue()  # TODO: change this trash way of sharing config!
 
     def worker_embedder(worker_id):
-        embedder, config = get_embedder(embeddername)
+        embedder, config = load_embedder(embeddername)
         config.update({'framehop': framehop})
         q_config.put(config)
 

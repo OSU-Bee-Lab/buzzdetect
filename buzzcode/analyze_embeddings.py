@@ -1,5 +1,6 @@
 from buzzcode.utils import search_dir, Timer, clip_name, setthreads, load_pickle
-from buzzcode.analysis.analysis import loadup, translate_results, merge_chunks
+from buzzcode.analysis import loadup, translate_results
+from buzzcode.mapping import merge_file_chunks
 from datetime import datetime
 import os
 import re
@@ -124,7 +125,7 @@ def analyze_batch(modelname, cpus, dir_embeddings="./localData/embeddings", path
             log_item = q_log.get(block=True)
 
         # on terminate, clean up chunks
-        merge_chunks(dir_out)
+        merge_file_chunks(dir_out)
 
         timer_total.stop()
         closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"

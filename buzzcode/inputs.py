@@ -1,6 +1,6 @@
 from buzzcode.utils import search_dir, setthreads
 from buzzcode.audio import load_audio, frame_audio
-from buzzcode.embeddings import get_embedder
+from buzzcode.embeddings import load_embedder
 from buzzcode.audio import extract_frequencies
 import soundfile as sf
 import tensorflow as tf
@@ -66,7 +66,7 @@ def cache_input(cpus, dir_in, paths_in = None, embeddername='yamnet', conflict='
 
     def worker_cacher(worker_id):
         print(f"cacher {worker_id}: launching")
-        embedder, config = get_embedder(embeddername)
+        embedder, config = load_embedder(embeddername)
 
         assignment = q_assignments.get()
         path_in = assignment[0]

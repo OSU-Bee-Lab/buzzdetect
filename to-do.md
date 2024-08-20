@@ -6,6 +6,7 @@
 ## Code
 ### general
 * Change framelength to be number of samples, not time (makes some operations like)
+* The warmup for analysis is taking forever lately. We're running it on all data files the lab has---perhaps the merge_chunks() function has some inefficiency that's bogging it down when there are many files? Profile the code.
 
 ### training
 * Restore loss from when patience triggered, not best weights
