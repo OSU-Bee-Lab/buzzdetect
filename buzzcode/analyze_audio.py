@@ -108,7 +108,6 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
     if chunklength < framelength:
         raise ValueError(f"insufficient memory allotment")
 
-
     paths_audio = search_dir(dir_audio, list(sf.available_formats().keys()))
 
     # start logger early and make these exit prints printlogs?
@@ -236,9 +235,11 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                     warnings.warn(
                         f"no data read at time {chunk[0]} for file {c['path_audio']}")
                 elif n_samples < read_size:
+                    prop = round(n_samples/read_size, 2)
+
                     warnings.warn(
                         f"unexpectedly small read at time {chunk[0]} for file {c['path_audio']}. "
-                        f"Requested {read_size} but receieved {n_samples}")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
+                        f"Received {prop}% of samples requested ({read_size}/{n_samples})")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
 
                 samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=config['samplerate'])
 
@@ -370,5 +371,4 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
 
 if __name__ == "__main__":
-    print(os.path.abspath(os.getcwd()))
     analyze_batch(modelname='model_general', gpu=True, vram=1, cpus=7, memory_allot=10, verbosity=2)
