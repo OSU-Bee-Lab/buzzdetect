@@ -9,7 +9,8 @@ import pandas as pd
 import soundfile as sf
 from buzzcode.utils import save_pickle, setthreads
 from buzzcode.audio import frame_audio
-from buzzcode.analysis.analysis import melt_coverage
+from buzzcode.analysis import melt_coverage
+
 setthreads(1)
 
 
@@ -38,7 +39,7 @@ def cache_training(dir_annotations, metadataname, framehop=0.2, overlap_annotati
     metadata = pd.read_csv(os.path.join(dir_annotations, metadataname + '.csv'))
     classes = sorted(metadata['classification'].unique())
 
-    metadata.to_csv(os.path.join(dir_set, 'metadata.csv'))
+    metadata.to_csv(os.path.join(dir_set, 'metadata.csv'), index=False)
     dir_raw = './localData/raw experiment audio'  # WITHOUT trailing slash, for creating path_raw
 
     idents = metadata['ident'].unique()
@@ -55,8 +56,8 @@ def cache_training(dir_annotations, metadataname, framehop=0.2, overlap_annotati
 
     def worker_constructor(worker_id):
         # TODO: figure out why I can't import get_embedder in parent context!
-        from buzzcode.embeddings import get_embedder
-        embedder, config = get_embedder(embeddername)
+        from buzzcode.embeddings import load_embedder
+        embedder, config = load_embedder(embeddername)
         q_config.put(config)
 
         framelength = config['framelength']
