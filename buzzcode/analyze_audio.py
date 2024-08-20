@@ -13,6 +13,7 @@ import re
 import librosa
 import multiprocessing
 import json
+import tensorflow as tf
 import soundfile as sf
 import numpy as np
 from datetime import datetime
@@ -20,10 +21,23 @@ from datetime import datetime
 warnings.warn(
     'chunklength calculation is currently done assuming a framehop of 1; need to  update embedder handling so framehop can be read before laoding embedder')
 
+# TODO: have gpu worker sub-chunk if needed for memory!
 
 #  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'
-def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop', dir_audio="./audio_in", verbosity=1,
+def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet_wholehop', dir_audio="./audio_in", verbosity=1,
                   result_detail='rich'):
+    timer_total = Timer()
+
+    dir_model = os.path.join("models", modelname)
+    dir_out = os.path.join(dir_model, "output")
+
+    log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
+    path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
+    os.makedirs(os.path.dirname(path_log), exist_ok=True)
+    log = open(path_log, "x")
+    log.close()
+
+    control = []  # make control now for worker_logger to reference in case of early exit
 
     # Logging
     #
@@ -39,7 +53,6 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
             print(item)
 
         return item
-
 
 
     def worker_logger():
@@ -75,10 +88,6 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
 
     # File handling
     #
-    timer_total = Timer()
-
-    dir_model = os.path.join("models", modelname)
-    dir_out = os.path.join(dir_model, "output")
 
     with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
         config = json.load(file)
@@ -99,11 +108,6 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
     if chunklength < framelength:
         raise ValueError(f"insufficient memory allotment")
 
-    log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
-    path_log = os.path.join(dir_out, f"log {log_timestamp}.txt")
-    os.makedirs(os.path.dirname(path_log), exist_ok=True)
-    log = open(path_log, "x")
-    log.close()
 
     paths_audio = search_dir(dir_audio, list(sf.available_formats().keys()))
 
@@ -120,7 +124,6 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
 
         return
 
-    control = []
     for path_audio in paths_audio:
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
@@ -228,12 +231,14 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
 
                 # we've found that many of our files give an incorrect .frames count, or else headers are broken
                 # this results in a silent failure where no samples are returned
-                if len(samples) == 0:
+                n_samples = len(samples)
+                if n_samples == 0:
                     warnings.warn(
-                        f"no data read at time {chunk[0]} for file {c['path_audio']}")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
-                elif len(samples) < read_size:
+                        f"no data read at time {chunk[0]} for file {c['path_audio']}")
+                elif n_samples < read_size:
                     warnings.warn(
-                        f"unexpectedly small read at time {chunk[0]} for file {c['path_audio']}")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
+                        f"unexpectedly small read at time {chunk[0]} for file {c['path_audio']}. "
+                        f"Requested {read_size} but receieved {n_samples}")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
 
                 samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=config['samplerate'])
 
@@ -253,9 +258,14 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
 
     # analyzer
     # 
-    def worker_analyzer(id_analyzer):
-        # TODO: check if assignment end == audio duration; if so, stitch
-        printlog(f"analyzer {id_analyzer}: launching", 1)
+    def worker_analyzer(id_analyzer, processor):
+        if processor == 'CPU':
+            tf.config.set_visible_devices([], 'GPU')
+            visible_devices = tf.config.get_visible_devices()
+            for device in visible_devices:
+                assert device.device_type != 'GPU'
+
+        printlog(f"analyzer {id_analyzer}: processing on {processor}", 1)
 
         # ready model
         #
@@ -339,11 +349,10 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
         f"memory allotment {memory_allot}\n",
         0)
 
-    # launch analysis_process; will wait immediately
     proc_analyzers = []
     for a in range(cpus):
         proc_analyzers.append(
-            multiprocessing.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a])))
+            multiprocessing.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a, 'CPU'])))
         proc_analyzers[-1].start()
         pass
 
@@ -353,9 +362,13 @@ def analyze_batch(modelname, cpus, memory_allot, embeddername='yamnet_wholehop',
         proc_streamers[-1].start()
         pass
 
+
+    if gpu:  # things get narsty when running GPU on a multiprocessing.Process(), so just run in main thread last
+        worker_analyzer('G', 'GPU')
     # wait for analysis to finish
     proc_logger.join()
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general', cpus=7, memory_allot=10, verbosity=2)
+    print(os.path.abspath(os.getcwd()))
+    analyze_batch(modelname='model_general', gpu=True, vram=1, cpus=7, memory_allot=10, verbosity=2)
