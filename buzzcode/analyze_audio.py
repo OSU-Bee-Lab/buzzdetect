@@ -22,6 +22,7 @@ warnings.warn(
     'chunklength calculation is currently done assuming a framehop of 1; need to  update embedder handling so framehop can be read before laoding embedder')
 
 # TODO: have gpu worker sub-chunk if needed for memory!
+# TODO: crap...does this shut down correctly?
 
 #  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'
 def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet_wholehop', dir_audio="./audio_in", verbosity=1,
@@ -67,7 +68,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             file_log.write(log_item)
             file_log.close()
 
-        # on terminate, clean up chunks
+        # on terminate, clean up chunks # TODO: move this to main thread. Doesn't make sense in logger. Will need to send final terminate from here.
         for c in control:
             base_out = c['path_audio']
             base_out = os.path.splitext(base_out)[0]
@@ -197,28 +198,29 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
     # streamer
     #
-    streamers_concurrent = 4  # TODO: tune this. What's best? A single streamer at a time? Two? Ten?
     q_control = multiprocessing.Queue()
     q_assignments = multiprocessing.Queue(maxsize=buffer_max)
 
     for c in control:
         q_control.put(c)
 
-    for _ in range(streamers_concurrent):
+    for _ in range(concurrent_streamers):
         q_control.put('TERMINATE')
 
     def worker_streamer(id_streamer):
         c = q_control.get()
         while c != 'TERMINATE':
+            files_remaining = q_control.qsize() - concurrent_streamers
             printlog(
-                f"streamer {id_streamer}: starting on {c['path_audio']}",
+                f"streamer {id_streamer}: starting on {c['path_audio']} \n"
+                f"{files_remaining} remaining files",
                 1
             )
 
             track = sf.SoundFile(c['path_audio'])
             samplerate_native = track.samplerate
 
-            for chunk in c['chunklist']:  # TODO: check for bad audio because samples returned is too small?
+            for i, chunk in enumerate(c['chunklist']):  # TODO: check for bad audio because samples returned is too small?
                 sample_from = int(chunk[0] * samplerate_native)
                 sample_to = int(chunk[1] * samplerate_native)
                 read_size = sample_to - sample_from
@@ -250,12 +252,19 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                     'samples': samples
                 }
 
+                printlog(
+                    f"streamer {id_streamer}: buffered chunk {i+1}/{len(c['chunklist'])}",
+                    2,
+                    do_log=False
+                )
+
                 ######### Temporary debug #########
                 if q_assignments.qsize() == buffer_max:
-                    print(f"!!! streamer {id_streamer} waiting for free buffer !!!")
+                    print(f"!!! ANALYSIS BOTTLENECK; streamer {id_streamer} waiting for free buffer !!!")
                 ######### Temporary debug #########
 
                 q_assignments.put(assignment)
+
 
     # analyzer
     # 
@@ -321,8 +330,9 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             os.makedirs(os.path.dirname(path_out), exist_ok=True)
             output.to_csv(path_out, index=False)
 
-            timer_analysis.stop()
             chunk_duration = assignment['chunk'][1] - assignment['chunk'][0]
+
+            timer_analysis.stop()
             analysis_rate = (chunk_duration / timer_analysis.get_total()).__round__(1)
             printlog(
                 f"analyzer {id_analyzer}: analyzed {assignment['path_audio']}, "
@@ -332,7 +342,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
             ######### Temporary debug #########
             if q_assignments.qsize() == 0:
-                print(f"!!! analyzer {id_analyzer} waiting for assignment !!!")
+                print(f"!!! BUFFER BOTTLENECK; analyzer {id_analyzer} waiting for assignment !!!")
             ######### Temporary debug #########
 
             assignment = q_assignments.get()
@@ -343,8 +353,9 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
     # Go!
     #
     printlog(
-        f"begin analysis \n"
-        f"start time: {timer_total.time_start} \n"
+        f"begin analysis\n"
+        f"start time: {timer_total.time_start}\n"
+        f"input directory: {dir_audio}\n"
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
         f"memory allotment {memory_allot}\n",

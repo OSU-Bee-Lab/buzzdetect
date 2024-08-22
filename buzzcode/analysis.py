@@ -55,7 +55,7 @@ def solve_memory(memory_allot, cpus, framehop):
     frame_time_free = audio_time_free*framehop
 
     # this is total guesswork. TODO: test! Tune!
-    concurrent_streamers = cpus
+    concurrent_streamers = (cpus/2).__ceil__()  # on SSD, ideal seems to be near cpus/2 (when running with GPU also!)
     buffer_max = 3 * cpus
     chunks_at_once = concurrent_streamers + buffer_max
 
