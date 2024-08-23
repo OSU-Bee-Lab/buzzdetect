@@ -232,9 +232,6 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
         def analyze_assignment(assignment):
             timer_analysis.restart()
-            printlog(f"analyzer {id_analyzer}: analyzing {assignment['path_audio']}, chunk {assignment['chunk']}", 2,
-                     do_log=False)
-
             embeddings = embedder(assignment['samples'])
             results = model(embeddings)
             output = translate_results(np.array(results), classes)
@@ -281,7 +278,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                 f"analyzer {id_analyzer}: analyzed {assignment['path_audio']}, "
                 f"chunk {assignment['chunk']} "
                 f"in {timer_analysis.get_total()}s (rate: {analysis_rate})",
-                2, do_log=False)
+                2, do_log=True)
 
 
         # ready model
