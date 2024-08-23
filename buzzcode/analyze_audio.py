@@ -7,11 +7,13 @@ setthreads(1)
 from buzzcode.embeddings import load_embedder
 from buzzcode.analysis import loadup, translate_results, suffix_result, suffix_partial, solve_memory, melt_coverage, \
     get_gaps, smooth_gaps, gaps_to_chunklist, stitch_partial
+from buzzcode.audio import stream_to_queue
 import pandas as pd
 import os
 import re
 import librosa
 import multiprocessing
+from queue import Empty
 import json
 import tensorflow as tf
 import soundfile as sf
@@ -21,11 +23,12 @@ from datetime import datetime
 warnings.warn(
     'chunklength calculation is currently done assuming a framehop of 1; need to  update embedder handling so framehop can be read before laoding embedder')
 
-# TODO: have gpu worker sub-chunk if needed for memory!
-# TODO: crap...does this shut down correctly?
 
-#  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'
-def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet_wholehop', dir_audio="./audio_in", verbosity=1,
+# TODO: have gpu worker sub-chunk if needed for memory!
+
+#  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'; gpu = False
+def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet_wholehop',
+                  dir_audio="./audio_in", verbosity=1,
                   result_detail='rich'):
     timer_total = Timer()
 
@@ -55,41 +58,23 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
         return item
 
-
     def worker_logger():
         workers_running = cpus
         while workers_running > 0:
             log_item = q_log.get(block=True)
             if log_item == 'TERMINATE':
                 workers_running -= 1
+                print(f'reduced workers_running to {workers_running}')
                 continue
 
-            file_log = open(path_log, "a")
-            file_log.write(log_item)
-            file_log.close()
-
-        # on terminate, clean up chunks # TODO: move this to main thread. Doesn't make sense in logger. Will need to send final terminate from here.
-        for c in control:
-            base_out = c['path_audio']
-            base_out = os.path.splitext(base_out)[0]
-            base_out = re.sub(dir_audio, dir_out, base_out)
-
-            stitch_partial(base_out, c['duration_audio'])
-
-        timer_total.stop()
-        closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
-
-        print(closing_message)
-        file_log = open(path_log, "a")
-        file_log.write(closing_message)
-        file_log.close()
+            with open(path_log, "a") as file_log:
+                file_log.write(log_item)
 
     proc_logger = multiprocessing.Process(target=worker_logger)
     proc_logger.start()
 
     # File handling
     #
-
     with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
         config = json.load(file)
 
@@ -111,7 +96,6 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
     paths_audio = search_dir(dir_audio, list(sf.available_formats().keys()))
 
-    # start logger early and make these exit prints printlogs?
     if len(paths_audio) == 0:
         printlog(
             f"no compatible audio files found in raw directory {dir_audio} \n"
@@ -119,7 +103,9 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             "exiting analysis",
             0
         )
-        for c in range(cpus):
+
+        # close out logger process
+        for _ in range(cpus):
             q_log.put('TERMINATE')
 
         return
@@ -191,80 +177,43 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             df.to_csv(path_stitched, index=False)
 
     if not control:
-        printlog(f"all files in {dir_audio} are fully analyzed; exiting analysis",0)
-        for c in range(cpus):
+        printlog(f"all files in {dir_audio} are fully analyzed; exiting analysis", 0)
+
+        # close out logger process
+        for _ in range(cpus):
             q_log.put('TERMINATE')
+
         return
 
     # streamer
     #
-    q_control = multiprocessing.Queue()
-    q_assignments = multiprocessing.Queue(maxsize=buffer_max)
+    streamers_active = multiprocessing.Value('i', concurrent_streamers)
 
+    q_control = multiprocessing.Queue()
     for c in control:
         q_control.put(c)
 
     for _ in range(concurrent_streamers):
         q_control.put('TERMINATE')
 
+    q_assignments = multiprocessing.Queue(maxsize=buffer_max)
+
     def worker_streamer(id_streamer):
         c = q_control.get()
+
         while c != 'TERMINATE':
-            files_remaining = q_control.qsize() - concurrent_streamers
-            printlog(
-                f"streamer {id_streamer}: starting on {c['path_audio']} \n"
-                f"{files_remaining} remaining files",
-                1
+            printlog(f"streamer {id_streamer}: buffering {c['path_audio']}")
+            stream_to_queue(
+                path_audio=c['path_audio'],
+                chunklist=c['chunklist'],
+                q_assignments=q_assignments,
+                resample_rate=config['samplerate']
             )
+            c = q_control.get()
 
-            track = sf.SoundFile(c['path_audio'])
-            samplerate_native = track.samplerate
-
-            for i, chunk in enumerate(c['chunklist']):  # TODO: check for bad audio because samples returned is too small?
-                sample_from = int(chunk[0] * samplerate_native)
-                sample_to = int(chunk[1] * samplerate_native)
-                read_size = sample_to - sample_from
-
-                track.seek(sample_from)
-                samples = track.read(read_size)
-                if track.channels > 1:
-                    samples = np.mean(samples, axis=1)
-
-                # we've found that many of our files give an incorrect .frames count, or else headers are broken
-                # this results in a silent failure where no samples are returned
-                n_samples = len(samples)
-                if n_samples == 0:
-                    warnings.warn(
-                        f"no data read at time {chunk[0]} for file {c['path_audio']}")
-                elif n_samples < read_size:
-                    prop = round(n_samples/read_size, 2)
-
-                    warnings.warn(
-                        f"unexpectedly small read at time {chunk[0]} for file {c['path_audio']}. "
-                        f"Received {prop}% of samples requested ({read_size}/{n_samples})")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
-
-                samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=config['samplerate'])
-
-                assignment = {
-                    'path_audio': c['path_audio'],
-                    'chunk': chunk,
-                    'duration_audio': duration_audio,
-                    'samples': samples
-                }
-
-                printlog(
-                    f"streamer {id_streamer}: buffered chunk {i+1}/{len(c['chunklist'])}",
-                    2,
-                    do_log=False
-                )
-
-                ######### Temporary debug #########
-                if q_assignments.qsize() == buffer_max:
-                    print(f"!!! ANALYSIS BOTTLENECK; streamer {id_streamer} waiting for free buffer !!!")
-                ######### Temporary debug #########
-
-                q_assignments.put(assignment)
-
+        printlog(f"streamer {id_streamer}: terminating")
+        with streamers_active.get_lock():
+            streamers_active.value -= 1
 
     # analyzer
     # 
@@ -277,20 +226,18 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
         printlog(f"analyzer {id_analyzer}: processing on {processor}", 1)
 
-        # ready model
-        #
-        model, config_model = loadup(modelname)
-        embedder, config_embedder = load_embedder(embeddername)
+        def streamer_is_alive(streamer_id):
+            try:
+                os.kill(streamer_id, 0)  # signal 0 doesn't kill process! Checks if alive.
+                return True
+            except OSError:
+                return False
 
-        classes = config_model['classes']
-
-        assignment = q_assignments.get()
-        timer_analysis = Timer()
-
-        while assignment != 'TERMINATE':
+        def analyze_assignment(assignment):
             timer_analysis.restart()
 
-            printlog(f"analyzer {id_analyzer}: analyzing {assignment['path_audio']}, chunk {assignment['chunk']}", 2,do_log=False)
+            printlog(f"analyzer {id_analyzer}: analyzing {assignment['path_audio']}, chunk {assignment['chunk']}", 2,
+                     do_log=False)
 
             embeddings = embedder(assignment['samples'])
             results = model(embeddings)
@@ -340,12 +287,26 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                 f"in {timer_analysis.get_total()}s (rate: {analysis_rate})",
                 2, do_log=False)
 
-            ######### Temporary debug #########
-            if q_assignments.qsize() == 0:
-                print(f"!!! BUFFER BOTTLENECK; analyzer {id_analyzer} waiting for assignment !!!")
-            ######### Temporary debug #########
 
-            assignment = q_assignments.get()
+        # ready model
+        #
+        model, config_model = loadup(modelname)
+        embedder, config_embedder = load_embedder(embeddername)
+
+        classes = config_model['classes']
+
+        timer_analysis = Timer()
+        while True:
+            try:
+                assignment = q_assignments.get(timeout=4)
+                analyze_assignment(assignment)
+            except Empty:
+                if streamers_active.value == 0:
+                    break
+                else:
+                    ######### Temporary debug #########
+                    print(f"!!! BUFFER BOTTLENECK; analyzer {id_analyzer} waiting for assignment !!!")
+                    ######### Temporary debug #########
 
         printlog(f"analyzer {id_analyzer}: terminating")
         q_log.put('TERMINATE')
@@ -361,6 +322,14 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         f"memory allotment {memory_allot}\n",
         0)
 
+    proc_streamers = []
+    streamer_ids = []
+    for s in range(concurrent_streamers):
+        proc_streamers.append(multiprocessing.Process(target=worker_streamer, name=f'streamer_proc{s}', args=[s]))
+        proc_streamers[-1].start()
+        streamer_ids.append(proc_streamers[-1].pid)
+        pass
+
     proc_analyzers = []
     for a in range(cpus):
         proc_analyzers.append(
@@ -368,18 +337,28 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         proc_analyzers[-1].start()
         pass
 
-    proc_streamers = []
-    for s in range(concurrent_streamers):
-        proc_streamers.append(multiprocessing.Process(target=worker_streamer, name=f'streamer_proc{s}', args=[s]))
-        proc_streamers[-1].start()
-        pass
-
-
     if gpu:  # things get narsty when running GPU on a multiprocessing.Process(), so just run in main thread last
         worker_analyzer('G', 'GPU')
+
     # wait for analysis to finish
     proc_logger.join()
 
+    # on terminate, clean up chunks
+    for c in control:
+        base_out = c['path_audio']
+        base_out = os.path.splitext(base_out)[0]
+        base_out = re.sub(dir_audio, dir_out, base_out)
+
+        stitch_partial(base_out, c['duration_audio'])
+
+    timer_total.stop()
+    closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
+
+    print(closing_message)
+    file_log = open(path_log, "a")
+    file_log.write(closing_message)
+    file_log.close()
+
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general', gpu=True, vram=1, cpus=7, memory_allot=10, verbosity=2)
+    analyze_batch(modelname='model_general', gpu=False, vram=1, cpus=7, memory_allot=10, verbosity=2)

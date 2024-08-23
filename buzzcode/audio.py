@@ -1,7 +1,7 @@
 import multiprocessing
 import os
 import sys
-
+import warnings
 import librosa
 import soundfile as sf
 import numpy as np
@@ -147,3 +147,46 @@ def snip_audio(sniplist, cpus, conflict_out='skip'):
         p.join()
 
     print('snipping finished!')
+
+
+def stream_to_queue(path_audio, chunklist, q_assignments, resample_rate):
+    def chunk_to_assignment(chunk, track, samplerate_native):
+        sample_from = int(chunk[0] * samplerate_native)
+        sample_to = int(chunk[1] * samplerate_native)
+        read_size = sample_to - sample_from
+
+        track.seek(sample_from)
+        samples = track.read(read_size)
+        if track.channels > 1:
+            samples = np.mean(samples, axis=1)
+
+        # we've found that many of our files give an incorrect .frames count, or else headers are broken
+        # this results in a silent failure where no samples are returned
+        n_samples = len(samples)
+        if n_samples == 0:
+            warnings.warn(
+                f"no data read for chunk {chunk} in file {path_audio}")
+        elif n_samples < read_size:
+            perc = int((n_samples / read_size) * 100)
+
+            warnings.warn(
+                f"unexpectedly small read for chunk {chunk} for file {path_audio}. "
+                f"Received {perc}% of samples requested ({read_size}/{n_samples})")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
+
+        samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=resample_rate)
+
+        assignment = {
+            'path_audio': path_audio,
+            'chunk': chunk,
+            'samples': samples
+        }
+
+        q_assignments.put(assignment)
+
+    track = sf.SoundFile(path_audio)
+    samplerate_native = track.samplerate
+
+    for chunk in chunklist:  # TODO: check for bad audio because samples returned is too small?
+        chunk_to_assignment(chunk, track, samplerate_native)
+
+    track.close()
