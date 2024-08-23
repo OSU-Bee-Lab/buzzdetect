@@ -118,6 +118,10 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         if os.path.exists(path_complete):  # if finished analysis file exists, go to next file
             continue
 
+        if os.path.getsize(path_audio) < 5000:
+            warnings.warn(f'skipping too-small file {path_audio}')
+            continue
+
         duration_audio = librosa.get_duration(path=path_audio)
         paths_chunks = search_dir(os.path.dirname(base_out), None)
         paths_chunks = [p for p in paths_chunks if re.search(base_out, p)]
