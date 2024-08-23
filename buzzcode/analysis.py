@@ -179,3 +179,4 @@ def stitch_partial(base_out, duration_audio):
         os.remove(p)
 
     df.to_csv(path_out, index=False)
+

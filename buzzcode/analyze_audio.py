@@ -226,16 +226,8 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
         printlog(f"analyzer {id_analyzer}: processing on {processor}", 1)
 
-        def streamer_is_alive(streamer_id):
-            try:
-                os.kill(streamer_id, 0)  # signal 0 doesn't kill process! Checks if alive.
-                return True
-            except OSError:
-                return False
-
         def analyze_assignment(assignment):
             timer_analysis.restart()
-
             printlog(f"analyzer {id_analyzer}: analyzing {assignment['path_audio']}, chunk {assignment['chunk']}", 2,
                      do_log=False)
 
