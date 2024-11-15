@@ -28,7 +28,7 @@ inspect_model <- function(modelname, prediction_threshold=-1){
   # Data read ----
   #
 
-    data <- read.csv(file.path(dir_model, 'output_testfold.csv'))
+    data <- read.csv(file.path(dir_model, '/tests/output_testfold.csv'))
     names(data) <- str_remove(names(data), 'score_')
     classes <- names(data) %>% 
       {.[!.%in%c('classes_actual', 'class_max')]}
