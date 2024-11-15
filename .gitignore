@@ -7,9 +7,15 @@
 
 # python/conda things
 __pycache__
+environment/
 condaenv.l8rr463d.requirements.txt
 .idea/
-environment/
 
 # directories for local execution
-local*/
+/audio_in/
+/local*/
+/models/
+/output*/
+/training/
+/embedders/
+/buzzextras/
