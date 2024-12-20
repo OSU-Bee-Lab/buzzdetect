@@ -17,6 +17,7 @@
        - Smaller framehop for buzzes?
 
 ### analysis
+* Drop "end" and "class_max" columns; they aren't relevant to current analysis pipelines
 * Add pre-embedding of entire audio files
   - Shouldn't need too much RAM allotment. 260,000 frames ~= 1,080MB. 1h of audio at 0.5 framehop = 7500 frames. Should be under 32MB data.
 * Redefine chunks to be a number of audio samples (for memory estimation)
