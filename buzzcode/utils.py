@@ -8,6 +8,7 @@ import re
 class Timer:
     def __init__(self):
         self.time_start = datetime.now()
+        self.time_end = datetime.now()
         # self.state = 'running'  # not pursuing it right now, but I could add exceptions for illegal start/stop
 
     def stop(self):
@@ -20,10 +21,10 @@ class Timer:
         return datetime.now() - self.time_start
 
     def get_total(self, decimals=2):
-        self.time_total = self.time_end - self.time_start
-        self.total_formatted = self.time_total.total_seconds().__round__(decimals)
+        time_total = self.time_end - self.time_start
+        total_formatted = time_total.total_seconds().__round__(decimals)
 
-        return self.total_formatted
+        return total_formatted
 
 
 def clip_name(filepath, clippath):

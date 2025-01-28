@@ -12,7 +12,7 @@ import soundfile as sf
 import buzzcode.config as cfg
 from buzzcode.analysis import melt_coverage
 from buzzcode.audio import frame_audio
-from buzzcode.training.set import overlapping_elements, expand_chunk
+from buzzcode.set import overlapping_elements, expand_chunk
 from buzzcode.utils import setthreads
 
 setthreads(1)
@@ -142,13 +142,3 @@ def extract_set(setname, event_overlap_prop, framehop_s, cpus):
         pool.starmap_async(write_ident, arglist)  # have to starmap cuz can't pickle local function
         pool.close()
         pool.join()
-
-
-if __name__ == '__main__':
-    extract_set(
-        setname='test',
-        embeddername='yamnet',
-        event_overlap_prop=0.3,
-        framehop_s=0.96 / 2,
-        cpus=6
-    )

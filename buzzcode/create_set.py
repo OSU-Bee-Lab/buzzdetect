@@ -7,10 +7,10 @@ import shutil
 
 from buzzcode import config as cfg
 from buzzcode.embedders import load_embedder_config
-from buzzcode.training.augment_combine import combine_set
-from buzzcode.training.embed import embed_set
-from buzzcode.training.extract import extract_set
-from buzzcode.training.set import clean_name
+from buzzcode.augment_combine import combine_set
+from buzzcode.embed import embed_set
+from buzzcode.extract import extract_set
+from buzzcode.set import clean_name
 
 
 def create_set(setname, annotationname, embeddername, framehop_prop, foldname, event_overlap_prop=0.2,
@@ -73,17 +73,3 @@ def create_set(setname, annotationname, embeddername, framehop_prop, foldname, e
 
     print('---- set done :D ----')
 
-
-if __name__ == '__main__':
-    create_set(
-        setname='general_notest_droptraffic',
-        annotationname='droptraffic',
-        embeddername='yamnet',
-        framehop_prop=0.1,
-        foldname='default',
-        event_overlap_prop=0.2,
-        augmentname_combine='buzz',
-        cpus_extract=7,
-        cpus_embed=1,  # man, I cannot avoid memory leaks when running multiple embedders
-        combine_limit=10
-    )

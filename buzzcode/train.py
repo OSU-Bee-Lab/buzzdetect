@@ -1,5 +1,3 @@
-import warnings
-
 from buzzcode.utils import setthreads
 
 setthreads(8)
@@ -14,15 +12,14 @@ import tensorflow as tf
 from matplotlib import pyplot as plt
 
 from buzzcode import config as cfg
-from buzzcode.training.set import clean_name
-from buzzcode.training.training import build_fold_dataset
-from buzzcode.training.translation import build_translation_dict
+from buzzcode.set import clean_name
+from buzzcode.training import build_fold_dataset
+from buzzcode.translation import build_translation_dict
 
 
 # TODO: re-implement testfold training with new set approach
 
-# modelname = 'model_general_v2'; setname = 'general_notest_droptraffic'; translationname='general'; epochs_in=300; test=True; augment=True
-def train_model(modelname, setname, translationname, epochs_in=300, test=True, augment=True):
+def train_model(modelname, setname, translationname, epochs_in=300, augment=True):
     dir_model = os.path.join(cfg.dir_models, modelname)
     if os.path.exists(dir_model) and modelname != 'test':
         raise FileExistsError(

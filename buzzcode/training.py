@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 import buzzcode.config as cfg
-from buzzcode.training.translation import translate_labels
+from buzzcode.translation import translate_labels
 from buzzcode.utils import read_pickle_exhaustive
 
 
@@ -37,7 +37,7 @@ def load_path_samples(paths_in):
         embeddings = read_pickle_exhaustive(path)
         ### DEBUG
         lengths = set([len(e) for e in embeddings])
-        if not lengths == set([1024]):
+        if not lengths == {1024}:
             raise ValueError(f'bad embeddings in {path}')
         ### DEBUG
         labels = path_to_labels(path)

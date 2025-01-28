@@ -54,4 +54,3 @@ def clean_name(name_in, prefix, extension):
     name_out = re.sub(extension, '', name_out)
 
     return name_out
-

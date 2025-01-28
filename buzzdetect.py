@@ -47,7 +47,7 @@ args = parser.parse_args()
 
 if args.action == "train":
     print(f"training new model {args.modelname} with set {args.set}")
-    from buzzcode.training.train import train_model
+    from buzzcode.train import train_model
 
     train_model(
         modelname=args.modelname,
