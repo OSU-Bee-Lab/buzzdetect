@@ -44,7 +44,7 @@ Full documentation [here](https://github.com/OSU-Bee-Lab/buzzdetect/blob/main/do
 3. Open a terminal in the project directory and activate the conda environment by running the command `conda activate ./environment`
 5. Analyze the audio files with the following command: `python buzzdetect.py analyze --modelname [model to use]`
     - By default, analysis uses a single process. To parallel process, use the `--cpus` option with the number of CPU cores you want to employ.
-    - See the comprehensive command-line documentation [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/documentation_CLI.md) for additional configuration options.
+    - See the comprehensive command-line documentation [here](https://github.com/OSU-Bee-Lab/BuzzDetect/blob/main/documentation/commandLineInterface.md) for additional configuration options.
 6. The results will be output as .csv files in the `/output` subdirectory of the model's directory.
 
 ### Training a new model
