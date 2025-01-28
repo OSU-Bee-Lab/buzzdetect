@@ -12,3 +12,5 @@ dependencies:
     - librosa==0.10
     - soundfile==0.12.1
     - pandas==2.1.0
+    - numpy==1.26.4
+    - matplotlib==3.9.4

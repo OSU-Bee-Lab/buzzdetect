@@ -33,22 +33,18 @@ def load_audio(path_audio, time_start=0, time_stop=None, resample_rate=None):
     return audio_data, sr
 
 
-# TODO: deprecate? This could be useful, e.g. for spectral analysis. Just gotta make sure we're aligned with YAMNet
-def frame_audio(audio_data, framelength, samplerate, framehop=0.5):
-    framelength_samples = int(framelength*samplerate)
+def frame_audio(audio_data, framelength, samplerate, framehop_s):
+    framelength_samples = int(framelength * samplerate)
     audio_samples = len(audio_data)
     if audio_samples < framelength_samples:
         raise ValueError('sub-frame audio given')
 
-    frames = []
-    frame_start = 0
-    frame_end = framelength_samples
-    step = int(framelength_samples*framehop)
+    step = int(framehop_s * samplerate)
 
-    while frame_end <= audio_samples:
-        frames.append(audio_data[frame_start:frame_end])
-        frame_start += step
-        frame_end += step
+    frames = []
+    # yields consecutive audio frames, stopping before exceeding audio length
+    for frame_start in range(0, audio_samples - framelength_samples + 1, step):
+        frames.append(audio_data[frame_start:frame_start + framelength_samples])
 
     return frames
 
@@ -149,7 +145,7 @@ def snip_audio(sniplist, cpus, conflict_out='skip'):
     print('snipping finished!')
 
 
-def stream_to_queue(path_audio, chunklist, q_assignments, resample_rate):
+def stream_to_queue(path_audio, chunklist, q_assignments, resample_rate, smallread_tolerance=0.98):
     def chunk_to_assignment(chunk, track, samplerate_native):
         sample_from = int(chunk[0] * samplerate_native)
         sample_to = int(chunk[1] * samplerate_native)
@@ -164,14 +160,14 @@ def stream_to_queue(path_audio, chunklist, q_assignments, resample_rate):
         # this results in a silent failure where no samples are returned
         n_samples = len(samples)
         if n_samples == 0:
-            warnings.warn(
-                f"no data read for chunk {chunk} in file {path_audio}")
-        elif n_samples < read_size:
+            warnings.warn( f"no data read for chunk {chunk} in file {path_audio}")
+
+        elif (n_samples/read_size) < smallread_tolerance:  # there's always a tiny smallread at end of file
             perc = int((n_samples / read_size) * 100)
 
             warnings.warn(
                 f"unexpectedly small read for chunk {chunk} for file {path_audio}. "
-                f"Received {perc}% of samples requested ({read_size}/{n_samples})")  # TODO: keep an eye on this; will this occur just because of  normal rounding errors between time and samples?
+                f"Received {perc}% of samples requested ({read_size}/{n_samples})")
 
         samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=resample_rate)
 

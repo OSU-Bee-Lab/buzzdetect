@@ -1,6 +1,4 @@
 from datetime import datetime
-import numpy as np
-import argparse
 import pickle
 import warnings
 import os
@@ -33,17 +31,6 @@ def clip_name(filepath, clippath):
     return clip
 
 
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
-
-
 def search_dir(dir_in, extensions=None):
     if extensions is not None and not (extensions.__class__ is list and extensions[0].__class__ is str):
         raise ValueError("input extensions should be None, or list of strings")
@@ -68,18 +55,16 @@ def search_dir(dir_in, extensions=None):
     return paths
 
 
-def save_pickle(path_pickle, obj):
-    os.makedirs(os.path.dirname(path_pickle), exist_ok=True)
-
-    with open(path_pickle, 'wb') as file_pickle:
-        pickle.dump(obj, file_pickle)
-
-
-def load_pickle(path_pickle):
-    with open(path_pickle, 'rb') as file_pickle:
-        obj = pickle.load(file_pickle)
-
-    return obj
+def read_pickle_exhaustive(path_pickle):
+    elements = []
+    with open(path_pickle, 'rb') as f:
+        while True:
+            try:
+                element = pickle.load(f)
+                elements.append(element)
+            except EOFError:
+                break
+    return elements
 
 
 def setthreads(threads_desired=1):

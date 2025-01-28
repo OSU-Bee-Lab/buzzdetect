@@ -7,15 +7,18 @@
 buzzdetect is a machine learning based python tool for automated biacoustic surveys of honey bees. buzzdetect is capable of processing arbitrarily large audio files of virtually any type and producing second-by-second annotations of the sounds identified in the files. It outputs results as CSV files for easy transfer into other data processing software.
 
 ### Performance
-The accuracy of buzzdetect varies between models. Our current best model has a true positive rate for honey bees of ~87% within the test set of the training data, but we are still addressing issues with false-positives when the model encounters sounds outside of its training set.
+The accuracy of buzzdetect varies between models. Check out the README files in each model saved in [the models folder](https://github.com/OSU-Bee-Lab/buzzdetect/tree/main/models).
 
-The speed of buzzdetect varies between models and the machine running the computation. Per-process performance is roughly 20x–40x realtime. An average laptop with a solid state hard drive processing on 8 logical CPUs will probably process an hour of audio in about 15 seconds.
+The speed of buzzdetect varies between models and the machine running the computation. On our YAMNet-based models running on CPU, per-process performance is roughly 30x–60x realtime. An average laptop with a solid state hard drive processing on 8 logical CPUs will probably process an hour of audio in about 15 seconds. However, processing is massively faster on GPU. We use an NVIDIA GeForce GTX 1650 and see analysis rates of about 1,200x realtime.
 
 ### Models
-The models that buzzdetect applies to data are still rapidly evolving. We will publicly host a selection of models that we believe to be production-ready, as well as performance metrics to aid in the interpretation of their results.
+Find our models [here](https://github.com/OSU-Bee-Lab/buzzdetect/tree/main/models).
+
+The models that buzzdetect applies to data are still rapidly evolving.
+We will publicly host a selection of models that we believe to be production-ready, as well as performance metrics to aid in the interpretation of their results.
 
 ### Transfer learning
-buzzdetect is based on the machine learning strategy of transfer learning. In brief, this means we do not feed our bespoke models audio data directly, but instead preprocess the data using an existing audio classification model. This allows us to create a highly performant model on a relatively small dataset. The first model extracts relevant features from the audio data and represents them in a lower-dimensional space called the "embedding space." Our models are trained on those smaller and more information-dense embeddings.
+Our models are based on the strategy of transfer learning. In brief, this means we do not feed our bespoke models audio data directly, but instead preprocess the data using an existing audio classification model. This allows us to create a highly performant model on a relatively small dataset. The first model extracts relevant features from the audio data and represents them in a lower-dimensional space called the "embedding space." Our models are trained on those smaller and more information-dense embeddings.
 
 Currently, we are training our models on embeddings from the Google Tensorflow model [YAMNet](https://github.com/tensorflow/models/blob/master/research/audioset/yamnet/yamnet.py).
   
@@ -60,3 +63,4 @@ You may want to train a model for your specific environment. For example, you ma
      - If you're using weights, also include the option `--weights [name of your weights csv]`
 8. A new tensorflow model will be trained and saved to `./models/[your chosen model name]`
 9. Your model is now ready for use in analysis!
+

@@ -4,8 +4,8 @@ from buzzcode.utils import search_dir, Timer, setthreads
 
 setthreads(1)
 
-from buzzcode.embeddings import load_embedder
-from buzzcode.analysis import loadup, translate_results, suffix_result, suffix_partial, solve_memory, melt_coverage, \
+from buzzcode.embedders import load_embedder_model, load_embedder_config
+from buzzcode.analysis import load_model, translate_results, suffix_result, suffix_partial, solve_memory, melt_coverage, \
     get_gaps, smooth_gaps, gaps_to_chunklist, stitch_partial
 from buzzcode.audio import stream_to_queue
 import pandas as pd
@@ -17,19 +17,11 @@ from queue import Empty
 import json
 import tensorflow as tf
 import soundfile as sf
-import numpy as np
 from datetime import datetime
 
-warnings.warn(
-    'chunklength calculation is currently done assuming a framehop of 1; need to  update embedder handling so framehop can be read before laoding embedder')
-
-
-# TODO: have gpu worker sub-chunk if needed for memory!
-
-#  modelname = "model_general"; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'; gpu = False
-def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet_wholehop',
-                  dir_audio="./audio_in", verbosity=1,
-                  result_detail='rich'):
+#  modelname = "new_light"; framehop_prop=1; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'; gpu = False
+def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet', framehop_prop=1,
+                  dir_audio="./audio_in", verbosity=1):
     timer_total = Timer()
 
     dir_model = os.path.join("models", modelname)
@@ -75,20 +67,23 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
     # File handling
     #
-    with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
-        config = json.load(file)
+    with open(os.path.join(dir_model, 'config_model.txt'), 'r') as file:
+        config_model = json.load(file)
 
-    with open(os.path.join(dir_model, 'config.txt'), 'r') as file:
-        config_string = file.read()
-        framelength_string = re.search(pattern='framelength\":\\ (\\d+\\.\\d+)', string=config_string).group(1)
-        framelength_digits = len(framelength_string.split('.')[1])
+    config_embedder = load_embedder_config(config_model['embedder'])
 
-    framelength = config['framelength']
+    framelength = config_embedder['framelength']
+
+    # for rounding purposes
+    framelength_str = str(config_embedder['framelength'])
+    framelength_str = re.sub('^.*\\.', '', framelength_str)
+    framelength_digits = len(framelength_str)
+
 
     concurrent_streamers, buffer_max, chunklength = solve_memory(
         memory_allot=memory_allot,
         cpus=cpus,
-        framehop=1  # TODO: fix this so I can read framehop without loading embedder (which kills analysis)
+        framehop_prop=framehop_prop
     )
 
     if chunklength < framelength:
@@ -119,7 +114,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             continue
 
         if os.path.getsize(path_audio) < 5000:
-            warnings.warn(f'skipping too-small file {path_audio}')
+            warnings.warn(f'file too small, skipping: {path_audio}')
             continue
 
         duration_audio = librosa.get_duration(path=path_audio)
@@ -142,7 +137,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         # if there are results, read them, make chunklist
         # (this is essentially a more efficient implementation of stitch_partial(), so I don't have to stitch, then re-read)
         df = pd.concat([pd.read_csv(p) for p in paths_chunks])
-        coverage = melt_coverage(df)
+        coverage = melt_coverage(df, framelength)
 
         gaps = get_gaps(
             range_in=(0, duration_audio),
@@ -211,7 +206,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                 path_audio=c['path_audio'],
                 chunklist=c['chunklist'],
                 q_assignments=q_assignments,
-                resample_rate=config['samplerate']
+                resample_rate=config_embedder['samplerate']
             )
             c = q_control.get()
 
@@ -234,7 +229,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             timer_analysis.restart()
             embeddings = embedder(assignment['samples'])
             results = model(embeddings)
-            output = translate_results(np.array(results), classes)
+            output = translate_results(results, classes)
 
             output.insert(
                 column='start',
@@ -242,25 +237,11 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                 loc=0
             )
 
-            output['start'] = output['start'] * config_embedder['framelength'] * config_embedder['framehop']
-            output['start'] = output['start'] + assignment['chunk'][
-                0]  # TODO: there's drift of about -1/600...maybe because of resampling? Floating point error?
+            output['start'] = output['start'] * framehop_prop * framelength
+            output['start'] = output['start'] + assignment['chunk'][0]
 
             # round to avoid float errors
             output['start'] = round(output['start'], framelength_digits)
-
-            if result_detail.lower() == 'sparse':
-                output = output[['start', 'ins_buzz']]
-
-            else:
-                output.insert(
-                    column='end',
-                    value=round(output['start'] + config_embedder['framelength'], framelength_digits),
-                    loc=1
-                )
-
-                # round to avoid float errors
-                output['end'] = round(output['end'], framelength_digits)
 
             base_out = assignment['path_audio']
             base_out = os.path.splitext(base_out)[0]
@@ -280,11 +261,10 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                 f"in {timer_analysis.get_total()}s (rate: {analysis_rate})",
                 2, do_log=True)
 
-
         # ready model
         #
-        model, config_model = loadup(modelname)
-        embedder, config_embedder = load_embedder(embeddername)
+        model = load_model(modelname)
+        embedder = load_embedder_model(embeddername, framehop_s=framelength*framehop_prop)
 
         classes = config_model['classes']
 
@@ -297,9 +277,9 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
                 if streamers_active.value == 0:
                     break
                 else:
-                    ######### Temporary debug #########
+                    # DEBUG
                     print(f"!!! BUFFER BOTTLENECK; analyzer {id_analyzer} waiting for assignment !!!")
-                    ######### Temporary debug #########
+                    # DEBUG
 
         printlog(f"analyzer {id_analyzer}: terminating")
         q_log.put('TERMINATE')
@@ -342,7 +322,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         base_out = os.path.splitext(base_out)[0]
         base_out = re.sub(dir_audio, dir_out, base_out)
 
-        stitch_partial(base_out, c['duration_audio'])
+        stitch_partial(base_out, c['duration_audio'], framelength)
 
     timer_total.stop()
     closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
@@ -354,4 +334,4 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general', gpu=False, vram=1, cpus=7, memory_allot=10, verbosity=2)
+    analyze_batch(modelname='new_light', gpu=False, vram=1, cpus=4, memory_allot=10, verbosity=2)

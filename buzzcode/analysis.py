@@ -1,10 +1,10 @@
 import json
+import os
 import re
 
 import numpy as np
-import tensorflow as tf
 import pandas as pd
-import os
+import tensorflow as tf
 
 from buzzcode.utils import search_dir
 
@@ -12,29 +12,31 @@ from buzzcode.utils import search_dir
 # Functions for handling models
 #
 
-def loadup(modelname):
+def load_model(modelname):
     dir_model = os.path.join('./models', modelname)
     model = tf.keras.models.load_model(dir_model)
 
+    return model
+
+
+def load_model_config(modelname):
+    dir_model = os.path.join('./models', modelname)
     with open(os.path.join(dir_model, 'config.txt'), 'r') as cfg:
         config = json.load(cfg)
 
-    return model, config
+    return config
 
 
 # Functions for applying transfer model
 #
 
-def translate_results(results, classes):
+def translate_results(results, classes, digits=1):
     # as I move from DataFrames to dicts, this function is becoming less useful...
+    results = np.array(results)
+    results = results.round(digits)
     translate = []
     for i, scores in enumerate(results):
-        results_frame = {
-            "class_max": classes[scores.argmax()]
-            # I think I'll deprecate this eventually, but it remains interesting for now
-        }
-
-        results_frame.update({classes[i]: scores[i] for i in range(len(classes))})
+        results_frame = {classes[i]: scores[i] for i in range(len(classes))}
         translate.append(results_frame)
     output_df = pd.DataFrame(translate)
 
@@ -45,14 +47,14 @@ suffix_result = '_buzzdetect.csv'
 suffix_partial = '_buzzchunk.csv'
 
 
-def solve_memory(memory_allot, cpus, framehop):
+def solve_memory(memory_allot, cpus, framehop_prop):
     """ given memory allotment, number of processes, and framelength, solve for number of streamer processes, depth of buffer, and chunklength """
     memory_remaining = memory_allot
     memory_remaining = memory_remaining - (0.350*cpus)  # memory (in GB) required for single tensorflow process
 
     memorydensity_audio = 2.4 / 3600  # gigabytes of memory per second of decoded audio (estimate)  # TODO: re-test with memory profile; just give best guess at peak memory usage
     audio_time_free = memory_remaining/memorydensity_audio
-    frame_time_free = audio_time_free*framehop
+    frame_time_free = audio_time_free * framehop_prop
 
     # this is total guesswork. TODO: test! Tune!
     concurrent_streamers = (cpus/2).__ceil__()  # on SSD, ideal seems to be near cpus/2 (when running with GPU also!)
@@ -64,8 +66,13 @@ def solve_memory(memory_allot, cpus, framehop):
     return concurrent_streamers, buffer_max, chunklength
 
 
-def melt_coverage(cover_df):
-    """ where cover_df is a dataframe with start and end columns """
+def melt_coverage(cover_df, framelength=None):
+    """ where cover_df is a dataframe with start and end columns OR framelength is provided"""
+    if 'end' not in cover_df.columns:
+        if framelength is None:
+            raise ValueError('cover_df has no "end" column and framelength is not provided')
+        cover_df['end'] = cover_df['start'] + framelength
+
     cover_df.sort_values("start", inplace=True)
     cover_df["coverageGroup"] = (cover_df["start"] > cover_df["end"].shift()).cumsum()
     df_coverage = cover_df.groupby("coverageGroup").agg({"start": "min", "end": "max"})
@@ -148,7 +155,7 @@ def gaps_to_chunklist(gaps_in, chunklength, decimals=2):
     return chunklist
 
 
-def stitch_partial(base_out, duration_audio):
+def stitch_partial(base_out, duration_audio, framelength):
     if os.path.exists(base_out + suffix_result):
         return
 
@@ -163,7 +170,7 @@ def stitch_partial(base_out, duration_audio):
         return
 
     df = pd.concat([pd.read_csv(p) for p in paths_chunks])
-    coverage = melt_coverage(df)
+    coverage = melt_coverage(df, framelength)
 
     gaps = get_gaps(
         range_in=(0, duration_audio),
