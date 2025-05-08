@@ -68,9 +68,11 @@ def solve_memory(memory_allot, cpus, framehop_prop):
 
 def melt_coverage(cover_df, framelength=None):
     """ where cover_df is a dataframe with start and end columns OR framelength is provided"""
+    if 'end' not in cover_df.columns and framelength is None:
+        raise ValueError('cover_df has no "end" column and framelength is not provided')
+
+    cover_df = cover_df.copy()  # don't mutate
     if 'end' not in cover_df.columns:
-        if framelength is None:
-            raise ValueError('cover_df has no "end" column and framelength is not provided')
         cover_df['end'] = cover_df['start'] + framelength
 
     cover_df.sort_values("start", inplace=True)
