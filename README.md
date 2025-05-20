@@ -4,7 +4,7 @@
 </div>
 
 ## Introduction
-buzzdetect is a machine learning based python tool for automated biacoustic surveys of honey bees. buzzdetect is capable of processing arbitrarily large audio files of virtually any type and producing second-by-second annotations of the sounds identified in the files. It outputs results as CSV files for easy transfer into other data processing software.
+buzzdetect is a machine learning based python tool for automated biacoustic surveys of honey bees. buzzdetect is capable of processing arbitrarily large audio files of virtually any type and producing second-by-second annotations of the sounds identified in the files. It outputs results as CSV files for easy transfer into other data processing software. 
 
 ### Performance
 The accuracy of buzzdetect varies between models. Check out the README files in each model saved in [the models folder](https://github.com/OSU-Bee-Lab/buzzdetect/tree/main/models).
