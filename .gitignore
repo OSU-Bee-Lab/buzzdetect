@@ -14,7 +14,6 @@ condaenv.l8rr463d.requirements.txt
 # directories for local execution
 /audio_in/
 /local*/
-/models/
 /output*/
 /training/
 /buzzextras/
