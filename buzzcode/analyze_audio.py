@@ -1,5 +1,8 @@
 import warnings
 
+import numpy as np
+
+from buzzcode.config import dir_audio_in
 from buzzcode.utils import search_dir, Timer, setthreads
 
 setthreads(1)
@@ -19,9 +22,9 @@ import tensorflow as tf
 import soundfile as sf
 from datetime import datetime
 
-#  modelname = "new_light"; framehop_prop=1; cpus=4; memory_allot = 3; dir_audio="./audio_in"; dir_out=None; verbosity=1; paths_audio = None; embeddername='yamnet_wholehop'; result_detail='sparse'; gpu = False
+
 def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet', framehop_prop=1,
-                  dir_audio="./audio_in", verbosity=1):
+                  dir_audio=dir_audio_in, verbosity=1):
     timer_total = Timer()
 
     dir_model = os.path.join("models", modelname)
@@ -34,6 +37,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
     log.close()
 
     control = []  # make control now for worker_logger to reference in case of early exit
+    q_write = multiprocessing.Queue()
 
     # Logging
     #
@@ -45,13 +49,13 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         if do_log:
             q_log.put(f"{time_current} - {item} \n")
 
-        if item_verb <= verbosity:
+        if verbosity >= item_verb:
             print(item)
 
         return item
 
     def worker_logger():
-        workers_running = cpus
+        workers_running = cpus + gpu
         while workers_running > 0:
             log_item = q_log.get(block=True)
             if log_item == 'TERMINATE':
@@ -105,6 +109,9 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
         return
 
+    # TODO: parallel process? This can take a long time if the interrupted analysis was very long
+    # TODO: files with bad ending data (e.g., recorder died during recording) will never stitch into a final file
+    # TODO: also, soundfile is faster for calculating runtime!  runtime = sf.frames/sf.samplerate
     for path_audio in paths_audio:
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
@@ -118,8 +125,8 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             continue
 
         duration_audio = librosa.get_duration(path=path_audio)
-        paths_chunks = search_dir(os.path.dirname(base_out), None)
-        paths_chunks = [p for p in paths_chunks if re.search(base_out, p)]
+
+        paths_chunks = search_dir(os.path.dirname(base_out), [os.path.basename(base_out) + suffix_partial])
 
         if not paths_chunks:  # if there are no results, chunklist whole file and move on
             gaps = [(0, duration_audio)]
@@ -134,9 +141,11 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             )
             continue
 
+        printlog(f"combining result chunks for {re.sub(dir_out, '', base_out)}", 1)
+
+        df = pd.concat([pd.read_csv(p) for p in paths_chunks])
         # if there are results, read them, make chunklist
         # (this is essentially a more efficient implementation of stitch_partial(), so I don't have to stitch, then re-read)
-        df = pd.concat([pd.read_csv(p) for p in paths_chunks])
         coverage = melt_coverage(df, framelength)
 
         gaps = get_gaps(
@@ -214,29 +223,15 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         with streamers_active.get_lock():
             streamers_active.value -= 1
 
-    # analyzer
-    # 
-    def worker_analyzer(id_analyzer, processor):
-        if processor == 'CPU':
-            tf.config.set_visible_devices([], 'GPU')
-            visible_devices = tf.config.get_visible_devices()
-            for device in visible_devices:
-                assert device.device_type != 'GPU'
-
-        printlog(f"analyzer {id_analyzer}: processing on {processor}", 1)
-
-        def analyze_assignment(assignment):
-            timer_analysis.restart()
-            embeddings = embedder(assignment['samples'])
-            results = model(embeddings)
-            output = translate_results(results, classes)
+    def worker_writer():
+        def write_results(assignment, results):
+            output = translate_results(results, config_model['classes'])
 
             output.insert(
                 column='start',
                 value=range(len(output)),
                 loc=0
             )
-
             output['start'] = output['start'] * framehop_prop * framelength
             output['start'] = output['start'] + assignment['chunk'][0]
 
@@ -251,38 +246,68 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             os.makedirs(os.path.dirname(path_out), exist_ok=True)
             output.to_csv(path_out, index=False)
 
+        assignment, results = q_write.get()
+        while assignment != 'TERMINATE':
+            write_results(assignment, results)
+            assignment, results = q_write.get()
+
+    # analyzer
+    # 
+    def worker_analyzer(id_analyzer, processor):
+        if processor == 'CPU':
+            tf.config.set_visible_devices([], 'GPU')
+            visible_devices = tf.config.get_visible_devices()
+            for device in visible_devices:
+                assert device.device_type != 'GPU'
+
+        printlog(f"analyzer {id_analyzer}: processing on {processor}", 1)
+
+        # TODO: separate analysis from writing! This is killing analysis rate!
+        # Also, implement feather for faster writing, smaller file, interoperability w/ R!
+        def analyze_assignment(assignment):
+            embeddings = embedder(assignment['samples'])
+            results = model(embeddings)
+            results = np.array(results)
+            q_write.put((assignment, results))
+
             chunk_duration = assignment['chunk'][1] - assignment['chunk'][0]
 
             timer_analysis.stop()
             analysis_rate = (chunk_duration / timer_analysis.get_total()).__round__(1)
+            path_short = re.sub(dir_audio,'',assignment['path_audio'])
             printlog(
-                f"analyzer {id_analyzer}: analyzed {assignment['path_audio']}, "
+                f"analyzer {id_analyzer}: analyzed {path_short}, "
                 f"chunk {assignment['chunk']} "
                 f"in {timer_analysis.get_total()}s (rate: {analysis_rate})",
                 2, do_log=True)
+            timer_analysis.restart()  # pessimistic; accounts for wait time
+
 
         # ready model
         #
         model = load_model(modelname)
-        embedder = load_embedder_model(embeddername, framehop_s=framelength*framehop_prop)
-
-        classes = config_model['classes']
+        embedder = load_embedder_model(embeddername, framehop_s=framelength * framehop_prop)
 
         timer_analysis = Timer()
+        timer_bottleneck = Timer()
         while True:
             try:
-                assignment = q_assignments.get(timeout=4)
+                assignment = q_assignments.get(timeout=0)  # I don't see bottlenecks once processing gets rolling, and yet realtime analysis rate is so much slower
                 analyze_assignment(assignment)
             except Empty:
                 if streamers_active.value == 0:
                     break
                 else:
-                    # DEBUG
-                    print(f"!!! BUFFER BOTTLENECK; analyzer {id_analyzer} waiting for assignment !!!")
-                    # DEBUG
+                    timer_bottleneck.restart()
+                    printlog(f"BUFFER BOTTLENECK: analyzer {id_analyzer} waiting for assignment", 2)
+                    assignment = q_assignments.get()  # now wait for assignment
+                    timer_bottleneck.stop()
+                    printlog(f"BUFFER BOTTLENECK: analyzer {id_analyzer} received assignment after {timer_bottleneck.get_total().__round__(1)}s", 2)
+                    analyze_assignment(assignment)
 
         printlog(f"analyzer {id_analyzer}: terminating")
         q_log.put('TERMINATE')
+        q_write.put(('TERMINATE', None))
 
     # Go!
     #
@@ -294,6 +319,9 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         f"CPU count: {cpus}\n"
         f"memory allotment {memory_allot}\n",
         0)
+
+    proc_writer = multiprocessing.Process(target=worker_writer, name='writer_proc', args=[])
+    proc_writer.start()
 
     proc_streamers = []
     streamer_ids = []
@@ -310,7 +338,14 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         proc_analyzers[-1].start()
         pass
 
+
+    # TODO: how does running just gpu with no cpu compare to allowing tensorflow full access to threads?
     if gpu:  # things get narsty when running GPU on a multiprocessing.Process(), so just run in main thread last
+        # TODO: hmmm...running in main thread is probably significantly harming performance;
+        # there seems to be idle time between tasks even when there are items in the buffer.
+        # e.g., after GPU analyzer finishes one task, it doesn't go right to the next one in the
+        # while loop. Is this caused by main thread processes? I don't see anything else in the main
+        # thread.
         worker_analyzer('G', 'GPU')
 
     # wait for analysis to finish
@@ -322,6 +357,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         base_out = os.path.splitext(base_out)[0]
         base_out = re.sub(dir_audio, dir_out, base_out)
 
+        printlog(f"combining result chunks for {re.sub(dir_out, '', base_out)}", 1)
         stitch_partial(base_out, c['duration_audio'], framelength)
 
     timer_total.stop()
