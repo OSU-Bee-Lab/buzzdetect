@@ -16,3 +16,5 @@ dir_translations = os.path.join(dir_training, 'translations')
 # Analysis
 dir_audio_in = './audio_in'
 
+# tags
+tag_eof = '_finalframe'

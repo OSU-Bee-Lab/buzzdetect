@@ -10,11 +10,10 @@ setthreads(1)
 from buzzcode.embedders import load_embedder_model, load_embedder_config
 from buzzcode.analysis import load_model, translate_results, suffix_result, suffix_partial, solve_memory, melt_coverage, \
     get_gaps, smooth_gaps, gaps_to_chunklist, stitch_partial
-from buzzcode.audio import stream_to_queue
+from buzzcode.audio import stream_to_queue, get_duration
 import pandas as pd
 import os
 import re
-import librosa
 import multiprocessing
 from queue import Empty
 import json
@@ -124,7 +123,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
             warnings.warn(f'file too small, skipping: {path_audio}')
             continue
 
-        duration_audio = librosa.get_duration(path=path_audio)
+        duration_audio = get_duration(path_audio)
 
         paths_chunks = search_dir(os.path.dirname(base_out), [os.path.basename(base_out) + suffix_partial])
 
@@ -358,7 +357,8 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         base_out = re.sub(dir_audio, dir_out, base_out)
 
         printlog(f"combining result chunks for {re.sub(dir_out, '', base_out)}", 1)
-        stitch_partial(base_out, c['duration_audio'], framelength)
+        # re-calculate duration to catch bad EOF
+        stitch_partial(base_out, get_duration(c['path_audio']), framelength)
 
     timer_total.stop()
     closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
@@ -370,4 +370,4 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='new_light', gpu=False, vram=1, cpus=4, memory_allot=10, verbosity=2)
+    analyze_batch(modelname='model_general', gpu=False, vram=1, cpus=4, memory_allot=10, verbosity=2)
