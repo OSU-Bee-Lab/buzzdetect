@@ -47,25 +47,6 @@ suffix_result = '_buzzdetect.csv'
 suffix_partial = '_buzzchunk.csv'
 
 
-def solve_memory(memory_allot, cpus, framehop_prop):
-    """ given memory allotment, number of processes, and framelength, solve for number of streamer processes, depth of buffer, and chunklength """
-    memory_remaining = memory_allot
-    memory_remaining = memory_remaining - (0.350*cpus)  # memory (in GB) required for single tensorflow process
-
-    memorydensity_audio = 2.4 / 3600  # gigabytes of memory per second of decoded audio (estimate)  # TODO: re-test with memory profile; just give best guess at peak memory usage
-    audio_time_free = memory_remaining/memorydensity_audio
-    frame_time_free = audio_time_free * framehop_prop
-
-    # this is total guesswork. TODO: test! Tune!
-    concurrent_streamers = (cpus/2).__ceil__()  # on SSD, ideal seems to be near cpus/2 (when running with GPU also!)
-    buffer_max = 3 * cpus
-    chunks_at_once = concurrent_streamers + buffer_max
-
-    chunklength = int(frame_time_free/chunks_at_once)
-
-    return concurrent_streamers, buffer_max, chunklength
-
-
 def melt_coverage(cover_df, framelength=None):
     """ where cover_df is a dataframe with start and end columns OR framelength is provided"""
     if 'end' not in cover_df.columns and framelength is None:

@@ -25,7 +25,6 @@ parser_analyze = subparsers.add_parser('analyze', help='analyze all audio files 
 parser_analyze.add_argument('--modelname', help='the name of the directory holding the model data', required=True,
                             type=str)
 parser_analyze.add_argument('--cpus', required=True, type=int)
-parser_analyze.add_argument('--memory', required=True, type=float)
 parser_analyze.add_argument('--classes', required=False, type=str)  # give as...comma-separated list?
 parser_analyze.add_argument('--dir_audio', required=False, default="./audio_in", type=str)
 parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
@@ -65,7 +64,6 @@ elif args.action == "analyze":
     analyze_batch(
         modelname=args.modelname,
         cpus=args.cpus,
-        memory_allot=args.memory,
         dir_audio=args.dir_audio,
         verbosity=args.verbosity,
     )

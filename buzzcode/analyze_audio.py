@@ -8,7 +8,7 @@ from buzzcode.utils import search_dir, Timer, setthreads
 setthreads(1)
 
 from buzzcode.embedders import load_embedder_model, load_embedder_config
-from buzzcode.analysis import load_model, translate_results, suffix_result, suffix_partial, solve_memory, melt_coverage, \
+from buzzcode.analysis import load_model, translate_results, suffix_result, suffix_partial, melt_coverage, \
     get_gaps, smooth_gaps, gaps_to_chunklist, stitch_partial
 from buzzcode.audio import stream_to_queue, get_duration
 import pandas as pd
@@ -22,7 +22,7 @@ import soundfile as sf
 from datetime import datetime
 
 
-def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddername='yamnet', framehop_prop=1,
+def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='yamnet', framehop_prop=1,
                   dir_audio=dir_audio_in, verbosity=1):
     timer_total = Timer()
 
@@ -82,12 +82,8 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
     framelength_str = re.sub('^.*\\.', '', framelength_str)
     framelength_digits = len(framelength_str)
 
-
-    concurrent_streamers, buffer_max, chunklength = solve_memory(
-        memory_allot=memory_allot,
-        cpus=cpus,
-        framehop_prop=framehop_prop
-    )
+    concurrent_streamers = 2
+    buffer_max = 2
 
     if chunklength < framelength:
         raise ValueError(f"insufficient memory allotment")
@@ -316,7 +312,7 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
         f"input directory: {dir_audio}\n"
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
-        f"memory allotment {memory_allot}\n",
+        f"GPU count: {gpu}\n",
         0)
 
     proc_writer = multiprocessing.Process(target=worker_writer, name='writer_proc', args=[])
@@ -370,4 +366,4 @@ def analyze_batch(modelname, cpus, memory_allot, gpu=False, vram=None, embeddern
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general', gpu=False, vram=1, cpus=4, memory_allot=10, verbosity=2)
+    analyze_batch(modelname='model_general', dir_audio='/media/server storage/experiments', gpu=True,cpus=0, verbosity=2)
