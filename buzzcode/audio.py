@@ -12,7 +12,7 @@ from buzzcode.config import tag_eof
 def get_duration(path_audio):
     track = sf.SoundFile(path_audio)
 
-    base_eof = os.path.splitext(path_audio)[0] + '_EOF'
+    base_eof = os.path.splitext(path_audio)[0] + tag_eof
     paths_eof = glob.glob(base_eof + '*')
 
     if paths_eof:
