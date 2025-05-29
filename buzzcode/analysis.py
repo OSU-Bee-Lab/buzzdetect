@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
+from buzzcode.constants import suffix_result, suffix_partial
 from buzzcode.utils import search_dir
 
 
@@ -42,9 +43,6 @@ def translate_results(results, classes, digits=1):
 
     return output_df
 
-
-suffix_result = '_buzzdetect.csv'
-suffix_partial = '_buzzchunk.csv'
 
 
 def melt_coverage(cover_df, framelength=None):
@@ -138,35 +136,54 @@ def gaps_to_chunklist(gaps_in, chunklength, decimals=2):
     return chunklist
 
 
-def stitch_partial(base_out, duration_audio, framelength):
-    if os.path.exists(base_out + suffix_result):
-        return
+def chunklist_from_base(base_out, duration_audio, framelength, chunklength):
+    path_complete = base_out + suffix_result
 
-    paths_chunks = search_dir(os.path.dirname(base_out), None)
-    paths_chunks = [p for p in paths_chunks if re.search(base_out, p)]
+    # if finished analysis file exists, return
+    if os.path.exists(path_complete):
+        return []
 
+    paths_chunks = search_dir(os.path.dirname(base_out), [os.path.basename(base_out) + '.*' + suffix_partial])
+
+    # if there are no chunks, return the whole duration
     if not paths_chunks:
-        return
-
-    # if there's only one, stitched result; ignore
-    if paths_chunks == [base_out+suffix_partial]:
-        return
-
-    df = pd.concat([pd.read_csv(p) for p in paths_chunks])
-    coverage = melt_coverage(df, framelength)
-
-    gaps = get_gaps(
-        range_in=(0, duration_audio),
-        coverage_in=coverage
-    )
-
-    if not gaps:
-        path_out = base_out + suffix_result
+        gaps = [(0, duration_audio)]
     else:
-        path_out = base_out + suffix_result
+        # otherwise, read the file and calculate chunks
+        df = pd.concat([pd.read_csv(p) for p in paths_chunks])
 
-    for p in paths_chunks:
-        os.remove(p)
+        coverage = melt_coverage(df, framelength)
 
-    df.to_csv(path_out, index=False)
+        gaps = get_gaps(
+            range_in=(0, duration_audio),
+            coverage_in=coverage
+        )
+
+        gaps = smooth_gaps(
+            gaps,
+            range_in=(0, duration_audio),
+            framelength=framelength,
+            gap_tolerance=framelength / 4
+        )
+
+        if not gaps:
+            path_out = path_complete
+        else:
+            path_out = base_out + suffix_partial
+
+        # remove old partials, write new one
+        for p in paths_chunks:
+            os.remove(p)
+
+        df.sort_values("start", inplace=True)
+        df.to_csv(path_out, index=False)
+
+    # if it turns out this file was actually fully analyzed,
+    # return empty
+    if not gaps:
+        return []
+
+    chunklist = gaps_to_chunklist(gaps, chunklength)
+
+    return chunklist
 
