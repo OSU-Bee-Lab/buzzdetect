@@ -2,14 +2,13 @@ import warnings
 
 import numpy as np
 
-from buzzcode.config import dir_audio_in
+from buzzcode.config import dir_audio_in, suffix_partial
 from buzzcode.utils import search_dir, Timer, setthreads
 
 setthreads(1)
 
 from buzzcode.embedders import load_embedder_model, load_embedder_config
 from buzzcode.analysis import load_model, translate_results, chunklist_from_base
-from buzzcode.constants import suffix_partial
 from buzzcode.audio import stream_to_queue, get_duration
 import os
 import re
@@ -75,11 +74,11 @@ def worker_streamer(id_streamer, sem_streamers, q_control, q_assignments, q_log,
     sem_streamers.acquire()
 
 
-def worker_writer(sem_writers, sem_analyzers, q_write, classes, framehop_prop, framelength, framelength_digits,
-                  dir_audio, dir_out, q_log, verbosity):
+def worker_writer(sem_writers, sem_analyzers, q_write, classes, framehop_prop, framelength, digits_time,
+                  dir_audio, dir_out, q_log, verbosity, digits_results=2):
     # TODO: implement feather for faster writing, smaller file, interoperability w/ R!
     def write_results(assignment, results):
-        output = translate_results(results, classes)
+        output = translate_results(results, classes, digits=digits_results)
 
         output.insert(
             column='start',
@@ -90,7 +89,7 @@ def worker_writer(sem_writers, sem_analyzers, q_write, classes, framehop_prop, f
         output['start'] = output['start'] + assignment['chunk'][0]
 
         # round to avoid float errors
-        output['start'] = round(output['start'], framelength_digits)
+        output['start'] = round(output['start'], digits_time)
 
         base_out = assignment['path_audio']
         base_out = os.path.splitext(base_out)[0]
@@ -209,12 +208,16 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
     # Setup
     #
     dir_model = os.path.join("models", modelname)
+    if not os.path.exists(dir_model):
+        warnings.warn(f'model {modelname} not found in model directory; exiting')
+        return
+
     dir_out = os.path.join(dir_model, "output")
     timer_total = Timer()
 
     # processing control
     concurrent_writers = 1
-    concurrent_streamers = 2
+    concurrent_streamers = max(int(cpus/2), 2)
     stream_buffer_depth = max(2, int(cpus/concurrent_streamers))
 
     # interprocess communication
@@ -330,7 +333,7 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
         'classes': config_model['classes'],
         'framehop_prop': framehop_prop,
         'framelength': config_embedder['framelength'],
-        'framelength_digits': framelength_digits,
+        'digits_time': framelength_digits,
         'dir_audio': dir_audio_in,
         'dir_out': dir_out,
         'q_log': q_log,
@@ -406,6 +409,10 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
     file_log.write(closing_message)
     file_log.close()
 
+    return
+
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general', dir_audio='/media/server storage/experiments', gpu=True,cpus=0, verbosity=2)
+    models = [m for m in os.listdir('./models') if m not in ['.gitignore', 'archive', 'test']]
+    for model in models:
+        analyze_batch(modelname=model, chunklength=1000, cpus=4, verbosity=2)

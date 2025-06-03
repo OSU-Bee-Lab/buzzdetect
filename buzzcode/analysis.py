@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from buzzcode.constants import suffix_result, suffix_partial
+from buzzcode.config import suffix_result, suffix_partial
 from buzzcode.utils import search_dir
 
 
@@ -31,7 +31,7 @@ def load_model_config(modelname):
 # Functions for applying transfer model
 #
 
-def translate_results(results, classes, digits=1):
+def translate_results(results, classes, digits=2):
     # as I move from DataFrames to dicts, this function is becoming less useful...
     results = np.array(results)
     results = results.round(digits)
@@ -42,7 +42,6 @@ def translate_results(results, classes, digits=1):
     output_df = pd.DataFrame(translate)
 
     return output_df
-
 
 
 def melt_coverage(cover_df, framelength=None):
