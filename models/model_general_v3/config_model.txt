@@ -1,0 +1,1 @@
+{"embedder": "yamnet", "set": "general_notest_droptraffic", "augment": false, "translation": "general", "classes": ["mech_train", "ins_trill", "frog", "ambient_noise", "mech_plane", "ambient_rain", "mech_hum", "mech_auto", "ins_buzz", "mech_siren", "ambient_background", "bird_goose", "human"], "size_shuffle": 162913, "size_batch": 65568}
