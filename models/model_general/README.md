@@ -3,7 +3,7 @@ README for model: model_general
 Date: 2025-02-05 (trained 2024-04-25)
 
 ## General
-This is our best performing general model as of 2025-02-05. The model is "general" in the sense that it classifies all insect flight buzzes under the "ins_buzz" label. It makes no attempt to further identify the insects.
+This is our best performing general model as of 2025-02-05 \[Update: now succeeded by model_general_v3! At least, for sensitivities above 95%\]. The model is "general" in the sense that it classifies all insect flight buzzes under the "ins_buzz" label. It makes no attempt to further identify the insects.
 
 This model is useful for application in a study system dominated by a single species (e.g., in our studies in soybean, we find that the majority of buzzes are from honey bees) or for tagging buzzes for further manual analysis. In the future, we intend to use a general model as a gate to expert submodels, using a mixture-of-experts approach for fine-grained identification of pollinators.
 
