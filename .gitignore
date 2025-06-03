@@ -17,3 +17,15 @@ condaenv.l8rr463d.requirements.txt
 /output*/
 /training/
 /buzzextras/
+
+
+# EMBEDDERS
+embedders/*
+!embedders/yamnet/
+
+# MODELS
+models/*
+models/*/output/
+
+!models/model_general/
+!models/model_general_v3/
