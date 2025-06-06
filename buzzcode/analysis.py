@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from buzzcode.config import suffix_result, suffix_partial
+from buzzcode.config import SUFFIX_RESULT_COMPLETE, SUFFIX_RESULT_PARTIAL
 from buzzcode.utils import search_dir
 
 
@@ -65,11 +65,11 @@ def melt_coverage(cover_df, framelength=None):
 def get_coverage(path_raw, dir_raw, dir_out, framelength=None, framelength_digits=None):
     raw_base = os.path.splitext(path_raw)[0]
 
-    path_partial = re.sub(dir_raw, dir_out, raw_base) + suffix_partial
+    path_partial = re.sub(dir_raw, dir_out, raw_base) + SUFFIX_RESULT_PARTIAL
     if os.path.exists(path_partial):
         path_out = path_partial
     else:
-        path_out = re.sub(dir_raw, dir_out, raw_base) + suffix_result
+        path_out = re.sub(dir_raw, dir_out, raw_base) + SUFFIX_RESULT_COMPLETE
 
     if not os.path.exists(path_out):
         return []
@@ -136,13 +136,13 @@ def gaps_to_chunklist(gaps_in, chunklength, decimals=2):
 
 
 def chunklist_from_base(base_out, duration_audio, framelength, chunklength):
-    path_complete = base_out + suffix_result
+    path_complete = base_out + SUFFIX_RESULT_COMPLETE
 
     # if finished analysis file exists, return no chunks
     if os.path.exists(path_complete):
         return []
 
-    path_partial = base_out + suffix_partial
+    path_partial = base_out + SUFFIX_RESULT_PARTIAL
 
     # if the file hasn't been started, chunk the whole file
     if not os.path.exists(path_partial):

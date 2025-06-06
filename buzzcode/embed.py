@@ -7,7 +7,7 @@ import re
 
 import numpy as np
 
-import buzzcode.config as cfg
+from buzzcode.config import DIR_TRAIN_SET
 from buzzcode.utils import setthreads, read_pickle_exhaustive
 
 setthreads(1)
@@ -44,7 +44,7 @@ def embeddings_done(path_audio, dir_samples_audio, dir_samples_embeddings, toler
 
 
 def embed_set(setname, overwrite=False, cpus=2):
-    dir_set = os.path.join(cfg.dir_sets, setname)
+    dir_set = os.path.join(DIR_TRAIN_SET, setname)
     dir_samples_audio = os.path.join(dir_set, 'samples_audio')
     dir_samples_embeddings = os.path.join(dir_set, 'samples_embeddings')
     if not os.path.exists(dir_samples_audio):

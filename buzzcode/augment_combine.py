@@ -66,7 +66,7 @@ def combine_set(setname, cpus=2, limit=10, batchsize=1500):
     # add add augmentation with white noise (should apply to negative cases, too)
     # change volume
     # change frequency response?
-    dir_set = os.path.join(cfg.dir_sets, setname)
+    dir_set = os.path.join(cfg.DIR_TRAIN_SET, setname)
     path_folds = os.path.join(dir_set, 'folds.csv')
     if not os.path.exists(path_folds):
         raise FileNotFoundError(

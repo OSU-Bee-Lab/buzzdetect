@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 
-from buzzcode.config import dir_audio_in, suffix_partial
+from buzzcode.config import DIR_AUDIO, SUFFIX_RESULT_PARTIAL
 from buzzcode.utils import search_dir, Timer, setthreads
 
 setthreads(1)
@@ -95,7 +95,7 @@ def worker_writer(sem_writers, sem_analyzers, q_write, classes, framehop_prop, f
         base_out = os.path.splitext(path_audio)[0]
         base_out = re.sub(dir_audio, dir_out, base_out)
         # Remove the chunk-specific suffix since we're appending to one file
-        path_out = base_out + suffix_partial
+        path_out = base_out + SUFFIX_RESULT_PARTIAL
 
         os.makedirs(os.path.dirname(path_out), exist_ok=True)
 
@@ -226,7 +226,7 @@ def initialize_log(time_start, dir_out):
 
 
 def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='yamnet', framehop_prop=1,
-                  dir_audio=dir_audio_in, verbosity=1):
+                  dir_audio=DIR_AUDIO, verbosity=1):
     # Setup
     #
     dir_model = os.path.join("models", modelname)

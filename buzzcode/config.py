@@ -1,22 +1,20 @@
 import os
 
-dir_models = './models'
-dir_embedders = './embedders'
+# File structure
+#
+DIR_AUDIO = './audio_in'
+DIR_MODELS = './models'
+DIR_EMBEDDERS = './embedders'
 
-# Training
-dir_training = './training'
-dir_trainingaudio = os.path.join(dir_training, 'audio')
+DIR_TRAIN = './training'
+DIR_TRAIN_AUDIO = os.path.join(DIR_TRAIN, 'audio')
+DIR_TRAIN_ANNOTATION = os.path.join(DIR_TRAIN, 'annotations')
+DIR_TRAIN_FOLD = os.path.join(DIR_TRAIN, 'folds')
+DIR_TRAIN_SET = os.path.join(DIR_TRAIN, 'sets')
+DIR_TRAIN_AUGMENT = os.path.join(DIR_TRAIN, 'augmentation')
+DIR_TRAIN_TRANSLATE = os.path.join(DIR_TRAIN, 'translations')
 
-dir_annotations = os.path.join(dir_training, 'annotations')
-dir_folds = os.path.join(dir_training, 'folds')
-dir_sets = os.path.join(dir_training, 'sets')
-dir_augmentation = os.path.join(dir_training, 'augmentation')
-dir_translations = os.path.join(dir_training, 'translations')
-
-# Analysis
-dir_audio_in = './audio_in'
-
-# tags
-tag_eof = '_finalframe'
-suffix_result = '_buzzdetect.csv'
-suffix_partial = '_buzzpart.csv'
+# File tags
+TAG_EOF = '_finalframe'
+SUFFIX_RESULT_COMPLETE = '_buzzdetect.csv'
+SUFFIX_RESULT_PARTIAL = '_buzzpart.csv'

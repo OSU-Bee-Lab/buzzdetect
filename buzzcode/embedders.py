@@ -4,7 +4,7 @@ import os
 import numpy as np
 import tensorflow as tf
 
-import buzzcode.config as cfg
+from buzzcode.config import DIR_EMBEDDERS
 from buzzcode.utils import setthreads
 
 # TODO: can we pull YAMNet from tf_hub? It seems to have some issues
@@ -15,6 +15,7 @@ setthreads(1)
 def load_yamnet(framehop_s):
     """Create a YAMNet model with specified frame hop."""
     dir_yamnet = os.path.join(cfg.dir_embedders, 'yamnet')
+    dir_yamnet = os.path.join(DIR_EMBEDDERS, 'yamnet')
 
     model = tf.keras.models.load_model(dir_yamnet, compile=False)
     modelconf = model.get_config()
@@ -32,7 +33,7 @@ def load_yamnet(framehop_s):
 
 
 def config_yamnet():
-    dir_yamnet = os.path.join(cfg.dir_embedders, 'yamnet')
+    dir_yamnet = os.path.join(DIR_EMBEDDERS, 'yamnet')
     with open(os.path.join(dir_yamnet, 'config.txt')) as f:
         config = json.load(f)
     return config

@@ -20,7 +20,7 @@ setthreads(1)
 
 def extract_ident(ident, annotations_ident, framelength, overlap_event_s, framehop_s, samplerate_target):
     print(f'EXTRACTION: starting ident {ident}')
-    base_raw = os.path.join(cfg.dir_trainingaudio, ident + '.*')
+    base_raw = os.path.join(cfg.DIR_TRAIN_AUDIO, ident + '.*')
     path_raw = glob.glob(base_raw)
     if len(path_raw) > 1:
         raise ValueError(f'multiple audio files found for ident {ident}')
@@ -82,7 +82,7 @@ def collapse_labels(labellist):
 
 
 def write_ident(setname, ident, framehop_s, framelength, samplerate_target, overlap_event_s):
-    dir_set = os.path.join(cfg.dir_sets, setname)
+    dir_set = os.path.join(cfg.DIR_TRAIN_SET, setname)
     dir_ident = os.path.join(dir_set, 'samples_audio', ident)
     os.makedirs(dir_ident, exist_ok=False)
 
@@ -113,7 +113,7 @@ def write_ident(setname, ident, framehop_s, framelength, samplerate_target, over
 
 
 def extract_set(setname, event_overlap_prop, framehop_s, cpus):
-    dir_set = os.path.join(cfg.dir_sets, setname)
+    dir_set = os.path.join(cfg.DIR_TRAIN_SET, setname)
 
     annotations = pd.read_csv(os.path.join(dir_set, 'annotations.csv'))
     idents = annotations['ident'].unique()

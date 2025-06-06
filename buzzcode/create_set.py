@@ -15,20 +15,20 @@ from buzzcode.set import clean_name
 
 def create_set(setname, annotationname, embeddername, framehop_prop, foldname, event_overlap_prop=0.2,
                augmentname_combine=None, cpus_extract=7, cpus_embed=1, combine_limit=10):
-    dir_set = os.path.join(cfg.dir_sets, setname)
+    dir_set = os.path.join(cfg.DIR_TRAIN_SET, setname)
     os.makedirs(dir_set)
 
     # ---- copy files to set directory ----
     # annotations
     annotationname = clean_name(annotationname, '^annotations_', '\\.csv')
     shutil.copy(
-        os.path.join(cfg.dir_annotations, 'annotations_' + annotationname + '.csv'),
+        os.path.join(cfg.DIR_TRAIN_ANNOTATION, 'annotations_' + annotationname + '.csv'),
         os.path.join(dir_set, 'annotations.csv')
     )
 
     # folds
     shutil.copy(
-        os.path.join(cfg.dir_folds, 'folds_' + foldname + '.csv'),
+        os.path.join(cfg.DIR_TRAIN_FOLD, 'folds_' + foldname + '.csv'),
         os.path.join(dir_set, 'folds.csv')
     )
 
@@ -50,7 +50,7 @@ def create_set(setname, annotationname, embeddername, framehop_prop, foldname, e
     # combination
     if augmentname_combine is not None:
         shutil.copy(
-            os.path.join(cfg.dir_augmentation, 'combine_' + augmentname_combine + '.csv'),
+            os.path.join(cfg.DIR_TRAIN_AUGMENT, 'combine_' + augmentname_combine + '.csv'),
             os.path.join(dir_set, 'augmentation_combine.csv')
         )
 

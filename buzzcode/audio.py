@@ -7,13 +7,13 @@ import librosa
 import numpy as np
 import soundfile as sf
 
-from buzzcode.config import tag_eof
+from buzzcode.config import TAG_EOF
 
 
 def get_duration(path_audio):
     track = sf.SoundFile(path_audio)
 
-    base_eof = os.path.splitext(path_audio)[0] + tag_eof
+    base_eof = os.path.splitext(path_audio)[0] + TAG_EOF
     paths_eof = glob.glob(base_eof + '*')
 
     if paths_eof:
@@ -43,7 +43,7 @@ def frame_audio(audio_data, framelength, samplerate, framehop_s):
 
 
 def mark_eof(path_audio, frame_final):
-    path_eof = os.path.splitext(path_audio)[0] + tag_eof + '_' + str(frame_final)
+    path_eof = os.path.splitext(path_audio)[0] + TAG_EOF + '_' + str(frame_final)
     open(path_eof, 'a').close()
 
 
