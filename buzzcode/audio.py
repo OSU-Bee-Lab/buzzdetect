@@ -51,8 +51,9 @@ def handle_badread(path_audio, duration_audio, track, end_intended):
     frame_actual = track.tell()
 
     # if we get a bad read in the middle of a file, this deserves a warning.
-    if not end_intended == duration_audio:
-        warnings.warn(f"Unreadable frames starting at {round(frame_actual / track.samplerate(), 1)}s for {path_audio}.")
+    near_end = abs(end_intended - duration_audio) < 5  # not sure there's an objective way to tune this
+    if not near_end:
+        warnings.warn(f"Unreadable frames starting at {round(frame_actual / track.samplerate, 1)}s for {path_audio}.")
         return
 
     # if we get a bad read at the end of a file, this is pretty common when batteries run out.
@@ -78,7 +79,7 @@ def stream_to_queue(path_audio, duration_audio, chunklist, q_assignments, resamp
         n_samples = len(samples)
 
         if n_samples < read_size:
-            handle_badread(path_audio, duration_audio, track, end_intended=chunk[1])
+            handle_badread(path_audio=path_audio, track=track, duration_audio=duration_audio, end_intended=chunk[1])
 
         samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=resample_rate)
 
