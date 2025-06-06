@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+import warnings
 
 import librosa
 import numpy as np
@@ -46,7 +47,21 @@ def mark_eof(path_audio, frame_final):
     open(path_eof, 'a').close()
 
 
-def stream_to_queue(path_audio, chunklist, q_assignments, resample_rate, mark_bad_eof=True):
+def handle_badread(path_audio, duration_audio, track, end_intended):
+    frame_actual = track.tell()
+
+    # if we get a bad read in the middle of a file, this deserves a warning.
+    if not end_intended == duration_audio:
+        warnings.warn(f"Unreadable frames starting at {round(frame_actual / track.samplerate(), 1)}s for {path_audio}.")
+        return
+
+    # if we get a bad read at the end of a file, this is pretty common when batteries run out.
+    # don't bother warning, just mark and move on.
+    mark_eof(path_audio, frame_actual)
+    return
+
+
+def stream_to_queue(path_audio, duration_audio, chunklist, q_assignments, resample_rate):
     def queue_assignment(chunk, track, samplerate_native):
         sample_from = int(chunk[0] * samplerate_native)
         sample_to = int(chunk[1] * samplerate_native)
@@ -61,10 +76,9 @@ def stream_to_queue(path_audio, chunklist, q_assignments, resample_rate, mark_ba
         # this appears to be because our recorders ran out of battery while recording
         # SoundFile does not handle this gracefully, so we catch it here.
         n_samples = len(samples)
+
         if n_samples < read_size:
-            perc = int((n_samples / read_size) * 100)
-            f"unexpectedly small read for chunk {chunk} for file {path_audio}. "
-            f"Received {perc}% of samples requested ({read_size}/{n_samples})"
+            handle_badread(path_audio, duration_audio, track, end_intended=chunk[1])
 
         samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=resample_rate)
 
@@ -81,11 +95,3 @@ def stream_to_queue(path_audio, chunklist, q_assignments, resample_rate, mark_ba
 
     for chunk in chunklist:
         queue_assignment(chunk, track, samplerate_native)
-
-    audio_duration = track.frames / track.samplerate
-    chunk_near_end = abs(chunk[1] - audio_duration) < 10
-
-    if mark_bad_eof and chunk_near_end:
-        mark_eof(path_audio, track.tell())
-
-    track.close()

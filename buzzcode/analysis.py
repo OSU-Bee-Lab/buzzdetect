@@ -138,26 +138,23 @@ def gaps_to_chunklist(gaps_in, chunklength, decimals=2):
 def chunklist_from_base(base_out, duration_audio, framelength, chunklength):
     path_complete = base_out + suffix_result
 
-    # if finished analysis file exists, return
+    # if finished analysis file exists, return no chunks
     if os.path.exists(path_complete):
         return []
 
-    paths_chunks = search_dir(os.path.dirname(base_out), [os.path.basename(base_out) + '.*' + suffix_partial])
+    path_partial = base_out + suffix_partial
 
-    # if there are no chunks, return the whole duration
-    if not paths_chunks:
+    # if the file hasn't been started, chunk the whole file
+    if not os.path.exists(path_partial):
         gaps = [(0, duration_audio)]
     else:
         # otherwise, read the file and calculate chunks
-        df = pd.concat([pd.read_csv(p) for p in paths_chunks])
-
+        df = pd.read_csv(path_partial)
         coverage = melt_coverage(df, framelength)
-
         gaps = get_gaps(
             range_in=(0, duration_audio),
             coverage_in=coverage
         )
-
         gaps = smooth_gaps(
             gaps,
             range_in=(0, duration_audio),
@@ -165,24 +162,16 @@ def chunklist_from_base(base_out, duration_audio, framelength, chunklength):
             gap_tolerance=framelength / 4
         )
 
-        if not gaps:
-            path_out = path_complete
-        else:
-            path_out = base_out + suffix_partial
-
-        # remove old partials, write new one
-        for p in paths_chunks:
-            os.remove(p)
-
-        df.sort_values("start", inplace=True)
-        df.to_csv(path_out, index=False)
-
-    # if it turns out this file was actually fully analyzed,
-    # return empty
+    # if we find no gaps, this file was actually finished!
+    # output to the finished file
     if not gaps:
+        df.sort_values("start", inplace=True)
+        df.to_csv(path_complete, index=False)
+        os.remove(path_partial)
+
+        # return no chunks, because the file was finished
         return []
 
     chunklist = gaps_to_chunklist(gaps, chunklength)
-
     return chunklist
 

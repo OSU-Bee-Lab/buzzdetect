@@ -64,6 +64,7 @@ def worker_streamer(id_streamer, sem_streamers, q_control, q_assignments, q_log,
                  do_log=True)
         stream_to_queue(
             path_audio=c['path_audio'],
+            duration_audio=c['duration_audio'],
             chunklist=c['chunklist'],
             q_assignments=q_assignments,
             resample_rate=resample_rate
@@ -76,8 +77,7 @@ def worker_streamer(id_streamer, sem_streamers, q_control, q_assignments, q_log,
 
 def worker_writer(sem_writers, sem_analyzers, q_write, classes, framehop_prop, framelength, digits_time,
                   dir_audio, dir_out, q_log, verbosity, digits_results=2):
-    # TODO: implement feather for faster writing, smaller file, interoperability w/ R!
-    def write_results(assignment, results):
+    def write_results(path_audio, chunk, results):
         output = translate_results(results, classes, digits=digits_results)
 
         output.insert(
@@ -85,24 +85,34 @@ def worker_writer(sem_writers, sem_analyzers, q_write, classes, framehop_prop, f
             value=range(len(output)),
             loc=0
         )
+
         output['start'] = output['start'] * framehop_prop * framelength
-        output['start'] = output['start'] + assignment['chunk'][0]
+        output['start'] = output['start'] + chunk[0]
 
         # round to avoid float errors
         output['start'] = round(output['start'], digits_time)
 
-        base_out = assignment['path_audio']
-        base_out = os.path.splitext(base_out)[0]
+        base_out = os.path.splitext(path_audio)[0]
         base_out = re.sub(dir_audio, dir_out, base_out)
-        path_out = base_out + f"_s{int(assignment['chunk'][0])}" + suffix_partial
+        # Remove the chunk-specific suffix since we're appending to one file
+        path_out = base_out + suffix_partial
 
         os.makedirs(os.path.dirname(path_out), exist_ok=True)
-        output.to_csv(path_out, index=False)
+
+        # Check if file exists to determine if we need to write headers
+        file_exists = os.path.exists(path_out)
+
+        # Append to existing file or create new one with headers
+        output.to_csv(path_out, mode='a', header=not file_exists, index=False)
 
     while True:
         try:
-            assignment, results = q_write.get(timeout=5)
-            write_results(assignment, results)
+            w = q_write.get(timeout=5)
+            write_results(
+                path_audio=w['path_audio'],
+                chunk=w['chunk'],
+                results=w['results']
+            )
         except Empty:
             # if the queue is empty, are there workers?
             if sem_analyzers.get_value() == 0:
@@ -127,22 +137,26 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
     printlog(f"analyzer {id_analyzer}: processing on {processor}", q_log=q_log, verb_set=verbosity, verb_item=2,
              do_log=True)
 
-    def analyze_assignment(assignment):
-        embeddings = embedder(assignment['samples'])
+    def analyze_assignment(path_audio, samples, chunk):
+        embeddings = embedder(samples)
         results = model(embeddings)
         results = np.array(results)
-        q_write.put((assignment, results))
+        q_write.put({
+            'path_audio': path_audio,
+            'chunk': assignment['chunk'],
+            'results': results
+        })
 
-        chunk_duration = assignment['chunk'][1] - assignment['chunk'][0]
+        chunk_duration = chunk[1] - chunk[0]
 
         timer_analysis.stop()
         analysis_rate = (chunk_duration / timer_analysis.get_total()).__round__(1)
-        path_short = re.sub(dir_audio, '', assignment['path_audio'])
+        path_short = re.sub(dir_audio, '', path_audio)
 
         # can I just have a monitor that watches the progress and handles reporting? So it would have its own
         # verbosity, do its own rate calculations?
         printlog(f"analyzer {id_analyzer}: analyzed {path_short}, "
-                 f"chunk {assignment['chunk']} "
+                 f"chunk {chunk} "
                  f"in {timer_analysis.get_total()}s (rate: {analysis_rate})", q_log, verb_set=verbosity, verb_item=1,
                  do_log=True)
 
@@ -167,7 +181,11 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
                     q_log=q_log, verb_set=verbosity,
                     verb_item=2,
                     do_log=True)
-                analyze_assignment(assignment)
+                analyze_assignment(
+                    path_audio=assignment['path_audio'],
+                    samples=assignment['samples'],
+                    chunk=assignment['chunk']
+                )
                 return
             except Empty:
                 if sem_streamers.get_value() > 0:
@@ -178,7 +196,11 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
     while True:
         try:
             assignment = q_assignments.get(timeout=0)
-            analyze_assignment(assignment)
+            analyze_assignment(
+                path_audio=assignment['path_audio'],
+                samples=assignment['samples'],
+                chunk=assignment['chunk']
+            )
         except Empty:
             state = loop_waiting()
             if state == 'TERMINATE':
@@ -217,8 +239,8 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
 
     # processing control
     concurrent_writers = 1
-    concurrent_streamers = max(int(cpus/2), 2)
-    stream_buffer_depth = max(2, int(cpus/concurrent_streamers))
+    concurrent_streamers = max(int(cpus / 2), 2)
+    stream_buffer_depth = max(2, int(cpus / concurrent_streamers))
 
     # interprocess communication
     sem_streamers = multiprocessing.Semaphore(concurrent_streamers)
@@ -276,11 +298,13 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
 
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
-        printlog(f"checking results for {re.sub(dir_out, '', base_out)}", q_log, verb_set=verbosity, verb_item=2, do_log=True)
+        printlog(f"checking results for {re.sub(dir_out, '', base_out)}", q_log, verb_set=verbosity, verb_item=2,
+                 do_log=True)
+        duration_audio = get_duration(path_audio)
 
         chunklist = chunklist_from_base(
             base_out=base_out,
-            duration_audio=get_duration(path_audio),
+            duration_audio=duration_audio,
             framelength=config_embedder['framelength'],
             chunklength=chunklength
         )
@@ -292,7 +316,8 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
 
         control.append({
             'path_audio': path_audio,
-            'chunklist': chunklist
+            'chunklist': chunklist,
+            'duration_audio': duration_audio
         })
 
     if not control:
@@ -334,7 +359,7 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
         'framehop_prop': framehop_prop,
         'framelength': config_embedder['framelength'],
         'digits_time': framelength_digits,
-        'dir_audio': dir_audio_in,
+        'dir_audio': dir_audio,
         'dir_out': dir_out,
         'q_log': q_log,
         'verbosity': verbosity
@@ -399,7 +424,8 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
             framelength=config_embedder['framelength'],
             chunklength=chunklength
         )
-        printlog(f"combining result chunks for {re.sub(dir_out, '', base_out)}", q_log, verb_set=verbosity, verb_item=1, do_log=True)
+        printlog(f"combining result chunks for {re.sub(dir_out, '', base_out)}", q_log, verb_set=verbosity, verb_item=1,
+                 do_log=True)
 
     timer_total.stop()
     closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
@@ -413,6 +439,5 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
 
 
 if __name__ == "__main__":
-    models = [m for m in os.listdir('./models') if m not in ['.gitignore', 'archive', 'test']]
-    for model in models:
-        analyze_batch(modelname=model, chunklength=1000, cpus=4, verbosity=2)
+    analyze_batch(modelname='model_general_v3', dir_audio='/home/luke/r projects/buzzdetect, repository/data/raw',
+                  chunklength=500, cpus=1, verbosity=2)

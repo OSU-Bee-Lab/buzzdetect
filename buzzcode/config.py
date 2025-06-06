@@ -19,4 +19,4 @@ dir_audio_in = './audio_in'
 # tags
 tag_eof = '_finalframe'
 suffix_result = '_buzzdetect.csv'
-suffix_partial = '_buzzchunk.csv'
+suffix_partial = '_buzzpart.csv'
