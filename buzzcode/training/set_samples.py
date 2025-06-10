@@ -10,7 +10,7 @@ import pandas as pd
 import soundfile as sf
 
 import buzzcode.config as cfg
-from buzzcode.analysis.analysis import melt_coverage
+from buzzcode.analysis.coverage import melt_coverage
 from buzzcode.audio import frame_audio
 from buzzcode.utils import setthreads
 
