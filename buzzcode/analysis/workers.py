@@ -136,7 +136,7 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
         results = np.array(results)
         q_write.put({
             'path_audio': path_audio,
-            'chunk': assignment['chunk'],
+            'chunk': chunk,
             'results': results
         })
 
