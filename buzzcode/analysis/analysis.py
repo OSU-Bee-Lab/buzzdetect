@@ -27,16 +27,25 @@ def load_model_config(modelname):
 # Functions for applying transfer model
 #
 
-def translate_results(results, classes, digits=2):
+def trim_results(results, classes, classes_keep='all', digits=2):
     # as I move from DataFrames to dicts, this function is becoming less useful...
     results = np.array(results)
     results = results.round(digits)
-    translate = []
-    for i, scores in enumerate(results):
-        results_frame = {classes[i]: scores[i] for i in range(len(classes))}
-        translate.append(results_frame)
-    output_df = pd.DataFrame(translate)
 
-    return output_df
+    classes_out = classes.copy()
+
+    if classes_keep != 'all':
+        classes_unknown = set(classes_keep) - set(classes)
+        if classes_unknown:
+            raise ValueError(f"Bad classes in classes_keep: {', '.join(list(classes_unknown))}")
+
+        keep_indices = [i for i, cls in enumerate(classes) if cls in classes_keep]
+        results = results[:, keep_indices]
+        classes_out = [classes[i] for i in keep_indices]
+
+    df = pd.DataFrame(results)
+    df.columns = classes_out
+
+    return df
 
 

@@ -14,7 +14,6 @@ setthreads(1)
 
 def load_yamnet(framehop_s):
     """Create a YAMNet model with specified frame hop."""
-    dir_yamnet = os.path.join(cfg.dir_embedders, 'yamnet')
     dir_yamnet = os.path.join(DIR_EMBEDDERS, 'yamnet')
 
     model = tf.keras.models.load_model(dir_yamnet, compile=False)

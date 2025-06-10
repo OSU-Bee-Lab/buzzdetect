@@ -6,7 +6,7 @@ from queue import Empty
 import numpy as np
 import tensorflow as tf
 
-from buzzcode.analysis.analysis import translate_results, load_model
+from buzzcode.analysis.analysis import trim_results, load_model
 from buzzcode.audio import stream_to_queue
 from buzzcode.config import SUFFIX_RESULT_PARTIAL
 from buzzcode.embedders import load_embedder_model
@@ -68,10 +68,10 @@ def worker_streamer(id_streamer, sem_streamers, q_control, q_assignments, q_log,
     sem_streamers.acquire()
 
 
-def worker_writer(sem_writers, sem_analyzers, q_write, classes, framehop_prop, framelength, digits_time,
+def worker_writer(sem_writers, sem_analyzers, q_write, classes, classes_keep, framehop_prop, framelength, digits_time,
                   dir_audio, dir_out, q_log, verbosity, digits_results=2):
     def write_results(path_audio, chunk, results):
-        output = translate_results(results, classes, digits=digits_results)
+        output = trim_results(results, classes, classes_keep=classes_keep, digits=digits_results)
 
         output.insert(
             column='start',
