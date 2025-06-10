@@ -7,14 +7,14 @@ import shutil
 
 from buzzcode import config as cfg
 from buzzcode.embedders import load_embedder_config
-from buzzcode.training.augment_combine import combine_set
-from buzzcode.training.extract_embeddings import embed_set
-from buzzcode.training.extract_samples import extract_set
+from buzzcode.training.set_combine import combine_set
+from buzzcode.training.set_embeddings import embed_set
+from buzzcode.training.set_samples import extract_set
 from buzzcode.training.training import clean_name
 
 
-def create_set(setname, annotationname, embeddername, framehop_prop, foldname, event_overlap_prop=0.2,
-               augmentname_combine=None, cpus_extract=7, cpus_embed=1, combine_limit=10):
+def build_set(setname, annotationname, embeddername, framehop_prop, foldname, event_overlap_prop=0.2,
+              augmentname_combine=None, cpus_extract=7, cpus_embed=1, combine_limit=10):
     dir_set = os.path.join(cfg.DIR_TRAIN_SET, setname)
     os.makedirs(dir_set)
 

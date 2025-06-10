@@ -12,8 +12,7 @@ import tensorflow as tf
 from matplotlib import pyplot as plt
 
 from buzzcode import config as cfg
-from buzzcode.training.training import build_fold_dataset, clean_name
-from buzzcode.training.translation import build_translation_dict
+from buzzcode.training.training import build_fold_dataset, clean_name, build_translation_dict
 
 
 # TODO: re-implement testfold training with new set approach
@@ -153,3 +152,5 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=Fals
     path_plot = os.path.join(dir_model, 'loss_curves.svg')
     plt.savefig(path_plot)
     plt.close()
+
+
