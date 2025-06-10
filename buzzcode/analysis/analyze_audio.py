@@ -8,7 +8,7 @@ from buzzcode.utils import search_dir, Timer, setthreads
 setthreads(1)
 
 from buzzcode.embedders import load_embedder_model, load_embedder_config
-from buzzcode.analysis import load_model, translate_results, chunklist_from_base
+from buzzcode.analysis.analysis import load_model, translate_results, chunklist_from_base
 from buzzcode.audio import stream_to_queue, get_duration
 import os
 import re
@@ -440,4 +440,4 @@ def analyze_batch(modelname, chunklength=2000, cpus=2, gpu=False, embeddername='
 
 if __name__ == "__main__":
     analyze_batch(modelname='model_general_v3', dir_audio='/home/luke/r projects/buzzdetect, repository/data/raw',
-                  chunklength=500, cpus=1, verbosity=2)
+                  chunklength=960, cpus=1, verbosity=2)  # chunklength being a multiple of framelength makes for seamless chunks

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 import buzzcode.config as cfg
-from buzzcode.translation import translate_labels
+from buzzcode.training.translation import add_labels_translate
 from buzzcode.utils import read_pickle_exhaustive
 
 
@@ -64,12 +64,6 @@ def load_fold_samples(foldname, setname, augment=False):
     return samples
 
 
-def add_labels_translate(s, translation_dict):
-    s_up = s.copy()
-    s_up.update({'labels_translate': translate_labels(s['labels_raw'], translation_dict)})
-    return s_up
-
-
 def labels_to_targets(labels, classes):
     y_blank = [0 for _ in classes]
     y_true = y_blank.copy()
@@ -100,3 +94,9 @@ def build_fold_dataset(foldname, setname, translation_dict, classes, augment, sh
 
     return samples
 
+
+def clean_name(name_in, prefix, extension):
+    name_out = re.sub(prefix, '', name_in)
+    name_out = re.sub(extension, '', name_out)
+
+    return name_out

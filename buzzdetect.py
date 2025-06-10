@@ -46,7 +46,7 @@ args = parser.parse_args()
 
 if args.action == "train":
     print(f"training new model {args.modelname} with set {args.set}")
-    from buzzcode.train import train_model
+    from buzzcode.training.train_model import train_model
 
     train_model(
         modelname=args.modelname,
@@ -59,7 +59,7 @@ if args.action == "train":
 
 elif args.action == "analyze":
     print(f"analyzing audio in {args.dir_audio} with model {args.modelname}")
-    from buzzcode.analyze_audio import analyze_batch
+    from buzzcode.analysis.analyze_audio import analyze_batch
 
     analyze_batch(
         modelname=args.modelname,

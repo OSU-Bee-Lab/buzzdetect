@@ -12,6 +12,7 @@ from buzzcode.utils import setthreads, read_pickle_exhaustive
 
 setthreads(1)
 
+
 def embed_samples(path_samples, embedder):
     samples_audio = read_pickle_exhaustive(path_samples)
 
@@ -36,7 +37,7 @@ def embeddings_done(path_audio, dir_samples_audio, dir_samples_embeddings, toler
     size_embeddings = os.path.getsize(path_embeddings)
     size_embeddings_expected = size_audio * embedding_to_audio_prop
 
-    if size_embeddings < (size_embeddings_expected*tolerance):
+    if size_embeddings < (size_embeddings_expected * tolerance):
         return False
 
     return True
@@ -72,7 +73,8 @@ def embed_set(setname, overwrite=False, cpus=2):
 
         from buzzcode.embedders import load_embedder_model, load_embedder_config
         config_embedder = load_embedder_config(embeddername)
-        embedder = load_embedder_model(embeddername, framehop_s=config_embedder['framelength'])  # set framehop to 1 frame; see embed_samples()
+        embedder = load_embedder_model(embeddername, framehop_s=config_embedder[
+            'framelength'])  # set framehop to 1 frame; see embed_samples()
 
         while path_in != 'terminate':
             path_out = re.sub(dir_samples_audio, dir_samples_embeddings, path_in)
