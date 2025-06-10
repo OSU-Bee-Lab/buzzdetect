@@ -95,6 +95,6 @@
 <text x='1019.84' y='420.92' style='font-size: 22.50px; font-weight: 500; font-family: "Futura-Medium";' textLength='122.16px' lengthAdjust='spacingAndGlyphs'>true negative</text>
 <text x='1019.84' y='444.65' style='font-size: 22.50px; font-weight: 500; font-family: "Futura-Medium";' textLength='113.44px' lengthAdjust='spacingAndGlyphs'>true positive</text>
 <text x='177.07' y='111.14' style='font-size: 40.00px; font-weight: 500; font-family: "Futura-Medium";' textLength='387.96px' lengthAdjust='spacingAndGlyphs'>True and false positives</text>
-<text x='177.07' y='154.34' style='font-size: 40.00px; font-weight: 500; font-family: "Futura-Medium";' textLength='833.74px' lengthAdjust='spacingAndGlyphs'> precision 0.9 | threshold -0.95 | sensitivity 0.38</text>
+<text x='177.07' y='154.34' style='font-size: 40.00px; font-weight: 500; font-family: "Futura-Medium";' textLength='955.38px' lengthAdjust='spacingAndGlyphs'> precision 0.9 | threshold -0.94 | sensitivity_grand 0.38</text>
 </g>
 </svg>

@@ -60,7 +60,7 @@
 <line x1='452.84' y1='171.53' x2='911.96' y2='171.53' style='stroke-width: 1.07; stroke-linecap: butt;' />
 <line x1='473.71' y1='609.79' x2='473.71' y2='150.66' style='stroke-width: 1.07; stroke-linecap: butt;' />
 <line x1='891.09' y1='609.79' x2='891.09' y2='150.66' style='stroke-width: 1.07; stroke-linecap: butt;' />
-<polyline points='891.09,588.80 891.09,587.46 891.09,576.92 891.09,552.80 888.78,523.60 878.62,486.63 876.94,485.30 873.26,483.00 871.83,481.18 870.70,478.03 870.61,476.21 867.26,472.82 864.53,469.42 859.01,465.18 851.74,462.03 847.65,458.52 840.87,455.12 829.99,450.40 817.47,446.88 804.78,441.55 786.93,435.85 778.57,430.64 768.23,425.07 750.79,416.83 734.28,411.49 723.51,406.28 711.73,400.59 697.25,392.83 687.47,387.25 675.99,378.41 667.72,372.59 657.28,362.17 645.53,353.08 639.91,346.17 631.56,337.20 626.07,331.26 621.26,324.24 615.04,314.18 611.33,308.60 605.36,299.39 600.66,289.70 598.03,283.88 593.58,276.00 591.16,271.76 587.40,264.97 585.12,261.46 559.61,195.29 551.89,176.02 ' style='stroke-width: 2.56; stroke: #00008B; stroke-linecap: butt;' />
+<polyline points='891.09,536.20 880.66,529.34 870.22,519.03 859.79,516.18 849.35,508.84 838.92,494.84 828.48,487.95 818.05,484.73 807.61,482.35 797.18,480.31 786.74,477.41 776.31,473.72 765.88,471.50 755.44,469.28 745.01,467.62 734.57,466.47 724.14,465.32 713.70,464.17 703.27,463.02 692.83,461.84 682.40,460.51 671.96,459.19 661.53,457.86 651.09,456.53 640.66,455.21 630.23,454.43 619.79,453.70 609.36,452.96 598.92,452.23 588.49,451.49 578.05,450.76 567.62,450.02 557.18,449.29 546.75,448.55 536.31,447.82 525.88,447.08 515.44,446.32 505.01,445.53 494.58,444.75 484.14,443.97 473.71,443.18 ' style='stroke-width: 2.56; stroke: #00008B; stroke-linecap: butt;' />
 </g>
 <g clip-path='url(#cpMC4wMHwxMjQ0LjE2fDAuMDB8Njk5Ljg0)'>
 <text x='448.35' y='595.21' text-anchor='end' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.00</text>
@@ -68,13 +68,13 @@
 <text x='448.35' y='386.51' text-anchor='end' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.50</text>
 <text x='448.35' y='282.17' text-anchor='end' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.75</text>
 <text x='448.35' y='177.82' text-anchor='end' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>1.00</text>
-<text x='473.71' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.00</text>
-<text x='578.05' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.25</text>
-<text x='682.40' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.50</text>
-<text x='786.74' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.75</text>
+<text x='473.71' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.80</text>
+<text x='578.05' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.85</text>
+<text x='682.40' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.90</text>
+<text x='786.74' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>0.95</text>
 <text x='891.09' y='626.85' text-anchor='middle' style='font-size: 16.00px; font-weight: 500;fill: #4D4D4D; font-family: "Futura-Medium";' textLength='32.36px' lengthAdjust='spacingAndGlyphs'>1.00</text>
 <text x='682.40' y='653.29' text-anchor='middle' style='font-size: 25.00px; font-weight: 500; font-family: "Futura-Medium";' textLength='94.77px' lengthAdjust='spacingAndGlyphs'>precision</text>
 <text x='391.09' y='390.05' text-anchor='end' style='font-size: 25.00px; font-weight: 500; font-family: "Futura-Medium";' textLength='98.74px' lengthAdjust='spacingAndGlyphs'>sensitivity</text>
-<text x='452.84' y='111.14' style='font-size: 40.00px; font-weight: 500; font-family: "Futura-Medium";' textLength='488.91px' lengthAdjust='spacingAndGlyphs'>Sensitivity-Precision Trade-off</text>
+<text x='452.84' y='111.14' style='font-size: 40.00px; font-weight: 500; font-family: "Futura-Medium";' textLength='309.33px' lengthAdjust='spacingAndGlyphs'>Trade-off, zoomed</text>
 </g>
 </svg>
