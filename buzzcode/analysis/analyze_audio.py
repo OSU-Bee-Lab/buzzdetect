@@ -18,8 +18,7 @@ import soundfile as sf
 from datetime import datetime
 
 
-def analyze_batch(modelname, classes_keep='all', chunklength=2000, cpus=2, gpu=False, embeddername='yamnet', framehop_prop=1,
-                  dir_audio=DIR_AUDIO, verbosity=1):
+def analyze_batch(modelname, classes_keep='all', chunklength=2000, cpus=2, gpu=False, framehop_prop=1, dir_audio=DIR_AUDIO, verbosity=1):
     # Setup
     #
     dir_model = os.path.join("models", modelname)
@@ -181,7 +180,7 @@ def analyze_batch(modelname, classes_keep='all', chunklength=2000, cpus=2, gpu=F
 
     args_analyzer = {
         'modelname': modelname,
-        'embeddername': embeddername,
+        'embeddername': config_model['embedder'],
         'framehop_s': framehop_prop * config_embedder['framelength'],
         'q_write': q_write,
         'q_assignments': q_assignments,
