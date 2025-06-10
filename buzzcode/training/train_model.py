@@ -12,9 +12,8 @@ import tensorflow as tf
 from matplotlib import pyplot as plt
 
 from buzzcode import config as cfg
-from buzzcode.set import clean_name
-from buzzcode.training import build_fold_dataset
-from buzzcode.translation import build_translation_dict
+from buzzcode.training.training import build_fold_dataset, clean_name
+from buzzcode.training.translation import build_translation_dict
 
 
 # TODO: re-implement testfold training with new set approach

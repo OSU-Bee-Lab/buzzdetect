@@ -33,3 +33,9 @@ def translate_labels(labels_raw, translation_dict):
     # Filter out NaN values
     labels_translated = [label for label in labels_translated if label is not np.nan]
     return labels_translated
+
+
+def add_labels_translate(s, translation_dict):
+    s_up = s.copy()
+    s_up.update({'labels_translate': translate_labels(s['labels_raw'], translation_dict)})
+    return s_up

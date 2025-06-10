@@ -7,7 +7,6 @@ import pandas as pd
 import tensorflow as tf
 
 from buzzcode.config import SUFFIX_RESULT_COMPLETE, SUFFIX_RESULT_PARTIAL
-from buzzcode.utils import search_dir
 
 
 # Functions for handling models
