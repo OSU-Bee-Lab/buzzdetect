@@ -3,10 +3,6 @@ import re
 from buzzcode.utils import setthreads
 
 setthreads(1)
-# TODO: enable GPU!
-# TODO: there are memory issues when running multiple embedding processes (appears to be leak, but might just be high usage),
-# maybe the most efficient method is to set many threads, then have only one embedder (esp. if using GPU)
-
 
 def overlaps(range_frame, range_label, minimum_overlap):
     range_overlap = (range_frame[0] + minimum_overlap, range_frame[1] - minimum_overlap)

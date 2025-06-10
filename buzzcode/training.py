@@ -35,11 +35,6 @@ def load_path_samples(paths_in):
     samples_all = []
     for path in paths_in:
         embeddings = read_pickle_exhaustive(path)
-        ### DEBUG
-        lengths = set([len(e) for e in embeddings])
-        if not lengths == {1024}:
-            raise ValueError(f'bad embeddings in {path}')
-        ### DEBUG
         labels = path_to_labels(path)
 
         samples_path = [{'embeddings': e, 'labels_raw': labels} for e in embeddings]
@@ -48,8 +43,8 @@ def load_path_samples(paths_in):
     return samples_all
 
 
-def load_fold_samples(foldname, setname, augment=True):
-    dir_set = os.path.join(cfg.dir_sets, setname)
+def load_fold_samples(foldname, setname, augment=False):
+    dir_set = os.path.join(cfg.DIR_TRAIN_SET, setname)
 
     paths_data = glob.glob(os.path.join(dir_set, 'samples_embeddings', '**', '*.pickle'), recursive=True)
 
@@ -90,8 +85,8 @@ def add_fold_targets(s, classes):
     return s_up
 
 
-def build_fold_dataset(foldname, setname, translation_dict, classes, shuffle=True):
-    samples = load_fold_samples(foldname, setname)
+def build_fold_dataset(foldname, setname, translation_dict, classes, augment, shuffle=True):
+    samples = load_fold_samples(foldname, setname, augment=augment)
 
     # so far, datasets fit in memory easily; will have to look into random reads if we run oom
     if shuffle:

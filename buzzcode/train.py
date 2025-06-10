@@ -18,16 +18,17 @@ from buzzcode.translation import build_translation_dict
 
 
 # TODO: re-implement testfold training with new set approach
-
-def train_model(modelname, setname, translationname, epochs_in=300, augment=True):
-    dir_model = os.path.join(cfg.dir_models, modelname)
+def train_model(modelname, setname, translationname, epochs_in=300, augment=False):
+    dir_model = os.path.join(cfg.DIR_MODELS, modelname)
     if os.path.exists(dir_model) and modelname != 'test':
         raise FileExistsError(
             'a model folder with this name already exists; delete or rename the existing model folder and re-run')
     os.makedirs(dir_model, exist_ok=True)
 
     translationname = clean_name(translationname, prefix='translation_', extension='.csv')
-    translation = pd.read_csv(os.path.join(cfg.dir_translations, 'translation_' + translationname + '.csv'))
+    translation = pd.read_csv(os.path.join(cfg.DIR_TRAIN_TRANSLATE, 'translation_' + translationname + '.csv'))
+    translation.to_csv(os.path.join(dir_model, 'translation.csv'), index=False)
+
     translation_dict = build_translation_dict(translation)
 
     classes = set(translation_dict.values())  # TODO: drop np.nan
@@ -36,8 +37,8 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=True
 
     # ---- load data ----
     print('TRAINING: loading data')
-    data_train = build_fold_dataset('train', setname, translation_dict, classes)
-    data_val = build_fold_dataset('validate', setname, translation_dict, classes)
+    data_train = build_fold_dataset('train', setname, translation_dict, classes, augment=augment)
+    data_val = build_fold_dataset('validate', setname, translation_dict, classes, augment=augment)
 
     # ---- weighting ----
     weights = pd.DataFrame()
@@ -96,12 +97,14 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=True
     model.add(tf.keras.layers.Dense(len(classes)))
 
     callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
-                                                patience=10,
+                                                patience=20,
                                                 min_delta=0.01,
                                                 restore_best_weights=True)
 
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)  # 0.001 is default
+
     model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
-                  optimizer="adam",
+                  optimizer=optimizer,
                   metrics=['accuracy'])
 
     history = model.fit(data_train_tf,
@@ -115,7 +118,7 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=True
 
     model.save(os.path.join(dir_model), include_optimizer=True)
 
-    with open(os.path.join(cfg.dir_sets, setname, 'config_set.txt'), 'r') as file:
+    with open(os.path.join(cfg.DIR_TRAIN_SET, setname, 'config_set.txt'), 'r') as file:
         config_set = json.load(file)
 
     config_train = {
@@ -131,8 +134,8 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=True
     with open(os.path.join(dir_model, 'config_model.txt'), 'x') as f:
         f.write(json.dumps(config_train))
 
-    epoch_stopped = callback.stopped_epoch  # TODO: this isn't the same as the restored epoch
-    epoch_loss = history.history['val_loss'][epoch_stopped]
+    epoch_restored = callback.best_epoch
+    epoch_loss = history.history['val_loss'][epoch_restored]
     loss_max = max(history.history['val_loss'])
 
     plt.plot()
@@ -145,9 +148,9 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=True
     plt.plot(history.history['val_loss'])
     plt.legend(['training', 'validation'], loc='upper left')
 
-    plt.annotate(f'stopped at epoch {epoch_stopped} with val_loss: {round(epoch_loss, 3)}', (0, 0.05))
-    plt.vlines(x=epoch_stopped, ymin=0, ymax=loss_max)
+    plt.annotate(f'stopped at epoch {epoch_restored} with val_loss: {round(epoch_loss, 3)}', (0, 0.05))
+    plt.vlines(x=epoch_restored, ymin=0, ymax=loss_max)
 
-    path_plot = os.path.join(dir_model, 'loss_curves.png')
+    path_plot = os.path.join(dir_model, 'loss_curves.svg')
     plt.savefig(path_plot)
     plt.close()
