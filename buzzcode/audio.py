@@ -12,15 +12,18 @@ from buzzcode.config import TAG_EOF
 
 def get_duration(path_audio):
     track = sf.SoundFile(path_audio)
-
     base_eof = os.path.splitext(path_audio)[0] + TAG_EOF
     paths_eof = glob.glob(base_eof + '*')
 
-    if paths_eof:
-        if len(paths_eof) > 1:
-            raise ValueError(f"multiple EOF files found for {path_audio}")
-        frame_final = int(re.search(base_eof + "_(.*)", paths_eof[0]).group(1))
+    if not paths_eof:
+        frame_final = track.frames
+    elif len(paths_eof) == 1:
+        match = re.search(base_eof + "_(.*)", paths_eof[0])
+        frame_final = int(match.group(1)) if match else track.frames
     else:
+        warnings.warn(f"multiple EOF files found for {path_audio}; deleting all")
+        for p in paths_eof:
+            os.remove(p)
         frame_final = track.frames
 
     return frame_final / track.samplerate
