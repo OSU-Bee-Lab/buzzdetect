@@ -21,14 +21,16 @@ parser = argparse.ArgumentParser(
 subparsers = parser.add_subparsers(help='sub-command help', dest='action', required=True)
 
 # analyze
-parser_analyze = subparsers.add_parser('analyze', help='analyze all audio files in a directory')
-parser_analyze.add_argument('--modelname', help='the name of the directory holding the model data', required=True,
+parser_analyze = subparsers.add_parser('analyze', help='analyze all audio files in audio_in')
+parser_analyze.add_argument('--modelname', help='the name of the model directory', required=True,
                             type=str)
-parser_analyze.add_argument('--cpus', required=True, type=int)
-parser_analyze.add_argument('--classes', required=False, type=str)  # give as...comma-separated list?
+parser_analyze.add_argument('--cpus', required=False, default=2, type=int)
+parser_analyze.add_argument('--keep_all', required=False, default=False, type=str2bool, help='whether to write the neuron values of every output neuron (True) or just the insect buzzing neuron (False, default)')
 parser_analyze.add_argument('--dir_audio', required=False, default="./audio_in", type=str)
-parser_analyze.add_argument('--dir_out', required=False, default=None, type=str)
 parser_analyze.add_argument('--verbosity', required=False, default=1, type=int)
+parser_analyze.add_argument('--chunklength', required=False, default=960, type=int, help='length of audio chunks for processing')
+parser_analyze.add_argument('--gpu', required=False, default=False, type=str2bool, help='whether to use GPU for processing')
+parser_analyze.add_argument('--framehop_prop', required=False, default=1, type=float, help='proportional frame hop, where 1 makes contiguous frames, 0.5 makes half-overlapping frames, etc.')
 
 # train
 parser_train = subparsers.add_parser('train', help='train a new model')
@@ -61,9 +63,18 @@ elif args.action == "analyze":
     print(f"analyzing audio in {args.dir_audio} with model {args.modelname}")
     from buzzcode.analysis.analyze_audio import analyze_batch
 
+    # Parse classes if provided
+    classes_keep = ['ins_buzz']  # default value
+    if args.keep_all:
+        classes_keep = 'all'
+
     analyze_batch(
         modelname=args.modelname,
+        classes_keep=classes_keep,
+        chunklength=args.chunklength,
         cpus=args.cpus,
+        gpu=args.gpu,
+        framehop_prop=args.framehop_prop,
         dir_audio=args.dir_audio,
         verbosity=args.verbosity,
     )

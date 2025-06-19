@@ -18,7 +18,7 @@ import soundfile as sf
 from datetime import datetime
 
 
-def analyze_batch(modelname, classes_keep='all', chunklength=2000, cpus=2, gpu=False, framehop_prop=1, dir_audio=DIR_AUDIO, verbosity=1):
+def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2, gpu=False, framehop_prop=1, dir_audio=DIR_AUDIO, verbosity=1):
     # Setup
     #
     dir_model = os.path.join("models", modelname)

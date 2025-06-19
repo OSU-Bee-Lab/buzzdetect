@@ -23,10 +23,12 @@ Despite specifying the environment name as the first line of the YAML file, cond
 
 
 ## 5. Test an audio file
-buzzdetect v1.0 was released with the model [agricultural_01](https://github.com/OSU-Bee-Lab/buzzdetect/tree/main/models/agricultural_01). We'll use this model to make sure analysis is in working order.
-1. Place a short audio file in the `./audio_in` directory
+buzzdetect comes prepackaged with our latest model (the name will change, but look in [./models](./models)) and an audio analysis file, [testbuzz.mp3](./audio_in/testbuzz.mp3).
+Let's try running our first analysis.
+1. Find the name of the model you want to try out. The name is the directory name under ./models. For example, ./models/model_general_v3 represents the model named "model_general_v3".
 2. Open a terminal in the project directory
-3. Run the command `conda activate ./environment`
-4. Run the command `python buzzdetect.py analyze --modelname agricultural_01`
+2. Run the command `conda activate ./environment`
+3. Run the analysis command, inserting the model name of whichever model you want to run.
+E.g.: `python buzzdetect.py analyze --modelname model_general_v3`
 
-You should see the terminal print out information about the analysis; one analyzer will launch and process the file. The results and log file will be written to `./models/agricultural_01/output`.
+You should see the terminal print out information about the analysis; one analyzer will launch and process the file. The results and log file will be written to an 'output' subdirectory within the model's directory.
