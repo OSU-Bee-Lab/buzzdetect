@@ -12,11 +12,8 @@ condaenv.l8rr463d.requirements.txt
 .idea/
 
 # directories for local execution
-/audio_in/
 /local*/
-/output*/
 /training/
-/buzzextras/
 
 
 # EMBEDDERS
