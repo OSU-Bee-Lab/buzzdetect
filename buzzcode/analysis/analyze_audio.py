@@ -1,15 +1,4 @@
 import warnings
-
-from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer, \
-    early_exit, initialize_log
-from buzzcode.config import DIR_AUDIO
-from buzzcode.utils import search_dir, Timer, setthreads
-
-setthreads(1)
-
-from buzzcode.embedders import load_embedder_config
-from buzzcode.analysis.coverage import chunklist_from_base
-from buzzcode.audio import get_duration
 import os
 import re
 import multiprocessing
@@ -17,10 +6,31 @@ import json
 import soundfile as sf
 from datetime import datetime
 
+from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer, \
+    initialize_log
+
+# Set the multiprocessing start method to 'spawn' for Windows compatibility
+# This must be done before any other multiprocessing operations
+if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn', force=True)
+
+from buzzcode.audio import get_duration
+from buzzcode.config import DIR_AUDIO
+from buzzcode.utils import search_dir, Timer, setthreads
+
+setthreads(1)
+
+from buzzcode.embedders import load_embedder_config
+from buzzcode.analysis.coverage import chunklist_from_base
+
+
+def early_exit(sem_writers, concurrent_writers):
+    for _ in range(concurrent_writers):
+        sem_writers.release()
+
 
 def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2, gpu=False, framehop_prop=1, dir_audio=DIR_AUDIO, verbosity=1):
     # Setup
-    #
     dir_model = os.path.join("models", modelname)
     if not os.path.exists(dir_model):
         warnings.warn(f'model {modelname} not found in model directory; exiting')
@@ -34,14 +44,18 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     concurrent_streamers = max(int(cpus / 2), 2)
     stream_buffer_depth = max(2, int(cpus / concurrent_streamers))
 
-    # interprocess communication
-    sem_streamers = multiprocessing.Semaphore(concurrent_streamers)
-    sem_analyzers = multiprocessing.Semaphore(cpus + gpu)
-    sem_writers = multiprocessing.Semaphore(concurrent_writers)
+    # Create multiprocessing context for spawn
+    ctx = multiprocessing.get_context('spawn')
 
-    q_log = multiprocessing.Queue()
-    q_control = multiprocessing.Queue()
-    q_write = multiprocessing.Queue()
+    # interprocess communication using spawn context
+    q_log = ctx.Queue()
+    q_control = ctx.Queue()
+    q_write = ctx.Queue()
+
+    # Use shared values instead of semaphores for counting
+    streamer_count = ctx.Value('i', concurrent_streamers)
+    analyzer_count = ctx.Value('i', cpus + (1 if gpu else 0))
+    writer_count = ctx.Value('i', concurrent_writers)
 
     # configs
     with open(os.path.join(dir_model, 'config_model.txt'), 'r') as file:
@@ -54,23 +68,23 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     framelength_digits = len(framelength_str)
 
     # Logging
-    #
     path_log = initialize_log(
         time_start=timer_total.time_start,
         dir_out=dir_out
     )
 
+    shutdown_event = ctx.Event()
+
     args_logger = {
         'path_log': path_log,
         'q_log': q_log,
-        'sem_writers': sem_writers,
+        'shutdown_event': shutdown_event,
         'verbosity': verbosity
     }
-    proc_logger = multiprocessing.Process(target=worker_logger, kwargs=args_logger)
-    proc_logger.start()  # start logger early, since there can be logworthy events even if analysis doesn't happen
+    proc_logger = ctx.Process(target=worker_logger, kwargs=args_logger)
+    proc_logger.start()
 
     # Build chunklists
-    #
     paths_audio = search_dir(dir_audio, list(sf.available_formats().keys()))
     if len(paths_audio) == 0:
         m = f"no compatible audio files found in raw directory {dir_audio} \n" \
@@ -78,12 +92,12 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
             f"exiting analysis"
 
         printlog(m, q_log, verb_set=verbosity, verb_item=0, do_log=True)
-        early_exit(sem_writers, concurrent_writers)
+        shutdown_event.set()  # Signal shutdown directly
+        proc_logger.join()
         return
 
     control = []
     for path_audio in paths_audio:
-        # TODO: parallel process? This can take a long time if the interrupted analysis was very long
         if os.path.getsize(path_audio) < 5000:
             warnings.warn(f'file too small, skipping: {path_audio}')
             continue
@@ -102,8 +116,6 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
         )
 
         if not chunklist:
-            # if this file didn't have chunks to analyze,
-            # move to the next one
             continue
 
         control.append({
@@ -115,7 +127,8 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     if not control:
         printlog(f"all files in {dir_audio} are fully analyzed; exiting analysis", q_log, verb_set=verbosity,
                  verb_item=0, do_log=True)
-        early_exit(sem_writers, concurrent_writers)
+        shutdown_event.set()  # Signal shutdown directly
+        proc_logger.join()
         return
 
     # load control into the queue
@@ -126,10 +139,9 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     for _ in range(concurrent_streamers):
         q_control.put('TERMINATE')
 
-    q_assignments = multiprocessing.Queue(maxsize=stream_buffer_depth)
+    q_assignments = ctx.Queue(maxsize=stream_buffer_depth)
 
     # Launch processes
-    #
     printlog(
         f"begin analysis\n"
         f"start time: {timer_total.time_start}\n"
@@ -144,8 +156,8 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     )
 
     args_writer = {
-        'sem_writers': sem_writers,
-        'sem_analyzers': sem_analyzers,
+        'writer_count': writer_count,
+        'analyzer_count': analyzer_count,
         'q_write': q_write,
         'classes': config_model['classes'],
         'classes_keep': classes_keep,
@@ -155,13 +167,14 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
         'dir_audio': dir_audio,
         'dir_out': dir_out,
         'q_log': q_log,
-        'verbosity': verbosity
+        'verbosity': verbosity,
+        'shutdown_event': shutdown_event
     }
-    proc_writer = multiprocessing.Process(target=worker_writer, name='writer_proc', kwargs=args_writer)
+    proc_writer = ctx.Process(target=worker_writer, name='writer_proc', kwargs=args_writer)
     proc_writer.start()
 
     args_streamer = {
-        'sem_streamers': sem_streamers,
+        'streamer_count': streamer_count,
         'q_control': q_control,
         'q_assignments': q_assignments,
         'q_log': q_log,
@@ -170,13 +183,10 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     }
 
     proc_streamers = []
-    streamer_ids = []
     for s in range(concurrent_streamers):
         proc_streamers.append(
-            multiprocessing.Process(target=worker_streamer, name=f'streamer_proc{s}', args=[s], kwargs=args_streamer))
+            ctx.Process(target=worker_streamer, name=f'streamer_proc{s}', args=[s], kwargs=args_streamer))
         proc_streamers[-1].start()
-        streamer_ids.append(proc_streamers[-1].pid)
-        pass
 
     args_analyzer = {
         'modelname': modelname,
@@ -185,20 +195,19 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
         'q_write': q_write,
         'q_assignments': q_assignments,
         'q_log': q_log,
-        'sem_streamers': sem_streamers,
-        'sem_analyzers': sem_analyzers,
+        'streamer_count': streamer_count,
+        'analyzer_count': analyzer_count,
         'dir_audio': dir_audio,
         'verbosity': verbosity
     }
     proc_analyzers = []
     for a in range(cpus):
         proc_analyzers.append(
-            multiprocessing.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a, 'CPU']),
-                                    kwargs=args_analyzer))
+            ctx.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a, 'CPU']),
+                        kwargs=args_analyzer))
         proc_analyzers[-1].start()
-        pass
 
-    if gpu:  # things get narsty when running GPU on a multiprocessing.Process(), so just run in main thread last
+    if gpu:
         worker_analyzer('G', 'GPU', **args_analyzer)
 
     # wait for analysis to finish
@@ -210,15 +219,14 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
 
-        # don't need the chunks, but this will clean it up
         chunklist_from_base(
             base_out=base_out,
             duration_audio=get_duration(path_audio),
             framelength=config_embedder['framelength'],
             chunklength=chunklength
         )
-        printlog(f"combining result chunks for {re.sub(dir_out, '', base_out)}", q_log, verb_set=verbosity, verb_item=1,
-                 do_log=True)
+        # Note: Can't use printlog here as logger has already exited
+        print(f"combining result chunks for {re.sub(dir_out, '', base_out)}")
 
     timer_total.stop()
     closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
@@ -232,5 +240,5 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general_v3', dir_audio='/home/luke/r projects/buzzdetect, repository/data/raw',
-                  chunklength=960, cpus=1, verbosity=2)  # chunklength being a multiple of framelength makes for seamless chunks
+    analyze_batch(modelname='model_general_v3',
+                  chunklength=960, cpus=7, verbosity=2)

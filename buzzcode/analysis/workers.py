@@ -1,7 +1,7 @@
 import os
 import re
+from _queue import Empty
 from datetime import datetime
-from queue import Empty
 
 import numpy as np
 import tensorflow as tf
@@ -25,7 +25,7 @@ def printlog(item, q_log, verb_set, verb_item=0, do_log=True):
     return item
 
 
-def worker_logger(path_log, q_log, sem_writers, verbosity):
+def worker_logger(path_log, q_log, shutdown_event, verbosity):
     def getwrite(t):
         item = q_log.get(timeout=t)
         with open(path_log, "a") as f:
@@ -36,7 +36,7 @@ def worker_logger(path_log, q_log, sem_writers, verbosity):
         try:
             getwrite(1)
         except Empty:
-            if sem_writers.get_value() == 0:
+            if shutdown_event.is_set():
                 break
             # else: another writer might still put, so continue
 
@@ -47,10 +47,13 @@ def worker_logger(path_log, q_log, sem_writers, verbosity):
         except Empty:
             break
 
-    printlog("logger: exiting", q_log=q_log, verb_set=verbosity, verb_item=1, do_log=True)
+    # Don't use printlog here as it could cause circular dependency
+    print("logger: exiting")
+    with open(path_log, "a") as f:
+        f.write(f"{datetime.now()} - logger: exiting \n")
 
 
-def worker_streamer(id_streamer, sem_streamers, q_control, q_assignments, q_log, resample_rate, verbosity):
+def worker_streamer(id_streamer, streamer_count, q_control, q_assignments, q_log, resample_rate, verbosity):
     c = q_control.get()
     while c != 'TERMINATE':
         printlog(f"streamer {id_streamer}: buffering {c['path_audio']}", q_log=q_log, verb_set=verbosity, verb_item=1,
@@ -65,11 +68,14 @@ def worker_streamer(id_streamer, sem_streamers, q_control, q_assignments, q_log,
         c = q_control.get()
 
     printlog(f"streamer {id_streamer}: terminating", q_log=q_log, verb_set=verbosity, verb_item=0, do_log=True)
-    sem_streamers.acquire()
+
+    # Decrement streamer count
+    with streamer_count.get_lock():
+        streamer_count.value -= 1
 
 
-def worker_writer(sem_writers, sem_analyzers, q_write, classes, classes_keep, framehop_prop, framelength, digits_time,
-                  dir_audio, dir_out, q_log, verbosity, digits_results=2):
+def worker_writer(writer_count, analyzer_count, q_write, classes, classes_keep, framehop_prop, framelength, digits_time,
+                  dir_audio, dir_out, q_log, verbosity, shutdown_event, digits_results=2):
     def write_results(path_audio, chunk, results):
         output = trim_results(results, classes, classes_keep=classes_keep, digits=digits_results)
 
@@ -107,20 +113,26 @@ def worker_writer(sem_writers, sem_analyzers, q_write, classes, classes_keep, fr
                 results=w['results']
             )
         except Empty:
-            # if the queue is empty, are there workers?
-            if sem_analyzers.get_value() == 0:
-                # if not, we're done
+            # Check if analyzers are still running using shared counter
+            with analyzer_count.get_lock():
+                current_analyzer_count = analyzer_count.value
+
+            if current_analyzer_count == 0:
                 break
-            # if so, go back to top of loop
             else:
                 continue
 
     printlog("writer: terminating", q_log=q_log, verb_set=verbosity, verb_item=2, do_log=True)
-    sem_writers.acquire()
+
+    # Decrement writer count and signal shutdown if this was the last writer
+    with writer_count.get_lock():
+        writer_count.value -= 1
+        if writer_count.value == 0:
+            shutdown_event.set()
 
 
 def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s, q_write, q_assignments, q_log,
-                    sem_streamers, sem_analyzers, dir_audio, verbosity):
+                    streamer_count, analyzer_count, dir_audio, verbosity):
     if processor == 'CPU':
         tf.config.set_visible_devices([], 'GPU')
         visible_devices = tf.config.get_visible_devices()
@@ -146,17 +158,14 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
         analysis_rate = (chunk_duration / timer_analysis.get_total()).__round__(1)
         path_short = re.sub(dir_audio, '', path_audio)
 
-        # can I just have a monitor that watches the progress and handles reporting? So it would have its own
-        # verbosity, do its own rate calculations?
         printlog(f"analyzer {id_analyzer}: analyzed {path_short}, "
                  f"chunk {chunk} "
                  f"in {timer_analysis.get_total()}s (rate: {analysis_rate})", q_log, verb_set=verbosity, verb_item=1,
                  do_log=True)
 
-        timer_analysis.restart()  # pessimistic; accounts for wait time
+        timer_analysis.restart()
 
     # ready model
-    #
     model = load_model(modelname)
     embedder = load_embedder_model(embeddername, framehop_s=framehop_s)
 
@@ -181,7 +190,11 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
                 )
                 return
             except Empty:
-                if sem_streamers.get_value() > 0:
+                # Check if streamers are still active using shared counter
+                with streamer_count.get_lock():
+                    current_streamer_count = streamer_count.value
+
+                if current_streamer_count > 0:
                     continue
                 else:
                     return 'TERMINATE'
@@ -200,12 +213,10 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
                 break
 
     printlog(f"analyzer {id_analyzer}: terminating", q_log, verb_set=verbosity, verb_item=0, do_log=True)
-    sem_analyzers.acquire()
 
-
-def early_exit(sem_writers, sem_writer_count):
-    for _ in range(sem_writer_count):
-        sem_writers.acquire()
+    # Decrement analyzer count
+    with analyzer_count.get_lock():
+        analyzer_count.value -= 1
 
 
 def initialize_log(time_start, dir_out):
