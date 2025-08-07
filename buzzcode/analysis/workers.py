@@ -1,5 +1,6 @@
 import os
 import re
+import warnings
 from _queue import Empty
 from datetime import datetime
 
@@ -77,23 +78,18 @@ def worker_streamer(id_streamer, streamer_count, q_control, q_assignments, q_log
 def worker_writer(writer_count, analyzer_count, q_write, classes, classes_keep, framehop_prop, framelength, digits_time,
                   dir_audio, dir_out, q_log, verbosity, shutdown_event, digits_results=2):
     def write_results(path_audio, chunk, results):
-        output = trim_results(results, classes, classes_keep=classes_keep, digits=digits_results)
-
-        output.insert(
-            column='start',
-            value=range(len(output)),
-            loc=0
+        output = trim_results(
+            results=results,
+            classes=classes,
+            framehop_s=framehop_prop*framelength,
+            time_start=chunk[0],
+            digits_time=digits_time,
+            classes_keep=classes_keep,
+            digits_results=digits_results
         )
-
-        output['start'] = output['start'] * framehop_prop * framelength
-        output['start'] = output['start'] + chunk[0]
-
-        # round to avoid float errors
-        output['start'] = round(output['start'], digits_time)
 
         base_out = os.path.splitext(path_audio)[0]
         base_out = re.sub(dir_audio, dir_out, base_out)
-        # Remove the chunk-specific suffix since we're appending to one file
         path_out = base_out + SUFFIX_RESULT_PARTIAL
 
         os.makedirs(os.path.dirname(path_out), exist_ok=True)
