@@ -8,7 +8,7 @@ import numpy as np
 import soundfile as sf
 
 from buzzcode.config import TAG_EOF
-
+from numpy.lib.stride_tricks import sliding_window_view
 
 def get_duration(path_audio):
     track = sf.SoundFile(path_audio)
@@ -30,17 +30,39 @@ def get_duration(path_audio):
 
 
 def frame_audio(audio_data, framelength, samplerate, framehop_s):
+    """
+    Frame audio data using NumPy's sliding_window_view for efficient processing.
+
+    Parameters:
+    -----------
+    audio_data : array-like
+        Input audio data
+    framelength : float
+        Frame length in seconds
+    samplerate : int or float
+        Sample rate in Hz
+    framehop_s : float
+        Hop size between frames in seconds
+
+    Returns:
+    --------
+    np.ndarray
+        2D array where each row is a frame
+    """
+    audio_data = np.asarray(audio_data)
     framelength_samples = int(framelength * samplerate)
     audio_samples = len(audio_data)
+
     if audio_samples < framelength_samples:
         raise ValueError('sub-frame audio given')
 
     step = int(framehop_s * samplerate)
 
-    frames = []
-    # yields consecutive audio frames, stopping before exceeding audio length
-    for frame_start in range(0, audio_samples - framelength_samples + 1, step):
-        frames.append(audio_data[frame_start:frame_start + framelength_samples])
+    # Use sliding_window_view for efficient framing
+    windowed = sliding_window_view(audio_data, window_shape=framelength_samples)
+
+    # Extract frames at specified hop intervals
+    frames = windowed[::step]
 
     return frames
 
