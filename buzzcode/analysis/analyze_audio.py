@@ -6,6 +6,7 @@ import json
 import soundfile as sf
 from datetime import datetime
 
+from buzzcode.analysis.analysis import get_framelength_digits
 from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer, \
     initialize_log
 
@@ -29,14 +30,16 @@ def early_exit(sem_writers, concurrent_writers):
         sem_writers.release()
 
 
-def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2, gpu=False, framehop_prop=1, dir_audio=DIR_AUDIO, verbosity=1):
+def analyze_batch(modelname: str, classes_keep:list=['ins_buzz'], chunklength:float=2000, cpus:int=2, gpu:bool=False, framehop_prop:float = 1, dir_audio:str=DIR_AUDIO, dir_out:str=None, verbosity:int=1):
     # Setup
     dir_model = os.path.join("models", modelname)
     if not os.path.exists(dir_model):
         warnings.warn(f'model {modelname} not found in model directory; exiting')
         return
 
-    dir_out = os.path.join(dir_model, "output")
+    if dir_out is None:
+        dir_out = os.path.join(dir_model, "output")
+
     timer_total = Timer()
 
     # processing control
@@ -63,9 +66,7 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     config_embedder = load_embedder_config(config_model['embedder'])
 
     # for rounding off floating point error
-    framelength_str = str(config_embedder['framelength'])
-    framelength_str = re.sub('^.*\\.', '', framelength_str)
-    framelength_digits = len(framelength_str)
+    framelength_digits = get_framelength_digits(config_embedder['framelength'])
 
     # Logging
     path_log = initialize_log(
@@ -214,6 +215,7 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
     proc_logger.join()
 
     # on terminate, clean up chunks
+    print('renaming completed result files')
     for c in control:
         path_audio = c['path_audio']
         base_out = re.sub(dir_audio, dir_out, path_audio)
@@ -226,7 +228,7 @@ def analyze_batch(modelname, classes_keep=['ins_buzz'], chunklength=2000, cpus=2
             chunklength=chunklength
         )
         # Note: Can't use printlog here as logger has already exited
-        print(f"combining result chunks for {re.sub(dir_out, '', base_out)}")
+
 
     timer_total.stop()
     closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
