@@ -53,7 +53,7 @@ if args.action == "train":
     train_model(
         modelname=args.modelname,
         setname=args.set,
-        translationname=args.translation,
+        name_translation=args.translation,
         epochs_in=args.epochs,
         augment=str2bool(args.augment)
     )

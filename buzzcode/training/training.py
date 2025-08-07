@@ -1,98 +1,11 @@
 import glob
 import os
-import random
 import re
 
 import numpy as np
 import pandas as pd
 
-import buzzcode.config as cfg
-from buzzcode.utils import read_pickle_exhaustive
-
-
-def path_to_labels(path_in):
-    # TODO: this should probably go in some utils file for training
-    base = os.path.basename(path_in)
-    base = os.path.splitext(base)[0]
-    labels = re.split(pattern='\\+', string=base)
-
-    return labels
-
-
-def get_fold_paths(paths_in, folds, foldname):
-    idents_fold = folds[folds['fold'] == foldname]['ident']
-
-    def path_in_fold(path_in):
-        return any([re.search(i, path_in) for i in idents_fold])
-
-    paths_fold = [p for p in paths_in if path_in_fold(p)]
-
-    return paths_fold
-
-
-def load_path_samples(paths_in):
-    samples_all = []
-    for path in paths_in:
-        embeddings = read_pickle_exhaustive(path)
-        labels = path_to_labels(path)
-
-        samples_path = [{'embeddings': e, 'labels_raw': labels} for e in embeddings]
-        samples_all.extend(samples_path)
-
-    return samples_all
-
-
-def load_fold_samples(foldname, setname, augment=False):
-    dir_set = os.path.join(cfg.DIR_TRAIN_SET, setname)
-
-    paths_data = glob.glob(os.path.join(dir_set, 'samples_embeddings', '**', '*.pickle'), recursive=True)
-
-    folds = pd.read_csv(os.path.join(dir_set, 'folds.csv'))
-
-    paths_fold = get_fold_paths(
-        paths_in=paths_data,
-        folds=folds,
-        foldname=foldname
-    )
-
-    if foldname == 'train' and augment:
-        paths_fold += glob.glob(os.path.join(dir_set, 'augment_*', '**', '*.pickle'), recursive=True)
-
-    samples = load_path_samples(paths_fold)
-
-    return samples
-
-
-def labels_to_targets(labels, classes):
-    y_blank = [0 for _ in classes]
-    y_true = y_blank.copy()
-    for label in labels:
-        y_true[classes.index(label)] = 1
-
-    return np.array(y_true, dtype=np.int64)
-
-
-def add_fold_targets(s, classes):
-    s_up = s.copy()
-    s_up.update({'targets': labels_to_targets(s['labels_translate'], classes)})
-    return s_up
-
-
-def build_fold_dataset(foldname, setname, translation_dict, classes, augment, shuffle=True):
-    samples = load_fold_samples(foldname, setname, augment=augment)
-
-    # so far, datasets fit in memory easily; will have to look into random reads if we run oom
-    if shuffle:
-        random.seed(42)
-        random.shuffle(samples)
-
-    samples = [add_labels_translate(s, translation_dict) for s in samples]
-    samples = [s for s in samples if s['labels_translate']]  # drop empty labels
-
-    samples = [add_fold_targets(s, classes) for s in samples]
-
-    return samples
-
+from buzzcode import config as cfg
 
 def clean_name(name_in, prefix, extension):
     name_out = re.sub(prefix, '', name_in)
@@ -101,41 +14,91 @@ def clean_name(name_in, prefix, extension):
     return name_out
 
 
-def translate_labels(labels_raw, translation_dict):
-    """
-    Translates a list of raw labels using a translation dictionary as built by build_translation_dict.
-    Leaves labels unchanged if no key is found (not in translate.csv).
-    Drops labels where the translation value is NaN (empty "to" value in translate.csv).
+def build_classes(translation):
+    classes = translation['to'].unique().tolist()
+    classes = [c for c in classes if not c in  ['ignore', np.nan, '', 'exclude']]
+    classes = sorted(classes)
 
-    Args:
-        labels_raw (list): The raw labels to translate.
-        translation_dict (dict): A dictionary mapping raw labels to their translations.
-
-    Returns:
-        list: Translated labels with NaN values removed.
-    """
-    labels_translated = [
-        translation_dict.get(l, l)  # Translate if found, else leave unchanged
-        for l in labels_raw
-    ]
-    # Filter out NaN values
-    labels_translated = [label for label in labels_translated if label is not np.nan]
-    return labels_translated
+    return classes
 
 
-def add_labels_translate(s, translation_dict):
-    s_up = s.copy()
-    s_up.update({'labels_translate': translate_labels(s['labels_raw'], translation_dict)})
-    return s_up
+def build_weights(data_train, classes):
+    weights = pd.DataFrame()
+    weights['target'] = range(len(classes))
+    weights['class'] = classes
+
+    def count_samples(target_in):
+        return sum(1 for s in data_train if s['targets'][target_in])
+
+    weights['frames'] = [count_samples(t) for t in weights['target']]
+    frames_total = weights['frames'].sum()
+
+    n_classes_present = sum(weights['frames'] > 0)
+
+    def weighter(frames_class):
+        if frames_class == 0:
+            return 1
+
+        weight = frames_total / (frames_class * n_classes_present)
+
+        return weight
+
+    weights['weight'] = [weighter(f) for f in weights['frames']]
+
+    return weights
 
 
-def build_translation_dict(translation):
-    """
-    where key is "from" and value is "to"
+def labels_from_path(path_in):
+    base = os.path.basename(path_in)
+    base = os.path.splitext(base)[0]
+    labels = re.split(pattern='\\+', string=base)
 
-    """
-    if "from" not in translation.columns or "to" not in translation.columns:
-        raise ValueError("DataFrame must contain 'from' and 'to' columns.")
+    return labels
 
-    translation_dict = translation.set_index("from")["to"].to_dict()
-    return translation_dict
+def enumerate_paths(setname, sample_subpath, labels_raw=None, exclusive=False, fold=None):
+    dir_set = os.path.join(cfg.TRAIN_DIR_SET, setname)
+    dir_samples = os.path.join(dir_set, sample_subpath)
+
+    paths = glob.glob(os.path.join(dir_samples, '**', '*.pickle'), recursive=True)
+
+    # drop paths outside of fold
+    def filter_fold(paths_original):
+        folds = pd.read_csv(os.path.join(dir_set, 'folds.csv'))
+        idents_in_fold = folds['ident'][folds['fold']==fold].to_list()
+
+        paths_new = []
+        for path in paths_original:
+            ident = re.sub(dir_samples, '', path)
+            ident = re.sub('^/', '', ident)
+            ident = os.path.dirname(ident)
+            if ident in idents_in_fold:
+                paths_new.append(path)
+
+        return paths_new
+
+    if fold is not None:
+        paths = filter_fold(paths)
+
+    # drop paths outside of classes
+    if labels_raw is not None:
+        paths = [p for p in paths if any([c in labels_from_path(p) for c in labels_raw])]
+        if exclusive:
+            paths = [p for p in paths if len(labels_from_path(p))==1]
+
+    return paths
+
+
+def can_write_model(modelname):
+    dir_model = os.path.join(cfg.DIR_MODELS, modelname)
+
+    if not os.path.exists(dir_model):
+        return True
+
+    if modelname == 'test':
+        return True
+
+    if not os.listdir(dir_model):
+        return True
+
+    return False
+

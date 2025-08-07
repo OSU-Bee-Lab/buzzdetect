@@ -55,7 +55,6 @@ def search_dir(dir_in, extensions=None):
     paths = [p for p in paths if True in [bool(re.search(e, p.lower())) for e in extensions]]
     return paths
 
-
 def read_pickle_exhaustive(path_pickle):
     elements = []
     with open(path_pickle, 'rb') as f:
@@ -66,6 +65,15 @@ def read_pickle_exhaustive(path_pickle):
             except EOFError:
                 break
     return elements
+
+
+def read_pickle_generator(path_pickle):
+    with open(path_pickle, 'rb') as f:
+        while True:
+            try:
+                yield pickle.load(f)
+            except EOFError:
+                break
 
 
 def setthreads(threads_desired=1):

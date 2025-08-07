@@ -1,3 +1,5 @@
+import shutil
+
 from buzzcode.utils import setthreads
 
 setthreads(8)
@@ -6,73 +8,50 @@ import os
 import pickle
 import json
 
-import numpy as np
-import pandas as pd
 import tensorflow as tf
+import pandas as pd
 from matplotlib import pyplot as plt
 
 from buzzcode import config as cfg
-from buzzcode.training.training import build_fold_dataset, clean_name, build_translation_dict
+from buzzcode.training.training import clean_name, build_weights, build_classes, can_write_model
+from buzzcode.training.training_dataset import build_fold_dataset, load_augment_noise, load_augment_volume
 
 
-# TODO: re-implement testfold training with new set approach
-def train_model(modelname, setname, translationname, epochs_in=300, augment=False):
+def train_model(modelname, setname, name_translation, name_noise=None, name_volume=None, epochs_in=300):
     dir_model = os.path.join(cfg.DIR_MODELS, modelname)
-    if os.path.exists(dir_model) and modelname != 'test':
-        raise FileExistsError(
-            'a model folder with this name already exists; delete or rename the existing model folder and re-run')
+    if not can_write_model(modelname):
+        print('a model folder with this name already exists; delete or rename the existing model folder and re-run')
+        return False
     os.makedirs(dir_model, exist_ok=True)
-
-    translationname = clean_name(translationname, prefix='translation_', extension='.csv')
-    translation = pd.read_csv(os.path.join(cfg.DIR_TRAIN_TRANSLATE, 'translation_' + translationname + '.csv'))
-    translation.to_csv(os.path.join(dir_model, 'translation.csv'), index=False)
-
-    translation_dict = build_translation_dict(translation)
-
-    classes = set(translation_dict.values())  # TODO: drop np.nan
-    classes -= {np.nan}
-    classes = list(classes)
 
     # ---- load data ----
     print('TRAINING: loading data')
-    data_train = build_fold_dataset('train', setname, translation_dict, classes, augment=augment)
-    data_val = build_fold_dataset('validate', setname, translation_dict, classes, augment=augment)
+    name_translation = clean_name(name_translation, prefix='translation_', extension='.csv')
+
+    translation = pd.read_csv(os.path.join(cfg.TRAIN_DIR_SET, setname, 'translation_' + name_translation + '.csv'))
+
+    data_train = build_fold_dataset(setname=setname, fold='train', translation=translation, augmenttype='raw')
+
+    if name_noise is not None:
+        name_noise = clean_name(name_noise, prefix='augment_noise_', extension='.csv')
+        data_train += load_augment_noise(setname=setname, translation=translation, name_noise=name_noise)
+
+    if name_volume is not None:
+        name_volume = clean_name(name_volume, prefix='augment_volume_', extension='.csv')
+        data_train += load_augment_volume(setname=setname, translation=translation, name_volume=name_volume)
+
+    labels_buzz = translation['from'][translation['to']=='ins_buzz'].to_list()
+    data_val = build_fold_dataset(setname=setname, fold='validate', translation=translation, labels_keep_raw=labels_buzz, exclusive=False, augmenttype='raw')
 
     # ---- weighting ----
-    weights = pd.DataFrame()
-    weights['target'] = range(len(classes))
-    weights['class'] = classes
-
-    def return_class_samples(class_in, dataset_in):
-        class_samples = [s for s in dataset_in if class_in in s['labels_translate']]
-        return class_samples
-
-    weights['frames'] = [len(return_class_samples(c, data_train)) for c in weights['class']]
-    frames_total = weights['frames'].sum()
-
-    n_classes_present = sum(weights['frames'] > 0)
-
-    def weighter(frames_class):
-        if frames_class == 0:
-            return 1
-
-        # this weighting seems to over-penalize extremely abundant classes;
-        # or maybe it's an effect of augmentation—it would be the perfect penalty,
-        # if the frames were IID, but augmentation means that volume outgrows signal
-        # so...make an adjustment for augmented data? Penalize less? Hmmmm....
-        weight = frames_total / (frames_class * n_classes_present)
-
-        return weight
-
-    weights['weight'] = [weighter(f) for f in weights['frames']]
-    weights.to_csv(os.path.join(dir_model, 'weights.csv'), index=False)
-
-    weight_dict = weights.set_index("target")["weight"].to_dict()
+    classes = build_classes(translation)
+    weights = build_weights(data_train, classes)
+    weight_dict = {target: weight for target, weight in enumerate(weights['weight'])}  # for training
 
     # Turning datasets into tensorflow datasets
     #
-    size_batch = 65568  # this is a huge batch, but I'm finding large batches (>1024) descend the gradient much better
-    size_shuffle = len(data_train)
+    size_batch = 65568
+    size_shuffle = 10*size_batch
 
     def data_to_tfset(set_in):
         embeddings = [s['embeddings'] for s in set_in]
@@ -95,11 +74,11 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=Fals
     model.add(tf.keras.layers.Dense(len(classes)))
 
     callback = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
-                                                patience=20,
+                                                patience=30,
                                                 min_delta=0.01,
                                                 restore_best_weights=True)
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)  # 0.001 is default
+    optimizer = tf.keras.optimizers.legacy.Adam(learning_rate=0.001*2)  # 0.001 is default
 
     model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
                   optimizer=optimizer,
@@ -116,21 +95,27 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=Fals
 
     model.save(os.path.join(dir_model), include_optimizer=True)
 
-    with open(os.path.join(cfg.DIR_TRAIN_SET, setname, 'config_set.txt'), 'r') as file:
-        config_set = json.load(file)
+    # write metadata (after successful training, just in case)
+    # copy set info, because sets may change over time (e.g., standard will be updated as new annotations come in)
+    dir_set = os.path.join(cfg.TRAIN_DIR_SET, setname)
+    shutil.copy(os.path.join(dir_set, 'config_set.txt'), dir_model)
+    shutil.copy(os.path.join(dir_set, 'annotations.csv'), dir_model)
+    shutil.copy(os.path.join(dir_set, 'folds.csv'), dir_model)
+    weights.to_csv(os.path.join(dir_model, 'weights.csv'), index=False)
+    translation.to_csv(os.path.join(dir_model, 'translation.csv'), index=False)
 
-    config_train = {
-        'embedder': config_set['embedder'],
+    with open(os.path.join(dir_set, 'config_embedder.txt'), 'r') as file:
+        config_embedder = json.load(file)
+    config_model = {
+        'embeddername': config_embedder['embeddername'],
         'set': setname,
-        'augment': augment,
-        'translation': translationname,
+        'translation': name_translation,
         'classes': classes,
         'size_shuffle': size_shuffle,
         'size_batch': size_batch
     }
-
     with open(os.path.join(dir_model, 'config_model.txt'), 'x') as f:
-        f.write(json.dumps(config_train))
+        f.write(json.dumps(config_model))
 
     epoch_restored = callback.best_epoch
     epoch_loss = history.history['val_loss'][epoch_restored]
@@ -153,4 +138,8 @@ def train_model(modelname, setname, translationname, epochs_in=300, augment=Fals
     plt.savefig(path_plot)
     plt.close()
 
+    return True
 
+
+if __name__ == '__main__':
+    train_model(modelname='lite', setname='lite', name_translation='general')
