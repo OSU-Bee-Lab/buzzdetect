@@ -95,7 +95,7 @@ def stream_to_queue(path_audio, duration_audio, chunklist, q_assignments, resamp
         read_size = sample_to - sample_from
 
         track.seek(sample_from)
-        samples = track.read(read_size)
+        samples = track.read(read_size, dtype=np.float32)
         if track.channels > 1:
             samples = np.mean(samples, axis=1)
 
@@ -107,12 +107,10 @@ def stream_to_queue(path_audio, duration_audio, chunklist, q_assignments, resamp
         if n_samples < read_size:
             handle_badread(path_audio=path_audio, track=track, duration_audio=duration_audio, end_intended=chunk[1])
 
-        samples = librosa.resample(y=samples, orig_sr=samplerate_native, target_sr=resample_rate)
-
         assignment = {
             'path_audio': path_audio,
             'chunk': chunk,
-            'samples': samples
+            'samples': samples.astype(np.float16)
         }
 
         q_assignments.put(assignment)
