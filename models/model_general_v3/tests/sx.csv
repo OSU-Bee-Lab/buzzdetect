@@ -1,0 +1,4 @@
+threshold,precision,sensitivity
+-1.24,0.9,0.31
+-1.11,0.95,0.27
+-0.54,0.99,0.16

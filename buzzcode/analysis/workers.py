@@ -1,13 +1,12 @@
 import os
 import re
-import warnings
 from _queue import Empty
 from datetime import datetime
 
 import numpy as np
 import tensorflow as tf
 
-from buzzcode.analysis.analysis import trim_results, load_model
+from buzzcode.analysis.analysis import format_activations, format_detections, load_model
 from buzzcode.audio import stream_to_queue
 from buzzcode.config import SUFFIX_RESULT_PARTIAL
 from buzzcode.embedders import load_embedder_model
@@ -75,17 +74,46 @@ def worker_streamer(id_streamer, streamer_count, q_control, q_assignments, q_log
         streamer_count.value -= 1
 
 
-def worker_writer(writer_count, analyzer_count, q_write, classes, classes_keep, framehop_prop, framelength, digits_time,
+def worker_writer(classes_out, threshold, writer_count, analyzer_count, q_write, classes, framehop_s, digits_time,
                   dir_audio, dir_out, q_log, verbosity, shutdown_event, digits_results=2):
+    # TODO: what if someone starts an analysis with activations, then finishes with detections?
+    if classes_out is not None and threshold is not None:
+        raise ValueError("cannot specify both classes_out and threshold")
+
+    if classes_out is None and threshold is None:
+        raise ValueError("must specify either classes_out or threshold")
+
+    if classes_out is not None:
+        def format_func(results, time_start):
+            output = format_activations(
+                results=results,
+                classes=classes,
+                framehop_s=framehop_s,
+                time_start=time_start,
+                digits_time=digits_time,
+                classes_keep=classes_out,
+                digits_results=digits_results
+            )
+
+            return output
+
+    else:
+        def format_func(results, time_start):
+            output = format_detections(
+                results,
+                threshold,
+                classes,
+                framehop_s,
+                digits_time,
+                time_start
+            )
+
+            return output
+
     def write_results(path_audio, chunk, results):
-        output = trim_results(
+        output = format_func(
             results=results,
-            classes=classes,
-            framehop_s=framehop_prop*framelength,
-            time_start=chunk[0],
-            digits_time=digits_time,
-            classes_keep=classes_keep,
-            digits_results=digits_results
+            time_start=chunk[0]
         )
 
         base_out = os.path.splitext(path_audio)[0]

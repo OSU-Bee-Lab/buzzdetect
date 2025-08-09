@@ -15,6 +15,7 @@ from matplotlib import pyplot as plt
 from buzzcode import config as cfg
 from buzzcode.training.training import clean_name, build_weights, build_classes, can_write_model
 from buzzcode.training.training_dataset import build_fold_dataset, load_augment_noise, load_augment_volume
+from buzzcode.training.test import test_model
 
 
 def train_model(modelname, setname, name_translation, name_noise=None, name_volume=None, epochs_in=300):
@@ -137,6 +138,8 @@ def train_model(modelname, setname, name_translation, name_noise=None, name_volu
     path_plot = os.path.join(dir_model, 'loss_curves.svg')
     plt.savefig(path_plot)
     plt.close()
+
+    test_model(modelname)
 
     return True
 

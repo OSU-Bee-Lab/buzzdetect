@@ -114,3 +114,14 @@ def make_chunklist(duration, chunklength, chunk_overlap=0, chunk_min=0):
             break
 
     return chunklist
+
+def build_ident(path, root_dir, tag=None):
+    ident = re.sub(root_dir, '', path)
+    ident = os.path.splitext(ident)[0]
+
+    if tag is not None:
+        ident = re.sub(tag, '', ident)
+
+    ident = re.sub('^/', '', ident)
+
+    return ident

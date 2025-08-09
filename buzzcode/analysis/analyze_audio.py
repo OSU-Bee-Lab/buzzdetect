@@ -9,6 +9,7 @@ from datetime import datetime
 from buzzcode.analysis.analysis import get_framelength_digits
 from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer, \
     initialize_log
+from buzzcode.training.test import pull_sx
 
 # Set the multiprocessing start method to 'spawn' for Windows compatibility
 # This must be done before any other multiprocessing operations
@@ -30,22 +31,101 @@ def early_exit(sem_writers, concurrent_writers):
         sem_writers.release()
 
 
-def analyze_batch(modelname: str, classes_keep:list=['ins_buzz'], chunklength:float=2000, cpus:int=2, gpu:bool=False, framehop_prop:float = 1, dir_audio:str=DIR_AUDIO, dir_out:str=None, verbosity:int=1):
+def analyze(
+    modelname: str,
+    classes_out: list=None,
+    precision: float=None,
+    framehop_prop: float=1,
+    chunklength:float=1000,
+    cpus:int=2,
+    gpu:bool=False,
+    concurrent_streamers:int=None,
+    dir_audio:str=DIR_AUDIO, 
+    dir_out:str=None, 
+    verbosity:int=1
+):
+    """Analyze audio files using a buzz detection model.
+
+    Parameters
+    ----------
+    modelname : str
+        Name of the model to use for analysis (corresponding to the directory name in the model directory)
+    classes_out : list, optional
+        List of strings corresponding to the names of neurons to output, by default None
+        If neurons_out is specified, output values are raw neuron activations.
+        Either neurons_out or precision must be specified.
+    precision : float, optional
+        Float of the precision value of the model to use to call buzzes
+        If precision is specified, output values are binary for the buzz class.
+        Calling of non-buzz events is not currently supported; if you would like
+        to work with non-buzz events (e.g., rain), specify neurons_out instead.
+        Either precision or neurons_out must be specified.
+    framehop_prop : float, optional
+        Float specifying the overlap between frames; framehop_prop=1 creates contiguous frames;
+        framehop_prop=0.5 creates frames that overlap by half their length, by default 1.
+    chunklength : float, optional
+        Length of audio chunks in seconds, by default 1000. Try different values to tune for your machine.
+    cpus : int, optional
+        Number of CPU cores to use, by default 2
+    gpu : bool, optional
+        Whether to use GPU for processing, by default False
+    concurrent_streamers : int, optional
+        The number of simultaneous workers to read audio files, by default None
+        If None, attempts to calculate a reasonable number of workers. If you're using GPU,
+        you may need to significantly increase this number to keep the GPU fed.
+    dir_audio : str, optional
+        Directory containing audio files to analyze, by default DIR_AUDIO (see config.py)
+    dir_out : str, optional
+        Output directory for analysis results, by default None
+        If None, creates 'output' subdirectory in model directory
+    verbosity : int, optional
+        Print verbosity level (0-2), by default 1
+
+    Returns
+    -------
+    None
+        Results are written to output directory as files
+
+    Notes
+    -----
+    This function processes audio files in parallel using multiple CPU cores
+    and optionally GPU. It uses a neural network model to classify sounds
+    in the audio files. Results are saved as separate files for each
+    analyzed audio chunk.
+    """
+    timer_total = Timer()
+
     # Setup
     dir_model = os.path.join("models", modelname)
     if not os.path.exists(dir_model):
         warnings.warn(f'model {modelname} not found in model directory; exiting')
         return
 
+    with open(os.path.join(dir_model, 'config_model.txt'), 'r') as file:
+        config_model = json.load(file)
+    config_embedder = load_embedder_config(config_model['embeddername'])
+
     if dir_out is None:
         dir_out = os.path.join(dir_model, "output")
 
-    timer_total = Timer()
+    if precision is None:
+        threshold = None
+    else:
+        threshold = pull_sx(modelname, precision)['threshold']
+
+    # rounding to nearest frame allows for seamless chunks
+    digits_time = get_framelength_digits(config_embedder['framelength'])
+    chunklength = round(chunklength / config_embedder['framelength']) * config_embedder['framelength']
+    chunklength = round(chunklength, digits_time)
 
     # processing control
     concurrent_writers = 1
-    concurrent_streamers = max(int(cpus / 2), 2)
-    stream_buffer_depth = max(2, int(cpus / concurrent_streamers))
+    if concurrent_streamers is None:
+        if not gpu:
+            concurrent_streamers = int(cpus / 2)
+        else:
+            concurrent_streamers = 8
+    stream_buffer_depth = 2
 
     # Create multiprocessing context for spawn
     ctx = multiprocessing.get_context('spawn')
@@ -55,26 +135,18 @@ def analyze_batch(modelname: str, classes_keep:list=['ins_buzz'], chunklength:fl
     q_control = ctx.Queue()
     q_write = ctx.Queue()
 
-    # Use shared values instead of semaphores for counting
     streamer_count = ctx.Value('i', concurrent_streamers)
     analyzer_count = ctx.Value('i', cpus + (1 if gpu else 0))
     writer_count = ctx.Value('i', concurrent_writers)
 
-    # configs
-    with open(os.path.join(dir_model, 'config_model.txt'), 'r') as file:
-        config_model = json.load(file)
-    config_embedder = load_embedder_config(config_model['embedder'])
+    shutdown_event = ctx.Event()
 
-    # for rounding off floating point error
-    framelength_digits = get_framelength_digits(config_embedder['framelength'])
 
     # Logging
     path_log = initialize_log(
         time_start=timer_total.time_start,
         dir_out=dir_out
     )
-
-    shutdown_event = ctx.Event()
 
     args_logger = {
         'path_log': path_log,
@@ -161,10 +233,10 @@ def analyze_batch(modelname: str, classes_keep:list=['ins_buzz'], chunklength:fl
         'analyzer_count': analyzer_count,
         'q_write': q_write,
         'classes': config_model['classes'],
-        'classes_keep': classes_keep,
-        'framehop_prop': framehop_prop,
-        'framelength': config_embedder['framelength'],
-        'digits_time': framelength_digits,
+        'classes_out': classes_out,
+        'threshold': threshold,
+        'framehop_s': config_embedder['framelength'] * framehop_prop,
+        'digits_time': digits_time,
         'dir_audio': dir_audio,
         'dir_out': dir_out,
         'q_log': q_log,
@@ -191,7 +263,7 @@ def analyze_batch(modelname: str, classes_keep:list=['ins_buzz'], chunklength:fl
 
     args_analyzer = {
         'modelname': modelname,
-        'embeddername': config_model['embedder'],
+        'embeddername': config_model['embeddername'],
         'framehop_s': framehop_prop * config_embedder['framelength'],
         'q_write': q_write,
         'q_assignments': q_assignments,

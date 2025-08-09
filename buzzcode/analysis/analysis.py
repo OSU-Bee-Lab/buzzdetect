@@ -35,12 +35,35 @@ def load_model_config(modelname):
     return config
 
 
-# Functions for applying transfer model
-#
+def add_time(df, time_start, framehop_s, digits_time):
+    df.insert(
+        column='start',
+        value=range(len(df)),
+        loc=0
+    )
 
-def trim_results(results, classes, framehop_s, digits_time, time_start=0, classes_keep='all', digits_results=2):
-    results = np.array(results)
-    results = results.round(digits_results)
+    df['start'] = df['start'] * framehop_s
+    if time_start != 0:
+        df['start'] = df['start'] + time_start
+
+    df['start'] = round(df['start'], digits_time)
+    return df
+
+
+def format_detections(results, threshold, classes, framehop_s, digits_time, time_start):
+    buzz_index = classes.index('ins_buzz')
+    activations = results[:, buzz_index]
+    detections = activations > threshold
+    detections = detections.astype(int)
+
+    df = pd.DataFrame(detections, columns=['detections_ins_buzz'])
+    df = add_time(df, time_start, framehop_s, digits_time)
+
+    return df
+
+
+def format_activations(results, classes, framehop_s, digits_time, time_start=0, classes_keep='all', digits_results=2):
+    results = np.array(results).round(digits_results)
 
     classes_out = classes.copy()
 
@@ -55,18 +78,7 @@ def trim_results(results, classes, framehop_s, digits_time, time_start=0, classe
 
     df = pd.DataFrame(results)
     df.columns = classes_out
-
-    df.insert(
-        column='start',
-        value=range(len(df)),
-        loc=0
-    )
-
-    df['start'] = df['start'] * framehop_s
-    if time_start != 0:
-        df['start'] = df['start'] + time_start
-
-    df['start'] = round(df['start'], digits_time)
+    df = add_time(df, time_start, framehop_s, digits_time)
 
     return df
 

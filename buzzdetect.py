@@ -61,14 +61,14 @@ if args.action == "train":
 
 elif args.action == "analyze":
     print(f"analyzing audio in {args.dir_audio} with model {args.modelname}")
-    from buzzcode.analysis.analyze_audio import analyze_batch
+    from buzzcode.analysis.analyze_audio import analyze
 
     # Parse classes if provided
     classes_keep = ['ins_buzz']  # default value
     if args.keep_all:
         classes_keep = 'all'
 
-    analyze_batch(
+    analyze(
         modelname=args.modelname,
         classes_keep=classes_keep,
         chunklength=args.chunklength,

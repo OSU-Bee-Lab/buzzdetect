@@ -11,6 +11,7 @@ TRAIN_DIR_AUDIO = os.path.join(TRAIN_DIR, 'audio')
 TRAIN_DIR_TESTS = os.path.join(TRAIN_DIR, 'tests')
 TRAIN_DIR_TESTS_AUDIO = os.path.join(TRAIN_DIR_TESTS, 'audio')
 TRAIN_DIR_TESTS_EMBEDDINGS = os.path.join(TRAIN_DIR_TESTS, 'embeddings')
+TRAIN_DIR_TESTS_ANNOTATIONS = os.path.join(TRAIN_DIR_TESTS, 'annotations')
 
 TRAIN_DIR_SET = os.path.join(TRAIN_DIR, 'sets')
 
