@@ -55,6 +55,7 @@ def search_dir(dir_in, extensions=None):
     paths = [p for p in paths if True in [bool(re.search(e, p.lower())) for e in extensions]]
     return paths
 
+
 def read_pickle_exhaustive(path_pickle):
     elements = []
     with open(path_pickle, 'rb') as f:
@@ -115,12 +116,13 @@ def make_chunklist(duration, chunklength, chunk_overlap=0, chunk_min=0):
 
     return chunklist
 
+
 def build_ident(path, root_dir, tag=None):
     ident = re.sub(root_dir, '', path)
     ident = os.path.splitext(ident)[0]
 
     if tag is not None:
-        ident = re.sub(tag, '', ident)
+        ident = re.sub(re.escape(tag), '', ident)
 
     ident = re.sub('^/', '', ident)
 
