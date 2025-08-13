@@ -1,29 +1,29 @@
-import warnings
-import os
-import re
 import multiprocessing
-import json
-import soundfile as sf
-from datetime import datetime
-
-from buzzcode.analysis.analysis import get_framelength_digits
-from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer, \
-    initialize_log
-from buzzcode.training.test import pull_sx
-
 # Set the multiprocessing start method to 'spawn' for Windows compatibility
 # This must be done before any other multiprocessing operations
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
 
-from buzzcode.audio import get_duration
-from buzzcode.config import DIR_AUDIO
-from buzzcode.utils import search_dir, Timer, setthreads
 
+from buzzcode.utils import search_dir, Timer, setthreads, build_ident
 setthreads(1)
 
 from buzzcode.embedders import load_embedder_config
 from buzzcode.analysis.coverage import chunklist_from_base
+from buzzcode.audio import get_duration
+import buzzcode.config as cfg
+import json
+import os
+import re
+import warnings
+from datetime import datetime
+
+import soundfile as sf
+
+from buzzcode.analysis.analysis import get_framelength_digits
+from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer, \
+    initialize_log
+from buzzcode.training.test import pull_sx
 
 
 def early_exit(sem_writers, concurrent_writers):
@@ -32,17 +32,17 @@ def early_exit(sem_writers, concurrent_writers):
 
 
 def analyze(
-    modelname: str,
-    classes_out: list=None,
-    precision: float=None,
-    framehop_prop: float=1,
-    chunklength:float=1000,
-    cpus:int=2,
-    gpu:bool=False,
-    concurrent_streamers:int=None,
-    dir_audio:str=DIR_AUDIO, 
-    dir_out:str=None, 
-    verbosity:int=1
+        modelname: str,
+        classes_out: list = None,
+        precision: float = None,
+        framehop_prop: float = 1,
+        chunklength: float = 1000,
+        cpus: int = 2,
+        gpu: bool = False,
+        concurrent_streamers: int = None,
+        dir_audio: str = cfg.DIR_AUDIO,
+        dir_out: str = None,
+        verbosity: int = 1
 ):
     """Analyze audio files using a buzz detection model.
 
@@ -96,7 +96,7 @@ def analyze(
     timer_total = Timer()
 
     # Setup
-    dir_model = os.path.join("models", modelname)
+    dir_model = os.path.join(cfg.DIR_MODELS, modelname)
     if not os.path.exists(dir_model):
         warnings.warn(f'model {modelname} not found in model directory; exiting')
         return
@@ -106,7 +106,7 @@ def analyze(
     config_embedder = load_embedder_config(config_model['embeddername'])
 
     if dir_out is None:
-        dir_out = os.path.join(dir_model, "output")
+        dir_out = os.path.join(dir_model, cfg.SUBDIR_OUTPUT)
 
     if precision is None:
         threshold = None
@@ -141,7 +141,6 @@ def analyze(
 
     shutdown_event = ctx.Event()
 
-
     # Logging
     path_log = initialize_log(
         time_start=timer_total.time_start,
@@ -158,7 +157,14 @@ def analyze(
     proc_logger.start()
 
     # Build chunklists
-    paths_audio = search_dir(dir_audio, list(sf.available_formats().keys()))
+    paths_audio = []
+    for path_audio in search_dir(dir_audio, list(sf.available_formats().keys())):
+        path_out = re.sub(dir_audio, dir_out, path_audio)
+        path_out = os.path.splitext(path_out)[0] + cfg.SUFFIX_RESULT_COMPLETE
+        if os.path.exists(path_out):
+            continue
+        paths_audio.append(path_audio)
+
     if len(paths_audio) == 0:
         m = f"no compatible audio files found in raw directory {dir_audio} \n" \
             f"audio format must be compatible with soundfile module version {sf.__version__} \n" \
@@ -301,7 +307,6 @@ def analyze(
         )
         # Note: Can't use printlog here as logger has already exited
 
-
     timer_total.stop()
     closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
 
@@ -314,5 +319,21 @@ def analyze(
 
 
 if __name__ == "__main__":
-    analyze_batch(modelname='model_general_v3',
-                  chunklength=960, cpus=7, verbosity=2)
+    dir_audio_base = '/media/server storage/experiments'
+    experiment = 'Luke - Various Opportunistic Recordings'
+    dir_audio = os.path.join(dir_audio_base, experiment)
+
+    modelname = 'model_general_v3'
+    dir_out = os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_OUTPUT, experiment)
+
+    analyze(
+        modelname='model_general_v3',
+        classes_out=['ins_buzz', 'ambient_rain'],
+        framehop_prop=1,
+        chunklength=1000,
+        cpus=0,
+        gpu=True,
+        dir_audio=dir_audio,
+        dir_out=dir_out,
+        verbosity=2
+    )

@@ -6,6 +6,8 @@ DIR_AUDIO = 'audio_in'
 DIR_MODELS = 'models'
 DIR_EMBEDDERS = 'embedders'
 
+SUBDIR_OUTPUT = 'output'
+
 TRAIN_DIR = 'training'
 TRAIN_DIR_AUDIO = os.path.join(TRAIN_DIR, 'audio')
 TRAIN_DIR_TESTS = os.path.join(TRAIN_DIR, 'tests')
