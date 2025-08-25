@@ -5,7 +5,8 @@ if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
 
 
-from buzzcode.utils import search_dir, Timer, setthreads, build_ident
+from buzzcode.utils import search_dir, Timer, setthreads
+
 setthreads(1)
 
 from buzzcode.embedders import load_embedder_config
@@ -21,14 +22,8 @@ from datetime import datetime
 import soundfile as sf
 
 from buzzcode.analysis.analysis import get_framelength_digits
-from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer, \
-    initialize_log
+from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer
 from buzzcode.training.test import pull_sx
-
-
-def early_exit(sem_writers, concurrent_writers):
-    for _ in range(concurrent_writers):
-        sem_writers.release()
 
 
 def analyze(
@@ -42,7 +37,7 @@ def analyze(
         concurrent_streamers: int = None,
         dir_audio: str = cfg.DIR_AUDIO,
         dir_out: str = None,
-        verbosity: int = 1
+        verbosity: str = 'INFO'
 ):
     """Analyze audio files using a buzz detection model.
 
@@ -78,8 +73,8 @@ def analyze(
     dir_out : str, optional
         Output directory for analysis results, by default None
         If None, creates 'output' subdirectory in model directory
-    verbosity : int, optional
-        Print verbosity level (0-2), by default 1
+    verbosity : str, optional
+        Level of verbosity for logging (INFO, DEBUG, WARNING, ERROR), by default 'INFO')
 
     Returns
     -------
@@ -119,7 +114,6 @@ def analyze(
     chunklength = round(chunklength, digits_time)
 
     # processing control
-    concurrent_writers = 1
     if concurrent_streamers is None:
         if not gpu:
             concurrent_streamers = int(cpus / 2)
@@ -137,15 +131,12 @@ def analyze(
 
     streamer_count = ctx.Value('i', concurrent_streamers)
     analyzer_count = ctx.Value('i', cpus + (1 if gpu else 0))
-    writer_count = ctx.Value('i', concurrent_writers)
 
     shutdown_event = ctx.Event()
 
     # Logging
-    path_log = initialize_log(
-        time_start=timer_total.time_start,
-        dir_out=dir_out
-    )
+    log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
+    path_log = os.path.join(dir_out, f"log {log_timestamp}.log")
 
     args_logger = {
         'path_log': path_log,
@@ -157,34 +148,42 @@ def analyze(
     proc_logger.start()
 
     # Build chunklists
-    paths_audio = []
-    for path_audio in search_dir(dir_audio, list(sf.available_formats().keys())):
-        path_out = re.sub(dir_audio, dir_out, path_audio)
-        path_out = os.path.splitext(path_out)[0] + cfg.SUFFIX_RESULT_COMPLETE
-        if os.path.exists(path_out):
-            continue
-        paths_audio.append(path_audio)
-
-    if len(paths_audio) == 0:
+    paths_audio_raw = search_dir(dir_audio, list(sf.available_formats().keys()))
+    if len(paths_audio_raw) == 0:
         m = f"no compatible audio files found in raw directory {dir_audio} \n" \
             f"audio format must be compatible with soundfile module version {sf.__version__} \n" \
             f"exiting analysis"
 
-        printlog(m, q_log, verb_set=verbosity, verb_item=0, do_log=True)
+        printlog(m, q_log, level='ERROR')
         shutdown_event.set()  # Signal shutdown directly
+        proc_logger.join()
+        return
+
+    paths_audio = []
+    for path_audio in paths_audio_raw:
+        path_out = re.sub(dir_audio, dir_out, path_audio)
+        path_out = os.path.splitext(path_out)[0] + cfg.SUFFIX_RESULT_COMPLETE
+        if os.path.exists(path_out):
+            results_exist = True
+            continue
+        paths_audio.append(path_audio)
+
+    if len(paths_audio) == 0:
+        m = f"all files in {dir_audio} are fully analyzed; exiting analysis"
+        printlog(m, q_log, level='WARNING')
+        shutdown_event.set()
         proc_logger.join()
         return
 
     control = []
     for path_audio in paths_audio:
         if os.path.getsize(path_audio) < 5000:
-            warnings.warn(f'file too small, skipping: {path_audio}')
+            printlog(f'file too small, skipping: {path_audio}', q_log, level='WARNING')
             continue
 
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
-        printlog(f"checking results for {re.sub(dir_out, '', base_out)}", q_log, verb_set=verbosity, verb_item=2,
-                 do_log=True)
+        printlog(f"checking results for {re.sub(dir_out, '', base_out)}", q_log, level='INFO')
         duration_audio = get_duration(path_audio)
 
         chunklist = chunklist_from_base(
@@ -204,8 +203,7 @@ def analyze(
         })
 
     if not control:
-        printlog(f"all files in {dir_audio} are fully analyzed; exiting analysis", q_log, verb_set=verbosity,
-                 verb_item=0, do_log=True)
+        printlog(f"all files in {dir_audio} are fully analyzed; exiting analysis", q_log, level='WARNING')
         shutdown_event.set()  # Signal shutdown directly
         proc_logger.join()
         return
@@ -229,13 +227,10 @@ def analyze(
         f"CPU count: {cpus}\n"
         f"GPU: {gpu}\n",
         q_log=q_log,
-        verb_set=verbosity,
-        verb_item=0,
-        do_log=True
+        level='INFO'
     )
 
     args_writer = {
-        'writer_count': writer_count,
         'analyzer_count': analyzer_count,
         'q_write': q_write,
         'classes': config_model['classes'],
@@ -246,7 +241,6 @@ def analyze(
         'dir_audio': dir_audio,
         'dir_out': dir_out,
         'q_log': q_log,
-        'verbosity': verbosity,
         'shutdown_event': shutdown_event
     }
     proc_writer = ctx.Process(target=worker_writer, name='writer_proc', kwargs=args_writer)
@@ -257,8 +251,7 @@ def analyze(
         'q_control': q_control,
         'q_assignments': q_assignments,
         'q_log': q_log,
-        'resample_rate': config_embedder['samplerate'],
-        'verbosity': verbosity
+        'resample_rate': config_embedder['samplerate']
     }
 
     proc_streamers = []
@@ -276,8 +269,7 @@ def analyze(
         'q_log': q_log,
         'streamer_count': streamer_count,
         'analyzer_count': analyzer_count,
-        'dir_audio': dir_audio,
-        'verbosity': verbosity
+        'dir_audio': dir_audio
     }
     proc_analyzers = []
     for a in range(cpus):
@@ -290,10 +282,10 @@ def analyze(
         worker_analyzer('G', 'GPU', **args_analyzer)
 
     # wait for analysis to finish
+    # TODO: separate logger closing from files finishing
     proc_logger.join()
 
     # on terminate, clean up chunks
-    print('renaming completed result files')
     for c in control:
         path_audio = c['path_audio']
         base_out = re.sub(dir_audio, dir_out, path_audio)
@@ -308,32 +300,19 @@ def analyze(
         # Note: Can't use printlog here as logger has already exited
 
     timer_total.stop()
-    closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
 
+    # TODO: after seperating logger closing from analysis finishing, move this to log
+    closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
     print(closing_message)
-    file_log = open(path_log, "a")
-    file_log.write(closing_message)
-    file_log.close()
 
     return
 
 
 if __name__ == "__main__":
-    dir_audio_base = '/media/server storage/experiments'
-    experiment = 'Luke - Various Opportunistic Recordings'
-    dir_audio = os.path.join(dir_audio_base, experiment)
-
-    modelname = 'model_general_v3'
-    dir_out = os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_OUTPUT, experiment)
-
     analyze(
-        modelname='model_general_v3',
+        modelname='lite',
         classes_out=['ins_buzz', 'ambient_rain'],
         framehop_prop=1,
-        chunklength=1000,
-        cpus=0,
-        gpu=True,
-        dir_audio=dir_audio,
-        dir_out=dir_out,
-        verbosity=2
+        chunklength=100,
+        verbosity='DEBUG'
     )
