@@ -203,15 +203,15 @@ def join_results(results, annotations, framelength, overlap_prop):
         results_join.append(merged_row)
 
     results_join = pd.DataFrame(results_join)
+    results_join = results_join.sort_values(by='ins_buzz', ascending=False, ignore_index=True)
     results_join['correct'] = [bool(re.search('ins_buzz', l)) for l in results_join['label']]
+    results_join['true_positives'] = results_join['correct'].cumsum()
+    results_join['precision'] = results_join['true_positives'] / (results_join.index + 1)
 
     return results_join
 
 def sx(results_join, precision_requested):
     ''' get sensitivity and threshold at x precision'''
-    results_join = results_join.sort_values(by='ins_buzz', ascending=False, ignore_index=True)
-    results_join['true_positives'] = results_join['correct'].cumsum()
-    results_join['precision'] = results_join['true_positives'] / (results_join.index + 1)
     results_join['delta'] = results_join['precision'] - precision_requested
 
     over = results_join[results_join['delta'] > 0].sort_values(by='delta', ascending=True, inplace=False)
