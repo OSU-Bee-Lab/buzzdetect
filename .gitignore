@@ -22,7 +22,7 @@ embedders/*
 
 # MODELS
 models/*
-models/*/output/
+models/*/output*
 
 !models/model_general/
 !models/model_general_v3/
