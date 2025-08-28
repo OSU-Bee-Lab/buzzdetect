@@ -1,0 +1,10 @@
+# Ignore everything in the root by default
+/*
+!.gitignore
+
+# Unignore these shared models
+!model_general_v3_k3/
+
+# Within unignored directories, ignore output* and tests/results*
+*/output*
+*/tests/results*
