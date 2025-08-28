@@ -1,14 +1,16 @@
-name: buzzdetect-py39
+name: buzzdetect
 channels:
   - defaults
   - conda-forge
 dependencies:
-  - python=3.9
-  - pip=23.2.1
+  - python>=3.10
+  - pip
   - pip:
-    - tensorflow==2.14
-    - tensorflow_hub==0.14.0
-    - tensorflow-io==0.34.0
-    - librosa==0.10
-    - soundfile==0.12.1
-    - pandas==2.1.0
+    - tensorflow
+    - tensorflow_hub
+    - tensorflow-io
+    - librosa
+    - soundfile
+    - pandas
+    - numpy
+    - matplotlib
