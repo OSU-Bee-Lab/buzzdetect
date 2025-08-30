@@ -2,7 +2,7 @@ import json
 import os
 
 from buzzcode import config as cfg
-from buzzcode.embedders import load_embedder_config
+from buzzcode.embedding.load_embedder import load_embedder
 from buzzcode.training.set_extract import extract_set
 
 from buzzcode.training.augment_noise_volume import augment_set
@@ -17,18 +17,12 @@ def build_set(setname, embeddername, framehop_prop, event_overlap_prop=0.2, cpus
 
     config_set = {
         'framehop_prop': framehop_prop,
-        'event_overlap_prop': event_overlap_prop
+        'event_overlap_prop': event_overlap_prop,
+        'embeddername': embeddername
     }
 
-    with open(os.path.join(dir_set, 'config_set.txt'), 'x') as f:
+    with open(os.path.join(dir_set, 'config_set.json'), 'x') as f:
         f.write(json.dumps(config_set))
-
-    # sets are locked to one embedder because the audio samples
-    # need samplerate if we want to resample; need framelength
-    # for event_overlap_prop, to call events
-    config_embedder = load_embedder_config(embeddername)
-    with open(os.path.join(dir_set, 'config_embedder.txt'), 'x') as f:
-        f.write(json.dumps(config_embedder))
 
 
     # ---- build ----

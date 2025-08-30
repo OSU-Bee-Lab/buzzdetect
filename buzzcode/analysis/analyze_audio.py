@@ -9,19 +9,17 @@ from buzzcode.utils import search_dir, Timer, setthreads
 
 setthreads(1)
 
-from buzzcode.embedders import load_embedder_config
+from buzzcode.embedding.load_embedder import load_embedder
 from buzzcode.analysis.coverage import chunklist_from_base
 from buzzcode.audio import get_duration
 import buzzcode.config as cfg
 import json
 import os
 import re
-import warnings
 from datetime import datetime
 
 import soundfile as sf
 
-from buzzcode.analysis.analysis import get_framelength_digits
 from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer
 from buzzcode.training.test import pull_sx
 
@@ -93,12 +91,10 @@ def analyze(
     # Setup
     dir_model = os.path.join(cfg.DIR_MODELS, modelname)
     if not os.path.exists(dir_model):
-        warnings.warn(f'model {modelname} not found in model directory; exiting')
-        return
+        raise FileNotFoundError(f'model {modelname} not found in model directory')
 
     with open(os.path.join(dir_model, 'config_model.txt'), 'r') as file:
         config_model = json.load(file)
-    config_embedder = load_embedder_config(config_model['embeddername'])
 
     if dir_out is None:
         dir_out = os.path.join(dir_model, cfg.SUBDIR_OUTPUT)
@@ -108,18 +104,18 @@ def analyze(
     else:
         threshold = pull_sx(modelname, precision)['threshold']
 
+    embedder_noload = load_embedder(embeddername=config_model['embeddername'], framehop_prop=framehop_prop, load_model=False)
     # rounding to nearest frame allows for seamless chunks
-    digits_time = get_framelength_digits(config_embedder['framelength'])
-    chunklength = round(chunklength / config_embedder['framelength']) * config_embedder['framelength']
-    chunklength = round(chunklength, digits_time)
+    chunklength = round(chunklength / embedder_noload.framelength_s) * embedder_noload.framelength_s
+    chunklength = round(chunklength, embedder_noload.digits_time)
 
     # processing control
     if concurrent_streamers is None:
         if not gpu:
-            concurrent_streamers = int(cpus / 2)
+            concurrent_streamers = max(int(cpus / 2), 1)
         else:
             concurrent_streamers = 8
-    stream_buffer_depth = 2
+    stream_buffer_depth = concurrent_streamers
 
     # Create multiprocessing context for spawn
     ctx = multiprocessing.get_context('spawn')
@@ -128,9 +124,6 @@ def analyze(
     q_log = ctx.Queue()
     q_control = ctx.Queue()
     q_write = ctx.Queue()
-
-    streamer_count = ctx.Value('i', concurrent_streamers)
-    analyzer_count = ctx.Value('i', cpus + (1 if gpu else 0))
 
     shutdown_event = ctx.Event()
 
@@ -147,6 +140,15 @@ def analyze(
 
     proc_logger = ctx.Process(target=worker_logger, kwargs=args_logger)
     proc_logger.start()
+
+    if framehop_prop > 1:
+        printlog(
+            'Currently, analyses with framehop > 1 will produce valid results,'
+            'but buzzdetect will interpret the resulting gaps as errors.'
+            f'Fully analyzed files will not be converted from {cfg.SUFFIX_RESULT_PARTIAL} to {cfg.SUFFIX_RESULT_COMPLETE}.'
+            f'Repeated analysis will attempt to fill gaps between frames.',
+            q_log, level='WARNING'
+        )
 
     # Build chunklists
     paths_audio_raw = search_dir(dir_audio, list(sf.available_formats().keys()))
@@ -165,11 +167,11 @@ def analyze(
         path_out = re.sub(dir_audio, dir_out, path_audio)
         path_out = os.path.splitext(path_out)[0] + cfg.SUFFIX_RESULT_COMPLETE
         if os.path.exists(path_out):
-            results_exist = True
             continue
+
         paths_audio.append(path_audio)
 
-    if len(paths_audio) == 0:
+    if not paths_audio:
         m = f"all files in {dir_audio} are fully analyzed; exiting analysis"
         printlog(m, q_log, level='WARNING')
         shutdown_event.set()
@@ -190,7 +192,7 @@ def analyze(
         chunklist = chunklist_from_base(
             base_out=base_out,
             duration_audio=duration_audio,
-            framelength=config_embedder['framelength'],
+            framelength_s=embedder_noload.framelength_s,
             chunklength=chunklength
         )
 
@@ -208,6 +210,15 @@ def analyze(
         shutdown_event.set()  # Signal shutdown directly
         proc_logger.join()
         return
+
+    n_paths = len(set([c['path_audio'] for c in control]))
+
+    if concurrent_streamers > n_paths:
+        concurrent_streamers = n_paths
+    if cpus > n_paths:
+        cpus = n_paths
+    streamer_count = ctx.Value('i', concurrent_streamers)
+    analyzer_count = ctx.Value('i', cpus + (1 if gpu else 0))
 
     # load control into the queue
     for c in control:
@@ -237,8 +248,8 @@ def analyze(
         'classes': config_model['classes'],
         'classes_out': classes_out,
         'threshold': threshold,
-        'framehop_s': config_embedder['framelength'] * framehop_prop,
-        'digits_time': digits_time,
+        'framehop_s': embedder_noload.framehop_s,
+        'digits_time': embedder_noload.digits_time,
         'dir_audio': dir_audio,
         'dir_out': dir_out,
         'q_log': q_log,
@@ -252,7 +263,7 @@ def analyze(
         'q_control': q_control,
         'q_assignments': q_assignments,
         'q_log': q_log,
-        'resample_rate': config_embedder['samplerate']
+        'resample_rate': embedder_noload.samplerate
     }
 
     proc_streamers = []
@@ -264,7 +275,7 @@ def analyze(
     args_analyzer = {
         'modelname': modelname,
         'embeddername': config_model['embeddername'],
-        'framehop_s': framehop_prop * config_embedder['framelength'],
+        'framehop_prop': embedder_noload.framehop_prop,
         'q_write': q_write,
         'q_assignments': q_assignments,
         'q_log': q_log,
@@ -278,7 +289,7 @@ def analyze(
             ctx.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a, 'CPU']),
                         kwargs=args_analyzer))
         proc_analyzers[-1].start()
-
+    
     if gpu:
         worker_analyzer('G', 'GPU', **args_analyzer)
 
@@ -295,7 +306,7 @@ def analyze(
         chunklist_from_base(
             base_out=base_out,
             duration_audio=get_duration(path_audio),
-            framelength=config_embedder['framelength'],
+            framelength_s=embedder_noload.framelength_s,
             chunklength=chunklength
         )
         # Note: Can't use printlog here as logger has already exited
@@ -311,9 +322,10 @@ def analyze(
 
 if __name__ == "__main__":
     analyze(
-        modelname='lite',
-        classes_out=['ins_buzz', 'ambient_rain'],
+        modelname='model_general_v3',
+        classes_out='all',
+        cpus=5,
         framehop_prop=1,
-        chunklength=100,
+        chunklength=180,
         verbosity='DEBUG'
     )
