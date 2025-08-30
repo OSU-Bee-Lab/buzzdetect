@@ -1,0 +1,6 @@
+# Ignore everything in the root by default
+/*
+!.gitignore
+
+# Unignore these shared embedders
+!yamnet

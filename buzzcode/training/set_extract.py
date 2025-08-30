@@ -13,6 +13,7 @@ import soundfile as sf
 import buzzcode.config as cfg
 from buzzcode.analysis.coverage import melt_coverage
 from buzzcode.audio import frame_audio, get_duration
+from buzzcode.embedding.load_embedder import load_embedder
 
 
 def overlaps(range_frame, range_label, minimum_overlap):
@@ -82,7 +83,7 @@ def get_ident_audio_path(ident):
     return path_audio
 
 
-def extract_ident(setname, ident):
+def extract_ident(setname, ident, framelength, samplerate_target, framehop_s, overlap_event_s, embedder_dtype):
     print(f'EXTRACTION: building ident {ident}')
     path_audio = get_ident_audio_path(ident)
     if not path_audio:
@@ -91,18 +92,6 @@ def extract_ident(setname, ident):
 
     dir_set = os.path.join(cfg.TRAIN_DIR_SET, setname)
     dir_out = os.path.join(dir_set, cfg.TRAIN_DIRNAME_AUDIOSAMPLES, cfg.TRAIN_DIRNAME_RAW, ident)
-
-    with open(os.path.join(dir_set, 'config_embedder.txt'), 'r') as f:
-        config_embedder = json.load(f)
-
-    framelength = config_embedder['framelength']
-    samplerate_target = config_embedder['samplerate']
-
-    with open(os.path.join(dir_set, 'config_set.txt'), 'r') as f:
-        config_set = json.load(f)
-
-    framehop_s=config_set['framehop_prop'] * framelength
-    overlap_event_s=config_set['event_overlap_prop'] * framelength
 
     annotations = pd.read_csv(os.path.join(dir_set, 'annotations.csv'))
     annotations = annotations[annotations['ident'] == ident].copy()
@@ -121,7 +110,7 @@ def extract_ident(setname, ident):
         samples_to_read = round(sr_native * (chunk[1] - chunk[0]))
         track.seek(start_sample)
 
-        audio_data = track.read(samples_to_read, dtype='float32')
+        audio_data = track.read(samples_to_read, dtype=embedder_dtype)
         if track.channels > 1:
             audio_data = np.mean(audio_data, axis=1)
 
@@ -183,8 +172,19 @@ def extract_set(setname, cpus):
             f'will NOT be completed. Delete partial ident folders if you wish to re-extract.'
         )
 
+    with open(os.path.join(dir_set, 'config_set.json'), 'r') as file:
+        config_set = json.load(file)
+
+    embedder = load_embedder(config_set['embeddername'], framehop_prop=config_set['framehop_prop'], load_model=False)
+    framelength = embedder.framelength_s
+    samplerate_target = embedder.samplerate
+    framehop_s = embedder.framehop_s
+    overlap_event_s = config_set['event_overlap_prop']*embedder.framelength_s
+    embedder_dtype = embedder.dtype_in
+
     with multiprocessing.Pool(cpus) as pool:
-        arglist = [(setname, ident) for ident in idents]
+        # TODO: refactor to OOP
+        arglist = [(setname, ident, framelength, samplerate_target, framehop_s, overlap_event_s, embedder_dtype) for ident in idents]
         pool.starmap_async(extract_ident, arglist)
         pool.close()
         pool.join()
@@ -194,6 +194,6 @@ def extract_set(setname, cpus):
 
 if __name__ == '__main__':
     extract_set(
-        setname='lite',
+        setname='standard',
         cpus=4
     )

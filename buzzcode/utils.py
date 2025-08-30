@@ -87,13 +87,11 @@ def setthreads(threads_desired=1):
     if threads_current == threads_desired:
         return
 
-    elif threads_current == 0:
+    try:
         tf.config.threading.set_inter_op_parallelism_threads(1)
         tf.config.threading.set_intra_op_parallelism_threads(1)
-
-    else:
+    except RuntimeError:
         warnings.warn(f'tensorflow threads already initialized to {threads_current}; cannot set')
-
 
 def make_chunklist(duration, chunklength, chunk_overlap=0, chunk_min=0):
     if chunk_overlap > chunklength:

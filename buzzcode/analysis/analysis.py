@@ -1,38 +1,9 @@
-import json
-import os
-
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-import re
-
-import buzzcode.config as cfg
 
 
 # Functions for handling models
 #
-
-def load_model(modelname):
-    dir_model = os.path.abspath(os.path.join(cfg.DIR_MODELS, modelname))
-    model = tf.keras.models.load_model(dir_model)
-
-    return model
-
-
-def load_model_config(modelname):
-    dir_model = os.path.join('./models', modelname)
-    with open(os.path.join(dir_model, 'config_model.txt'), 'r') as cfg:
-        config = json.load(cfg)
-
-    if 'embedder' in config.keys():
-        print('COMPATIBILITY: updating old embdder config keys')
-        config['embeddername'] = config['embedder']
-        del config['embedder']
-
-        with open(os.path.join(dir_model, 'config_model.txt'), 'w') as cfg:
-            json.dump(config, cfg)
-
-    return config
 
 
 def add_time(df, time_start, framehop_s, digits_time):
@@ -81,9 +52,3 @@ def format_activations(results, classes, framehop_s, digits_time, time_start=0, 
     df = add_time(df, time_start, framehop_s, digits_time)
 
     return df
-
-
-def get_framelength_digits(framelength):
-    framelength_str = str(framelength)
-    framelength_str = re.sub('^\\d+\\.', '', framelength_str)
-    return len(framelength_str)

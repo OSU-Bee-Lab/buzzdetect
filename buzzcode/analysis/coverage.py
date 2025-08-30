@@ -75,7 +75,7 @@ def gaps_to_chunklist(gaps_in, chunklength, decimals=2):
     return chunklist
 
 
-def chunklist_from_base(base_out, duration_audio, framelength, chunklength):
+def chunklist_from_base(base_out, duration_audio, framelength_s, chunklength):
     path_complete = base_out + SUFFIX_RESULT_COMPLETE
 
     # if finished analysis file exists, return no chunks
@@ -90,7 +90,7 @@ def chunklist_from_base(base_out, duration_audio, framelength, chunklength):
     else:
         # otherwise, read the file and calculate chunks
         df = pd.read_csv(path_partial)
-        coverage = melt_coverage(df, framelength)
+        coverage = melt_coverage(df, framelength_s)
         gaps = get_gaps(
             range_in=(0, duration_audio),
             coverage_in=coverage
@@ -98,8 +98,8 @@ def chunklist_from_base(base_out, duration_audio, framelength, chunklength):
         gaps = smooth_gaps(
             gaps,
             range_in=(0, duration_audio),
-            framelength=framelength,
-            gap_tolerance=framelength / 4
+            framelength=framelength_s,
+            gap_tolerance=framelength_s / 4
         )
 
     # if we find no gaps, this file was actually finished!

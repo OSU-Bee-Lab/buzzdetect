@@ -12,17 +12,5 @@ condaenv.l8rr463d.requirements.txt
 .idea/
 
 # directories for local execution
-/local*/
-/training/
-
-
-# EMBEDDERS
-embedders/*
-!embedders/yamnet/
-
-# MODELS
-models/*
-models/*/output*
-
-!models/model_general/
-!models/model_general_v3/
+local*/
+training/

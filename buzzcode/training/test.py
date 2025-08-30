@@ -11,8 +11,8 @@ import pandas as pd
 import soundfile as sf
 
 import buzzcode.config as cfg
-from buzzcode.analysis.analysis import load_model_config, load_model, format_activations, get_framelength_digits
-from buzzcode.embedders import load_embedder_model, load_embedder_config
+from buzzcode.analysis.analysis import format_activations
+from buzzcode.analysis.models import load_model, load_model_config
 from buzzcode.utils import search_dir, build_ident
 
 framehop_prop_test = 1
@@ -77,7 +77,7 @@ def analyze_test_embeddings(modelname):
             results,
             classes=config_model['classes'],
             framehop_s=config_embedder['framelength']*framehop_prop_test,
-            digits_time=get_framelength_digits(config_embedder['framelength']),
+            digits_time=embedder.digits_time,
             classes_keep=['ins_buzz'],
             digits_results=3
         )

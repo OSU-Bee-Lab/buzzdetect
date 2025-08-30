@@ -6,10 +6,11 @@ from _queue import Empty
 import numpy as np
 import tensorflow as tf
 
-from buzzcode.analysis.analysis import format_activations, format_detections, load_model
+from buzzcode.analysis.analysis import format_activations, format_detections
+from buzzcode.analysis.models import load_model
 from buzzcode.audio import stream_to_queue
 from buzzcode.config import SUFFIX_RESULT_PARTIAL
-from buzzcode.embedders import load_embedder_model
+from buzzcode.embedding.load_embedder import load_embedder
 from buzzcode.utils import Timer
 
 log_levels = {
@@ -148,7 +149,7 @@ def worker_writer(classes_out, threshold, analyzer_count, q_write, classes, fram
 
     def write_results(path_audio, chunk, results):
         output = format_func(
-            results=results,
+            results=results.numpy(),
             time_start=chunk[0]
         )
 
@@ -185,7 +186,7 @@ def worker_writer(classes_out, threshold, analyzer_count, q_write, classes, fram
     shutdown_event.set()
 
 
-def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s, q_write, q_assignments, q_log,
+def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_prop, q_write, q_assignments, q_log,
                     streamer_count, analyzer_count, dir_audio):
     if processor == 'CPU':
         tf.config.set_visible_devices([], 'GPU')
@@ -196,9 +197,13 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
     printlog(f"analyzer {id_analyzer}: processing on {processor}", q_log=q_log, level='INFO')
 
     def analyze_assignment(path_audio, samples, chunk):
-        embeddings = embedder(samples)
-        results = model(embeddings)
-        results = np.array(results)
+        embeddings = embedder.embed(samples)
+        results = model(embeddings)['dense'] # hmm...
+        # the results are a dict now. That's either because of Keras 3 and it's new standard behavior,
+        # or it's the result of converting the Keras 2 models I'm currenlty testing to K3.
+        # will the output always have the 'dense' key? I dunno! But if you see an error later,
+        # check the class/shape/keys of these results.
+
         q_write.put({
             'path_audio': path_audio,
             'chunk': chunk,
@@ -212,14 +217,14 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
         path_short = re.sub(dir_audio, '', path_audio)
 
         printlog(f"analyzer {id_analyzer}: analyzed {path_short}, "
-                 f"chunk {chunk} "
+                 f"chunk ({float(chunk[0])}, {float(chunk[1])}) "
                  f"in {timer_analysis.get_total()}s (rate: {analysis_rate})", q_log, level='INFO')
 
         timer_analysis.restart()
 
     # ready model
     model = load_model(modelname)
-    embedder = load_embedder_model(embeddername, framehop_s=framehop_s)
+    embedder = load_embedder(embeddername=embeddername, framehop_prop=framehop_prop, load_model=True)
 
     timer_analysis = Timer()
     timer_bottleneck = Timer()
@@ -232,7 +237,7 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_s,
                 timer_bottleneck.stop()
                 printlog(
                     f"BUFFER BOTTLENECK: analyzer {id_analyzer} received assignment after {timer_bottleneck.get_total().__round__(1)}s",
-                    q_log=q_log, level='INFO')
+                    q_log=q_log, level='DEBUG')
                 analyze_assignment(
                     path_audio=assignment['path_audio'],
                     samples=assignment['samples'],
