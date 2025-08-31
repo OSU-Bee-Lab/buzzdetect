@@ -41,5 +41,9 @@ def load_embedder(embeddername: str, framehop_prop: float, load_model: bool):
         raise ValueError(f"No BaseEmbedder subclass found in {embeddername}/embedder.py")
 
     # Instantiate and load
-    embedder = embedder_class(framehop_prop=framehop_prop, load_model=load_model)
+    embedder = embedder_class(framehop_prop=framehop_prop)
+
+    if load_model:
+        embedder.model = embedder.load()
+
     return embedder

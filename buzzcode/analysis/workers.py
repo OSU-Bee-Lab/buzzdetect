@@ -3,7 +3,6 @@ import os
 import re
 from _queue import Empty
 
-import numpy as np
 import tensorflow as tf
 
 from buzzcode.analysis.analysis import format_activations, format_detections
@@ -203,6 +202,8 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_pr
         # or it's the result of converting the Keras 2 models I'm currenlty testing to K3.
         # will the output always have the 'dense' key? I dunno! But if you see an error later,
         # check the class/shape/keys of these results.
+        # TODO: change models to modular based on ABC, like embedders;
+        # that will let us handle idiosyncracies
 
         q_write.put({
             'path_audio': path_audio,
