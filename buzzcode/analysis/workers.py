@@ -4,6 +4,7 @@ import re
 from _queue import Empty
 
 import tensorflow as tf
+import warnings
 
 from buzzcode.analysis.analysis import format_activations, format_detections
 from buzzcode.analysis.models import load_model
@@ -192,6 +193,15 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_pr
         visible_devices = tf.config.get_visible_devices()
         for device in visible_devices:
             assert device.device_type != 'GPU'
+    elif processor == 'GPU':
+        # let memory grow when processing on GPU
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        if gpus:
+            try:
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+            except RuntimeError as e:
+                print(e)
 
     printlog(f"analyzer {id_analyzer}: processing on {processor}", q_log=q_log, level='INFO')
 
@@ -226,6 +236,8 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_pr
     # ready model
     model = load_model(modelname)
     embedder = load_embedder(embeddername=embeddername, framehop_prop=framehop_prop, load_model=True)
+    warnings.warn('you still have to solve embedders not loading their models, at least for k2')
+    embedder.load()
 
     timer_analysis = Timer()
     timer_bottleneck = Timer()
