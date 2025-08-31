@@ -154,6 +154,7 @@ class WaveformFeatures(layers.Layer):
             p = types.SimpleNamespace(**params_cfg)
             return cls(p)
 
+    @tf.function
     def call(self, waveform):
         padded = features_lib.pad_waveform(waveform, self.params)
         log_mel_spectrogram, features = features_lib.waveform_to_log_mel_spectrogram_patches(

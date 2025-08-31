@@ -4,3 +4,4 @@
 
 # Unignore these shared embedders
 !yamnet
+!yamnet_k2

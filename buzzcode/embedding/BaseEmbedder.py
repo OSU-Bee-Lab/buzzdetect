@@ -12,7 +12,7 @@ class BaseEmbedder(ABC):
     digits_time: int = None  # how many digits should timestamps be rounded to? Should be equal to framelength digits
     dtype_in: str = None
 
-    def __init__(self, framehop_prop, load_model):
+    def __init__(self, framehop_prop):
         """Initialize embedder with framehop defined as a proportion
 
         Args:
@@ -20,11 +20,7 @@ class BaseEmbedder(ABC):
         """
         self.framehop_prop = framehop_prop
         self.framehop_s = self.framelength_s * framehop_prop
-
-        if load_model:
-            self.model = self.load()
-        else:
-            self.model = None
+        self.model = None
 
     @abstractmethod
     def load(self):
