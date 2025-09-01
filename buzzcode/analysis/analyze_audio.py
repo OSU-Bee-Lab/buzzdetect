@@ -8,8 +8,7 @@ os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
 
-from buzzcode.utils import search_dir, Timer, setthreads
-setthreads(1)
+from buzzcode.utils import search_dir, Timer
 from buzzcode.embedding.load_embedder import load_embedder
 from buzzcode.analysis.coverage import chunklist_from_base
 from buzzcode.audio import get_duration

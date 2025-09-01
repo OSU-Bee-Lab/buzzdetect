@@ -77,22 +77,6 @@ def read_pickle_generator(path_pickle):
                 break
 
 
-def setthreads(threads_desired=1):
-    if threads_desired < 1:
-        warnings.warn(f'cannot set threadcount below 1; continuing without modification')
-
-    import tensorflow as tf
-    threads_current = tf.config.threading.get_inter_op_parallelism_threads()
-
-    if threads_current == threads_desired:
-        return
-
-    try:
-        tf.config.threading.set_inter_op_parallelism_threads(1)
-        tf.config.threading.set_intra_op_parallelism_threads(1)
-    except RuntimeError:
-        warnings.warn(f'tensorflow threads already initialized to {threads_current}; cannot set')
-
 def make_chunklist(duration, chunklength, chunk_overlap=0, chunk_min=0):
     if chunk_overlap > chunklength:
         raise ValueError('chunk overlap must be less than chunk length')

@@ -9,9 +9,7 @@ import numpy as np
 
 import buzzcode.config as cfg
 from buzzcode.embedding.load_embedder import load_embedder
-from buzzcode.utils import read_pickle_generator, setthreads
-
-setthreads(1)
+from buzzcode.utils import read_pickle_generator
 
 
 def embed_file(path_audiosamples, path_embeddings, embedder):

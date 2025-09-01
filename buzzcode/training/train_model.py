@@ -1,9 +1,5 @@
 import shutil
 
-from buzzcode.utils import setthreads
-
-setthreads(8)
-
 import os
 import pickle
 import json
