@@ -3,7 +3,6 @@ import os
 import re
 import warnings
 
-import librosa
 import numpy as np
 import soundfile as sf
 
@@ -88,36 +87,3 @@ def handle_badread(path_audio, duration_audio, track, end_intended):
     return
 
 
-def stream_to_queue(path_audio, duration_audio, chunklist, q_assignments, resample_rate):
-    def queue_assignment(chunk, track, samplerate_native):
-        sample_from = int(chunk[0] * samplerate_native)
-        sample_to = int(chunk[1] * samplerate_native)
-        read_size = sample_to - sample_from
-
-        track.seek(sample_from)
-        samples = track.read(read_size, dtype=np.float32)
-        if track.channels > 1:
-            samples = np.mean(samples, axis=1)
-
-        # we've found that many of our .mp3 files give an incorrect .frames count, or else headers are broken
-        # this appears to be because our recorders ran out of battery while recording
-        # SoundFile does not handle this gracefully, so we catch it here.
-        n_samples = len(samples)
-
-        if n_samples < read_size:
-            handle_badread(path_audio=path_audio, track=track, duration_audio=duration_audio, end_intended=chunk[1])
-
-        samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=resample_rate)
-        assignment = {
-            'path_audio': path_audio,
-            'chunk': chunk,
-            'samples': samples.astype(np.float16)
-        }
-
-        q_assignments.put(assignment)
-
-    track = sf.SoundFile(path_audio)
-    samplerate_native = track.samplerate
-
-    for chunk in chunklist:
-        queue_assignment(chunk, track, samplerate_native)

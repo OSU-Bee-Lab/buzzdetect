@@ -3,32 +3,22 @@ import os
 import re
 from _queue import Empty
 
+import librosa
+import numpy as np
+import soundfile as sf
+
 import tensorflow as tf
 import warnings
 
 from buzzcode.analysis.analysis import format_activations, format_detections
+from buzzcode.analysis.assignments import AssignLog, AssignStream, AssignAnalyze, AssignWrite
 from buzzcode.analysis.models import load_model
-from buzzcode.audio import stream_to_queue
+from buzzcode.audio import handle_badread
 from buzzcode.config import SUFFIX_RESULT_PARTIAL
 from buzzcode.embedding.load_embedder import load_embedder
 from buzzcode.utils import Timer
+from queue import Queue
 
-log_levels = {
-    'DEBUG': logging.DEBUG,
-    'INFO': logging.INFO,
-    'WARNING': logging.WARNING,
-    'ERROR': logging.ERROR,
-    'CRITICAL': logging.CRITICAL}
-
-def printlog(item: str, q_log, level):
-    if level.__class__ is str:
-        level_int = log_levels[level]
-    elif level.__class__ is int:
-        level_int = level
-    else:
-        raise ValueError(f"level must be str or int, not {level.__class__}")
-
-    q_log.put((item, level_int))
 
 # source code modified from Sergey Pleshakov's code here: https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
 # might also consider loguru
@@ -53,108 +43,173 @@ class PrintFormatter(logging.Formatter):
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
-def worker_logger(path_log, q_log, shutdown_event, verbosity):
-    log = logging.getLogger()
-    log.setLevel(0)
+class WorkerLogger:
+    def __init__(self, path_log, q_log: Queue[AssignLog], event_closelogger, verbosity):
+        self.path_log = path_log
+        self.q_log = q_log
+        self.event_closelogger = event_closelogger
+        self.verbosity = verbosity
 
-    handle_stream = logging.StreamHandler()
-    handle_stream.setLevel(verbosity)
-    handle_stream.setFormatter(PrintFormatter())
-    log.addHandler(handle_stream)
+        self.log = logging.getLogger()
+        self.log.setLevel(0)
 
-    format_file = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-    handle_file = logging.FileHandler(path_log)
-    handle_file.setLevel(logging.DEBUG)  # always write everything to file
-    handle_file.setFormatter(format_file)
-    log.addHandler(handle_file)
+        self.handle_stream = logging.StreamHandler()
+        self.handle_stream.setLevel(verbosity)
+        self.handle_stream.setFormatter(PrintFormatter())
+        self.log.addHandler(self.handle_stream)
 
-    def getwrite(t):
-        item = q_log.get(timeout=t)
-        logging.log(msg=item[0], level=item[1])
+        self.format_file = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        self.handle_file = logging.FileHandler(path_log)
+        self.handle_file.setLevel(logging.DEBUG)  # always write everything to file
+        self.handle_file.setFormatter(self.format_file)
+        self.log.addHandler(self.handle_file)
 
-    # Main loop: drain while work is still coming or writers alive
-    while True:
-        try:
-            getwrite(1)
-        except Empty:
-            if shutdown_event.is_set():
+    def __call__(self):
+        self.run()
+
+    def getwrite(self, time):
+        a_log = self.q_log.get(timeout=time)
+        logging.log(msg=a_log.item, level=a_log.level_int)
+
+    def run(self):
+        # Main loop: drain while work is still coming or writers alive
+        while True:
+            try:
+                self.getwrite(1)
+            except Empty:
+                if self.event_closelogger.is_set():
+                    break
+                # else: another writer might still put, so continue
+
+        # Final catch-up: keep draining until there's a real timeout
+        while True:
+            try:
+                self.getwrite(1)
+            except Empty:
                 break
-            # else: another writer might still put, so continue
-
-    # Final catch-up: keep draining until there's a real timeout
-    while True:
-        try:
-            getwrite(1)
-        except Empty:
-            break
 
 
-    logging.info("logger: exiting")
+        logging.info("logger: exiting")
 
-def worker_streamer(id_streamer, streamer_count, q_control, q_assignments, q_log, resample_rate):
-    c = q_control.get()
-    while c != 'TERMINATE':
-        printlog(f"streamer {id_streamer}: buffering {c['path_audio']}", q_log=q_log, level='INFO')
-        stream_to_queue(
-            path_audio=c['path_audio'],
-            duration_audio=c['duration_audio'],
-            chunklist=c['chunklist'],
-            q_assignments=q_assignments,
-            resample_rate=resample_rate
+
+class WorkerStreamer:
+    def __init__(self, id_streamer, streamer_count, q_stream: Queue[AssignStream], q_analyze: Queue[AssignAnalyze], q_log, resample_rate):
+        self.id_streamer = id_streamer
+        self.streamer_count = streamer_count
+        self.q_stream = q_stream
+        self.q_assignments = q_analyze
+        self.q_log = q_log
+        self.resample_rate = resample_rate
+
+    def __call__(self):
+        self.run()
+
+    def stream_to_queue(self, a_stream: AssignStream):
+        track = sf.SoundFile(a_stream.path_audio)
+        samplerate_native = track.samplerate
+
+        def queue_assignment(chunk, track, samplerate_native):
+            sample_from = int(chunk[0] * samplerate_native)
+            sample_to = int(chunk[1] * samplerate_native)
+            read_size = sample_to - sample_from
+
+            track.seek(sample_from)
+            samples = track.read(read_size, dtype=np.float32)
+            if track.channels > 1:
+                samples = np.mean(samples, axis=1)
+
+            # we've found that many of our .mp3 files give an incorrect .frames count, or else headers are broken
+            # this appears to be because our recorders ran out of battery while recording
+            # SoundFile does not handle this gracefully, so we catch it here.
+            n_samples = len(samples)
+
+            if n_samples < read_size:
+                handle_badread(path_audio=a_stream.path_audio, track=track, duration_audio=a_stream.duration_audio, end_intended=chunk[1])
+
+            samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=self.resample_rate)
+            a_analyze = AssignAnalyze(path_audio=a_stream.path_audio, chunk=chunk, samples=samples)
+
+            self.q_assignments.put(a_analyze)
+
+        for chunk in a_stream.chunklist:
+            queue_assignment(chunk, track, samplerate_native)
+
+    def run(self):
+        a_stream = self.q_stream.get()
+        while not a_stream.terminate:
+            self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: buffering {a_stream.shortpath}", level='INFO'))
+
+            self.stream_to_queue(a_stream)
+            a_stream = self.q_stream.get()
+        self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: terminating", level='INFO'))
+
+        # Decrement streamer count
+        with self.streamer_count.get_lock():
+            self.streamer_count.value -= 1
+
+class WorkerWriter:
+    def __init__(self, classes_out, threshold, analyzer_count, q_write: Queue[AssignWrite], classes, framehop_s, digits_time,
+                 dir_audio, dir_out, q_log, event_analysisdone, digits_results):
+        # TODO: what if someone starts an analysis with activations, then finishes with detections?
+        if classes_out is not None and threshold is not None:
+            raise ValueError("cannot specify both classes_out and threshold")
+
+        if classes_out is None and threshold is None:
+            raise ValueError("must specify either classes_out or threshold")
+
+        self.classes_out = classes_out
+        self.threshold = threshold
+        self.analyzer_count = analyzer_count
+        self.q_write = q_write
+        self.classes = classes
+        self.framehop_s = framehop_s
+        self.digits_time = digits_time
+        self.dir_audio = dir_audio
+        self.dir_out = dir_out
+        self.q_log = q_log
+        self.shutdown_event = event_analysisdone
+        self.digits_results = digits_results
+
+        if classes_out is not None:
+            def format_func(results, time_start):
+                out = format_activations(
+                    results=results,
+                    classes=classes,
+                    framehop_s=framehop_s,
+                    time_start=time_start,
+                    digits_time=digits_time,
+                    classes_keep=classes_out,
+                    digits_results=digits_results
+                )
+
+                return out
+
+        else:
+            def format_func(results, time_start):
+                out = format_detections(
+                    results,
+                    threshold,
+                    classes,
+                    framehop_s,
+                    digits_time,
+                    time_start
+                )
+
+                return out
+
+        self.format = format_func
+
+    def __call__(self):
+        self.run()
+
+    def write_results(self, assignment: AssignWrite):
+        output = self.format(
+            results=assignment.results.numpy(),
+            time_start=assignment.chunk[0]
         )
-        c = q_control.get()
 
-    printlog(f"streamer {id_streamer}: terminating", q_log=q_log, level='INFO')
-
-    # Decrement streamer count
-    with streamer_count.get_lock():
-        streamer_count.value -= 1
-
-
-def worker_writer(classes_out, threshold, analyzer_count, q_write, classes, framehop_s, digits_time,
-                  dir_audio, dir_out, q_log, shutdown_event, digits_results=2):
-    # TODO: what if someone starts an analysis with activations, then finishes with detections?
-    if classes_out is not None and threshold is not None:
-        raise ValueError("cannot specify both classes_out and threshold")
-
-    if classes_out is None and threshold is None:
-        raise ValueError("must specify either classes_out or threshold")
-
-    if classes_out is not None:
-        def format_func(results, time_start):
-            output = format_activations(
-                results=results,
-                classes=classes,
-                framehop_s=framehop_s,
-                time_start=time_start,
-                digits_time=digits_time,
-                classes_keep=classes_out,
-                digits_results=digits_results
-            )
-
-            return output
-
-    else:
-        def format_func(results, time_start):
-            output = format_detections(
-                results,
-                threshold,
-                classes,
-                framehop_s,
-                digits_time,
-                time_start
-            )
-
-            return output
-
-    def write_results(path_audio, chunk, results):
-        output = format_func(
-            results=results.numpy(),
-            time_start=chunk[0]
-        )
-
-        base_out = os.path.splitext(path_audio)[0]
-        base_out = re.sub(dir_audio, dir_out, base_out)
+        base_out = os.path.splitext(assignment.path_audio)[0]
+        base_out = re.sub(self.dir_audio, self.dir_out, base_out)
         path_out = base_out + SUFFIX_RESULT_PARTIAL
 
         os.makedirs(os.path.dirname(path_out), exist_ok=True)
@@ -165,49 +220,94 @@ def worker_writer(classes_out, threshold, analyzer_count, q_write, classes, fram
         # Append to existing file or create new one with headers
         output.to_csv(path_out, mode='a', header=not file_exists, index=False)
 
-    while True:
-        try:
-            w = q_write.get(timeout=5)
-            write_results(
-                path_audio=w['path_audio'],
-                chunk=w['chunk'],
-                results=w['results']
-            )
-        except Empty:
-            with analyzer_count.get_lock():
-                current_analyzer_count = analyzer_count.value
-
-            if current_analyzer_count == 0:
-                break
-            else:
-                continue
-
-    printlog("writer: terminating", q_log=q_log, level='INFO')
-    shutdown_event.set()
-
-
-def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_prop, q_write, q_assignments, q_log,
-                    streamer_count, analyzer_count, dir_audio):
-    if processor == 'CPU':
-        tf.config.set_visible_devices([], 'GPU')
-        visible_devices = tf.config.get_visible_devices()
-        for device in visible_devices:
-            assert device.device_type != 'GPU'
-    elif processor == 'GPU':
-        # let memory grow when processing on GPU
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        if gpus:
+    def run(self):
+        while True:
             try:
+                self.write_results(self.q_write.get(timeout=5))
+            except Empty:
+                with self.analyzer_count.get_lock():
+                    current_analyzer_count = self.analyzer_count.value
+
+                if current_analyzer_count == 0:
+                    break
+                else:
+                    continue
+
+        self.q_log.put(AssignLog(msg="writer: terminating", level='INFO'))
+        self.shutdown_event.set()
+
+
+
+class WorkerAnalyzer:
+    def __init__(self, id_analyzer, processor, modelname, embeddername, framehop_prop, q_write: Queue[AssignWrite], q_analyze: Queue[
+        AssignAnalyze], q_log, streamer_count, analyzer_count, dir_audio):
+        self.id_analyzer = id_analyzer
+        self.processor = processor
+        self.modelname = modelname
+        self.embeddername = embeddername
+        self.framehop_prop = framehop_prop
+        self.q_write = q_write
+        self.q_analyze = q_analyze
+        self.q_log = q_log
+        self.streamer_count = streamer_count
+        self.analyzer_count = analyzer_count
+        self.dir_audio = dir_audio
+
+        self.timer_analysis = Timer()
+        self.timer_bottleneck = Timer()
+
+        self.model = None
+        self.embedder = None
+
+
+    def __call__(self):
+        self.run()
+
+    def _initialize_models(self):
+        # lazy load because models can't be pickled
+        self.model = load_model(self.modelname)
+        self.embedder = load_embedder(embeddername=self.embeddername, framehop_prop=self.framehop_prop, load_model=True)
+
+    def _managememory(self):
+        if self.processor == 'CPU':
+            tf.config.set_visible_devices([], 'GPU')
+            visible_devices = tf.config.get_visible_devices()
+            for device in visible_devices:
+                assert device.device_type != 'GPU'
+        elif self.processor == 'GPU':
+            # let memory grow when processing on GPU
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            if not gpus:
+                warnings.warn("GPU not found; using CPU")
+                self.processor = 'CPU'
+            else:
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
-            except RuntimeError as e:
-                print(e)
 
-    printlog(f"analyzer {id_analyzer}: processing on {processor}", q_log=q_log, level='INFO')
+            if len(gpus) > 1:
+                warnings.warn("multi-processing on GPU is not yet explicitly supported; ")
 
-    def analyze_assignment(path_audio, samples, chunk):
-        embeddings = embedder.embed(samples)
-        results = model(embeddings)['dense'] # hmm...
+        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: processing on {self.processor}", level='INFO'))
+
+
+    def report_rate(self, chunk, path_audio):
+        chunk_duration = chunk[1] - chunk[0]
+
+        self.timer_analysis.stop()
+        analysis_rate = (chunk_duration / self.timer_analysis.get_total()).__round__(1)
+        path_short = re.sub(self.dir_audio, '', path_audio)
+
+        msg = (f"analyzer {self.id_analyzer}: analyzed {path_short}, "
+                 f"chunk ({float(chunk[0])}, {float(chunk[1])}) "
+                 f"in {self.timer_analysis.get_total()}s (rate: {analysis_rate})")
+
+        self.q_log.put(AssignLog(msg=msg, level='INFO'))
+
+        self.timer_analysis.restart()
+
+    def analyze_assignment(self, assignment: AssignAnalyze):
+        embeddings = self.embedder.embed(assignment.samples)
+        results = self.model(embeddings)['dense'] # hmm...
         # the results are a dict now. That's either because of Keras 3 and it's new standard behavior,
         # or it's the result of converting the Keras 2 models I'm currenlty testing to K3.
         # will the output always have the 'dense' key? I dunno! But if you see an error later,
@@ -215,74 +315,43 @@ def worker_analyzer(id_analyzer, processor, modelname, embeddername, framehop_pr
         # TODO: change models to modular based on ABC, like embedders;
         # that will let us handle idiosyncracies
 
-        q_write.put({
-            'path_audio': path_audio,
-            'chunk': chunk,
-            'results': results
-        })
+        self.q_write.put(AssignWrite(path_audio=assignment.path_audio, chunk=assignment.chunk, results=results))
+        self.report_rate(assignment.chunk, assignment.path_audio)
 
-        chunk_duration = chunk[1] - chunk[0]
 
-        timer_analysis.stop()
-        analysis_rate = (chunk_duration / timer_analysis.get_total()).__round__(1)
-        path_short = re.sub(dir_audio, '', path_audio)
+    def run(self):
+        self._initialize_models()
+        def loop_waiting():
+            self.timer_bottleneck.restart()
+            while True:
+                try:
+                    assignment = self.q_analyze.get(timeout=5)
+                    self.timer_bottleneck.stop()
+                    msg = f"BUFFER BOTTLENECK: analyzer {self.id_analyzer} received assignment after {self.timer_bottleneck.get_total().__round__(1)}s"
+                    self.q_log.put(AssignLog(msg=msg, level='DEBUG'))
+                    self.analyze_assignment(assignment)
+                    return 'running'
+                except Empty:
+                    # Check if streamers are still active using shared counter
+                    with self.streamer_count.get_lock():
+                        current_streamer_count = self.streamer_count.value
 
-        printlog(f"analyzer {id_analyzer}: analyzed {path_short}, "
-                 f"chunk ({float(chunk[0])}, {float(chunk[1])}) "
-                 f"in {timer_analysis.get_total()}s (rate: {analysis_rate})", q_log, level='INFO')
+                    if current_streamer_count > 0:
+                        continue
+                    else:
+                        return 'TERMINATE'
 
-        timer_analysis.restart()
-
-    # ready model
-    model = load_model(modelname)
-    embedder = load_embedder(embeddername=embeddername, framehop_prop=framehop_prop, load_model=True)
-    warnings.warn('you still have to solve embedders not loading their models, at least for k2')
-    embedder.load()
-
-    timer_analysis = Timer()
-    timer_bottleneck = Timer()
-
-    def loop_waiting():
-        timer_bottleneck.restart()
         while True:
             try:
-                assignment = q_assignments.get(timeout=5)
-                timer_bottleneck.stop()
-                printlog(
-                    f"BUFFER BOTTLENECK: analyzer {id_analyzer} received assignment after {timer_bottleneck.get_total().__round__(1)}s",
-                    q_log=q_log, level='DEBUG')
-                analyze_assignment(
-                    path_audio=assignment['path_audio'],
-                    samples=assignment['samples'],
-                    chunk=assignment['chunk']
-                )
-                return
+                self.analyze_assignment(self.q_analyze.get(timeout=0))
             except Empty:
-                # Check if streamers are still active using shared counter
-                with streamer_count.get_lock():
-                    current_streamer_count = streamer_count.value
+                state = loop_waiting()
+                if state == 'TERMINATE':
+                    break
+        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: terminating", level='INFO'))
 
-                if current_streamer_count > 0:
-                    continue
-                else:
-                    return 'TERMINATE'
+        # Decrement analyzer count
+        with self.analyzer_count.get_lock():
+            self.analyzer_count.value -= 1
 
-    while True:
-        try:
-            assignment = q_assignments.get(timeout=0)
-            analyze_assignment(
-                path_audio=assignment['path_audio'],
-                samples=assignment['samples'],
-                chunk=assignment['chunk']
-            )
-        except Empty:
-            state = loop_waiting()
-            if state == 'TERMINATE':
-                break
-
-    printlog(f"analyzer {id_analyzer}: terminating", q_log, level='INFO')
-
-    # Decrement analyzer count
-    with analyzer_count.get_lock():
-        analyzer_count.value -= 1
 

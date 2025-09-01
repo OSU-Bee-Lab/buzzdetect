@@ -1,29 +1,34 @@
 import multiprocessing
+import os
+import time
+
+os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 # Set the multiprocessing start method to 'spawn' for Windows compatibility
 # This must be done before any other multiprocessing operations
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
 
-import os
-os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
-
 from buzzcode.utils import search_dir, Timer, setthreads
-
 setthreads(1)
-
 from buzzcode.embedding.load_embedder import load_embedder
 from buzzcode.analysis.coverage import chunklist_from_base
 from buzzcode.audio import get_duration
+from datetime import datetime
 import buzzcode.config as cfg
 import json
 import re
-from datetime import datetime
 
 import soundfile as sf
 
-from buzzcode.analysis.workers import printlog, worker_logger, worker_streamer, worker_writer, worker_analyzer
+from buzzcode.analysis.workers import WorkerStreamer, WorkerWriter, WorkerAnalyzer, WorkerLogger
+from buzzcode.analysis.assignments import AssignLog, AssignStream
 from buzzcode.training.test import pull_sx
 
+
+# helper function since it's hard to pickle otherwise
+def run_worker(workerclass, **kwargs):
+    worker = workerclass(**kwargs)
+    worker()
 
 def analyze(
         modelname: str,
@@ -123,43 +128,47 @@ def analyze(
 
     # interprocess communication using spawn context
     q_log = ctx.Queue()
-    q_control = ctx.Queue()
+    q_stream = ctx.Queue()
     q_write = ctx.Queue()
 
-    shutdown_event = ctx.Event()
+    event_analysisdone = ctx.Event()
+    event_closelogger = ctx.Event()
 
     # Logging
     log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
     path_log = os.path.join(dir_out, f"log {log_timestamp}.log")
     os.makedirs(os.path.dirname(path_log), exist_ok=True)
-    args_logger = {
-        'path_log': path_log,
-        'q_log': q_log,
-        'shutdown_event': shutdown_event,
-        'verbosity': verbosity
-    }
 
-    proc_logger = ctx.Process(target=worker_logger, kwargs=args_logger)
+    proc_logger = ctx.Process(
+        target=run_worker,
+        name='logger_proc',
+        kwargs={
+            'workerclass': WorkerLogger,
+            'q_log': q_log,
+            'path_log': path_log,
+            'event_closelogger': event_closelogger,
+            'verbosity': verbosity
+        }
+    )
     proc_logger.start()
 
     if framehop_prop > 1:
-        printlog(
+        msg = (
             'Currently, analyses with framehop > 1 will produce valid results,'
             'but buzzdetect will interpret the resulting gaps as errors.'
             f'Fully analyzed files will not be converted from {cfg.SUFFIX_RESULT_PARTIAL} to {cfg.SUFFIX_RESULT_COMPLETE}.'
-            f'Repeated analysis will attempt to fill gaps between frames.',
-            q_log, level='WARNING'
+            f'Repeated analysis will attempt to fill gaps between frames.'
         )
+        q_log.put(AssignLog(msg=msg, level='WARNING'))
 
     # Build chunklists
     paths_audio_raw = search_dir(dir_audio, list(sf.available_formats().keys()))
     if len(paths_audio_raw) == 0:
-        m = f"no compatible audio files found in raw directory {dir_audio} \n" \
+        msg = f"no compatible audio files found in raw directory {dir_audio} \n" \
             f"audio format must be compatible with soundfile module version {sf.__version__} \n" \
             f"exiting analysis"
-
-        printlog(m, q_log, level='ERROR')
-        shutdown_event.set()  # Signal shutdown directly
+        q_log.put(AssignLog(msg=msg, level='ERROR'))
+        event_analysisdone.set()  # Signal shutdown directly
         proc_logger.join()
         return
 
@@ -173,21 +182,21 @@ def analyze(
         paths_audio.append(path_audio)
 
     if not paths_audio:
-        m = f"all files in {dir_audio} are fully analyzed; exiting analysis"
-        printlog(m, q_log, level='WARNING')
-        shutdown_event.set()
+        msg = f"all files in {dir_audio} are fully analyzed; exiting analysis"
+        q_log.put(AssignLog(msg=msg, level='WARNING'))
+        event_analysisdone.set()
         proc_logger.join()
         return
 
-    control = []
+    a_stream_list = []
     for path_audio in paths_audio:
         if os.path.getsize(path_audio) < 5000:
-            printlog(f'file too small, skipping: {path_audio}', q_log, level='WARNING')
+            q_log.put(AssignLog(msg=f'file too small, skipping: {path_audio}', level='WARNING'))
             continue
 
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
-        printlog(f"checking results for {re.sub(dir_out, '', base_out)}", q_log, level='INFO')
+        q_log.put(AssignLog(msg=f'checking results for {re.sub(dir_out, "", base_out)}', level='INFO'))
         duration_audio = get_duration(path_audio)
 
         chunklist = chunklist_from_base(
@@ -200,19 +209,23 @@ def analyze(
         if not chunklist:
             continue
 
-        control.append({
-            'path_audio': path_audio,
-            'chunklist': chunklist,
-            'duration_audio': duration_audio
-        })
 
-    if not control:
-        printlog(f"all files in {dir_audio} are fully analyzed; exiting analysis", q_log, level='WARNING')
-        shutdown_event.set()  # Signal shutdown directly
+        a_stream_list.append(
+            AssignStream(
+                path_audio=path_audio,
+                chunklist=chunklist,
+                duration_audio=duration_audio,
+                terminate=False
+            )
+        )
+
+    if not a_stream_list:
+        q_log.put(AssignLog(msg=f'all files in {dir_audio} are fully analyzed; exiting analysis', level='WARNING'))
+        event_analysisdone.set()  # Signal shutdown directly
         proc_logger.join()
         return
 
-    n_paths = len(set([c['path_audio'] for c in control]))
+    n_paths = len(set([a.path_audio for a in a_stream_list]))
 
     if concurrent_streamers > n_paths:
         concurrent_streamers = n_paths
@@ -222,85 +235,114 @@ def analyze(
     analyzer_count = ctx.Value('i', cpus + (1 if gpu else 0))
 
     # load control into the queue
-    for c in control:
-        q_control.put(c)
+    for a in a_stream_list:
+        q_stream.put(a)
 
     # send sentinel for streamers
+    assign_streamend = AssignStream(path_audio=None, duration_audio=None, chunklist=None, terminate=True)
     for _ in range(concurrent_streamers):
-        q_control.put('TERMINATE')
+        q_stream.put(assign_streamend)
 
-    q_assignments = ctx.Queue(maxsize=stream_buffer_depth)
+    q_analyze = ctx.Queue(maxsize=stream_buffer_depth)
 
     # Launch processes
-    printlog(
+    msg = (
         f"begin analysis\n"
         f"start time: {timer_total.time_start}\n"
         f"input directory: {dir_audio}\n"
         f"model: {modelname}\n"
         f"CPU count: {cpus}\n"
-        f"GPU: {gpu}\n",
-        q_log=q_log,
-        level='INFO'
+        f"GPU: {gpu}\n"
     )
+    q_log.put(AssignLog(msg=msg, level='INFO'))
 
-    args_writer = {
-        'analyzer_count': analyzer_count,
-        'q_write': q_write,
-        'classes': config_model['classes'],
-        'classes_out': classes_out,
-        'threshold': threshold,
-        'framehop_s': embedder_noload.framehop_s,
-        'digits_time': embedder_noload.digits_time,
-        'dir_audio': dir_audio,
-        'dir_out': dir_out,
-        'q_log': q_log,
-        'shutdown_event': shutdown_event
-    }
-    proc_writer = ctx.Process(target=worker_writer, name='writer_proc', kwargs=args_writer)
+    proc_writer = ctx.Process(
+        target=run_worker,
+        name='writer_proc',
+        kwargs={
+            'workerclass': WorkerWriter,
+            'classes_out': classes_out,
+            'threshold': threshold,
+            'analyzer_count': analyzer_count,
+            'q_write': q_write,
+            'classes': config_model['classes'],
+            'framehop_s': embedder_noload.framehop_s,
+            'digits_time': embedder_noload.digits_time,
+            'dir_audio': dir_audio,
+            'dir_out': dir_out,
+            'q_log': q_log,
+            'event_analysisdone': event_analysisdone,
+            'digits_results': config_model['digits_results']
+        }
+    )
     proc_writer.start()
-
-    args_streamer = {
-        'streamer_count': streamer_count,
-        'q_control': q_control,
-        'q_assignments': q_assignments,
-        'q_log': q_log,
-        'resample_rate': embedder_noload.samplerate
-    }
 
     proc_streamers = []
     for s in range(concurrent_streamers):
-        proc_streamers.append(
-            ctx.Process(target=worker_streamer, name=f'streamer_proc{s}', args=[s], kwargs=args_streamer))
+        proc_streamer = ctx.Process(
+            target=run_worker,
+            name=f'streamer_proc{s}',
+            kwargs={
+                'workerclass': WorkerStreamer,
+                'id_streamer': s,
+                'streamer_count': streamer_count,
+                'q_stream': q_stream,
+                'q_analyze': q_analyze,
+                'q_log': q_log,
+                'resample_rate': embedder_noload.samplerate,
+            }
+        )
+
+        proc_streamers.append(proc_streamer)
         proc_streamers[-1].start()
 
-    args_analyzer = {
-        'modelname': modelname,
-        'embeddername': config_model['embeddername'],
-        'framehop_prop': embedder_noload.framehop_prop,
-        'q_write': q_write,
-        'q_assignments': q_assignments,
-        'q_log': q_log,
-        'streamer_count': streamer_count,
-        'analyzer_count': analyzer_count,
-        'dir_audio': dir_audio
-    }
+
     proc_analyzers = []
     for a in range(cpus):
-        proc_analyzers.append(
-            ctx.Process(target=worker_analyzer, name=f"analysis_proc{a}", args=([a, 'CPU']),
-                        kwargs=args_analyzer))
+        proc_analyzer = ctx.Process(
+            target=run_worker,
+            name=f"analysis_proc{a}",
+            kwargs={
+                'workerclass': WorkerAnalyzer,
+                'id_analyzer': a,
+                'processor': 'CPU',
+                'modelname': modelname,
+                'embeddername': config_model['embeddername'],
+                'framehop_prop': framehop_prop,
+                'q_write': q_write,
+                'q_analyze': q_analyze,
+                'q_log': q_log,
+                'streamer_count': streamer_count,
+                'analyzer_count': analyzer_count,
+                'dir_audio': dir_audio
+            }
+        )
+        
+        proc_analyzers.append(proc_analyzer)
         proc_analyzers[-1].start()
     
     if gpu:
-        worker_analyzer('G', 'GPU', **args_analyzer)
+        WorkerAnalyzer(
+            id_analyzer='g',
+            processor='GPU',
+            modelname=modelname,
+            embeddername=config_model['embeddername'],
+            framehop_prop=framehop_prop,
+            q_write=q_write,
+            q_analyze=q_analyze,
+            q_log=q_log,
+            streamer_count=streamer_count,
+            analyzer_count=analyzer_count,
+            dir_audio=dir_audio
+        )()  # call, blocking main thread in execution until analysis is finished
 
     # wait for analysis to finish
     # TODO: separate logger closing from files finishing
-    proc_logger.join()
+    event_analysisdone.wait()
 
     # on terminate, clean up chunks
-    for c in control:
-        path_audio = c['path_audio']
+    for a in a_stream_list:
+        path_audio = a.path_audio
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
 
@@ -315,8 +357,9 @@ def analyze(
     timer_total.stop()
 
     # TODO: after seperating logger closing from analysis finishing, move this to log
-    closing_message = f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s"
-    print(closing_message)
+    q_log.put(AssignLog(msg=f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s", level='INFO'))
+    event_closelogger.set()
+    proc_logger.join()
 
     return
 
@@ -325,8 +368,9 @@ if __name__ == "__main__":
     analyze(
         modelname='model_general_v3',
         classes_out='all',
-        cpus=5,
+        dir_audio='/Users/luke/Documents/code projects/buzzdetect_repository/data/raw/full_recordings',
+        cpus=4,
         framehop_prop=1,
-        chunklength=180,
+        chunklength=500,
         verbosity='DEBUG'
     )

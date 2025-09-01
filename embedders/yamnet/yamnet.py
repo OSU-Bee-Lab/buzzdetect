@@ -16,10 +16,7 @@
 
 """Core model definition of YAMNet."""
 
-import csv
 import keras
-
-import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Model, layers
 
@@ -154,12 +151,13 @@ class WaveformFeatures(layers.Layer):
             p = types.SimpleNamespace(**params_cfg)
             return cls(p)
 
-    @tf.function
     def call(self, waveform):
-        padded = features_lib.pad_waveform(waveform, self.params)
-        log_mel_spectrogram, features = features_lib.waveform_to_log_mel_spectrogram_patches(
-            padded, self.params)
-        return log_mel_spectrogram, features
+        with tf.name_scope('waveform_processing'):
+            padded = features_lib.pad_waveform(waveform, self.params)
+            log_mel_spectrogram, features = features_lib.waveform_to_log_mel_spectrogram_patches(
+                padded, self.params)
+            return log_mel_spectrogram, features
+
 
 
 def yamnet_frames_model(params):
@@ -181,4 +179,9 @@ def yamnet_frames_model(params):
   frames_model = Model(
       name='yamnet_frames', inputs=waveform,
       outputs=[predictions, embeddings, log_mel_spectrogram])
+
+  # CHANGE: explicitly enable memory optimization
+  if hasattr(frames_model, 'run_eagerly'):
+      frames_model.run_eagerly = False
+
   return frames_model
