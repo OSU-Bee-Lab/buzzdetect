@@ -19,8 +19,9 @@ class EmbedderYamnetK2(BaseEmbedder):
             dir_model = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'models/yamnet_halfhop')
         else:
             raise ValueError('For Keras 2 YAMNet, framehop_prop must be 1 or 0.5')
+            # TODO: hop on command; totally worth it with how much faster k2 is
 
-        self.model = TFSMLayer(dir_model, call_endpoint='serving_default')
+        return TFSMLayer(dir_model, call_endpoint='serving_default')
 
 
     def embed(self, audio):
