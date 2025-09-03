@@ -7,7 +7,7 @@ from buzzcode.utils import setthreads
 
 setthreads(1)
 
-def load_embedder(embeddername: str, framehop_prop: float, load_model: bool):
+def load_embedder(embeddername: str, framehop_prop: float, initialize: bool):
     """
     Generic function to load any embedder by name.
 
@@ -43,7 +43,7 @@ def load_embedder(embeddername: str, framehop_prop: float, load_model: bool):
     # Instantiate and load
     embedder = embedder_class(framehop_prop=framehop_prop)
 
-    if load_model:
-        embedder.model = embedder.load()
+    if initialize:
+        embedder.initialize()
 
     return embedder

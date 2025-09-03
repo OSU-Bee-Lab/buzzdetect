@@ -11,8 +11,8 @@ import pandas as pd
 import soundfile as sf
 
 import buzzcode.config as cfg
-from buzzcode.analysis.analysis import format_activations
-from buzzcode.analysis.models import load_model, load_model_config
+from buzzcode.analysis.formatting import format_activations
+from buzzcode.models.load_model import load_model
 from buzzcode.utils import search_dir, build_ident
 
 framehop_prop_test = 1

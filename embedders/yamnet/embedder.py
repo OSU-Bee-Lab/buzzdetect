@@ -17,7 +17,7 @@ class EmbedderYamnet(BaseEmbedder):
     n_embeddings = 1024
     dtype_in = 'float32'
 
-    def load(self):
+    def initialize(self):
         """Load the YAMNet model from TensorFlow Hub"""
         curdir = os.path.dirname(os.path.realpath(__file__))
         model_path = os.path.join(curdir, 'yamnet.keras')

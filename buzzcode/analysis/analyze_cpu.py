@@ -1,8 +1,6 @@
 import multiprocessing
 import os
-import time
 
-os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
 # Set the multiprocessing start method to 'spawn' for Windows compatibility
 # This must be done before any other multiprocessing operations
 if __name__ == "__main__":
@@ -10,35 +8,30 @@ if __name__ == "__main__":
 
 from buzzcode.utils import search_dir, Timer, setthreads
 setthreads(1)
-from buzzcode.embedding.load_embedder import load_embedder
 from buzzcode.analysis.coverage import chunklist_from_base
 from buzzcode.audio import get_duration
 from datetime import datetime
 import buzzcode.config as cfg
-import json
 import re
 
 import soundfile as sf
 
 from buzzcode.analysis.workers import WorkerStreamer, WorkerWriter, WorkerAnalyzer, WorkerLogger
+from buzzcode.analysis.analysis import run_worker, early_exit
 from buzzcode.analysis.assignments import AssignLog, AssignStream
 from buzzcode.training.test import pull_sx
+from buzzcode.models.load_model import load_model
 
 
-# helper function since it's hard to pickle otherwise
-def run_worker(workerclass, **kwargs):
-    worker = workerclass(**kwargs)
-    worker()
-
-def analyze(
+def analyze_cpu(
         modelname: str,
         classes_out: list = None,
         precision: float = None,
         framehop_prop: float = 1,
         chunklength: float = 1000,
         cpus: int = 2,
-        gpu: bool = False,
         concurrent_streamers: int = None,
+        stream_buffer_depth: int = None,
         dir_audio: str = cfg.DIR_AUDIO,
         dir_out: str = None,
         verbosity: str = 'INFO'
@@ -66,12 +59,14 @@ def analyze(
         Length of audio chunks in seconds, by default 1000. Try different values to tune for your machine.
     cpus : int, optional
         Number of CPU cores to use, by default 2
-    gpu : bool, optional
-        Whether to use GPU for processing, by default False
     concurrent_streamers : int, optional
         The number of simultaneous workers to read audio files, by default None
         If None, attempts to calculate a reasonable number of workers. If you're using GPU,
         you may need to significantly increase this number to keep the GPU fed.
+    stream_buffer_depth : int, optional
+        How many chunks should the streaming queue hold? If 1, only one streamer can enqueue at a time.
+        Max RAM utilizaiton will be (concurrent streamers + stream_buffer_depth) * chunklength, since
+        each streamer will hold 1 chunk while waiting to enqueue.
     dir_audio : str, optional
         Directory containing audio files to analyze, by default DIR_AUDIO (see config.py)
     dir_out : str, optional
@@ -99,9 +94,6 @@ def analyze(
     if not os.path.exists(dir_model):
         raise FileNotFoundError(f'model {modelname} not found in model directory')
 
-    with open(os.path.join(dir_model, 'config_model.txt'), 'r') as file:
-        config_model = json.load(file)
-
     if dir_out is None:
         dir_out = os.path.join(dir_model, cfg.SUBDIR_OUTPUT)
 
@@ -110,18 +102,17 @@ def analyze(
     else:
         threshold = pull_sx(modelname, precision)['threshold']
 
-    embedder_noload = load_embedder(embeddername=config_model['embeddername'], framehop_prop=framehop_prop, load_model=False)
+    model_noload = load_model(modelname=modelname, framehop_prop=framehop_prop, initialize=False)
     # rounding to nearest frame allows for seamless chunks
-    chunklength = round(chunklength / embedder_noload.framelength_s) * embedder_noload.framelength_s
-    chunklength = round(chunklength, embedder_noload.digits_time)
+    chunklength = round(chunklength / model_noload.embedder.framelength_s) * model_noload.embedder.framelength_s
+    chunklength = round(chunklength, model_noload.embedder.digits_time)
 
     # processing control
     if concurrent_streamers is None:
-        if not gpu:
-            concurrent_streamers = max(int(cpus / 2), 1)
-        else:
-            concurrent_streamers = 8
-    stream_buffer_depth = concurrent_streamers
+        concurrent_streamers = max(cpus, 1)
+
+    if stream_buffer_depth is None:
+        stream_buffer_depth = concurrent_streamers*2
 
     # Create multiprocessing context for spawn
     ctx = multiprocessing.get_context('spawn')
@@ -129,6 +120,7 @@ def analyze(
     # interprocess communication using spawn context
     q_log = ctx.Queue()
     q_stream = ctx.Queue()
+    q_analyze = ctx.Queue(maxsize=stream_buffer_depth)
     q_write = ctx.Queue()
 
     event_analysisdone = ctx.Event()
@@ -168,8 +160,8 @@ def analyze(
             f"audio format must be compatible with soundfile module version {sf.__version__} \n" \
             f"exiting analysis"
         q_log.put(AssignLog(msg=msg, level='ERROR'))
-        event_analysisdone.set()  # Signal shutdown directly
-        proc_logger.join()
+
+        early_exit(msg=msg, level='ERROR', event_analysisdone=event_analysisdone, event_closelogger=event_closelogger, proc_logger=proc_logger, q_log=q_log)
         return
 
     paths_audio = []
@@ -202,7 +194,7 @@ def analyze(
         chunklist = chunklist_from_base(
             base_out=base_out,
             duration_audio=duration_audio,
-            framelength_s=embedder_noload.framelength_s,
+            framelength_s=model_noload.embedder.framelength_s,
             chunklength=chunklength
         )
 
@@ -227,12 +219,11 @@ def analyze(
 
     n_paths = len(set([a.path_audio for a in a_stream_list]))
 
-    if concurrent_streamers > n_paths:
-        concurrent_streamers = n_paths
-    if cpus > n_paths:
-        cpus = n_paths
+    concurrent_streamers = min(concurrent_streamers, n_paths)
+    concurrent_analyzers = min(cpus, n_paths)
+
     streamer_count = ctx.Value('i', concurrent_streamers)
-    analyzer_count = ctx.Value('i', cpus + (1 if gpu else 0))
+    analyzer_count = ctx.Value('i', concurrent_analyzers)
 
     # load control into the queue
     for a in a_stream_list:
@@ -243,16 +234,12 @@ def analyze(
     for _ in range(concurrent_streamers):
         q_stream.put(assign_streamend)
 
-    q_analyze = ctx.Queue(maxsize=stream_buffer_depth)
-
     # Launch processes
     msg = (
         f"begin analysis\n"
         f"start time: {timer_total.time_start}\n"
         f"input directory: {dir_audio}\n"
         f"model: {modelname}\n"
-        f"CPU count: {cpus}\n"
-        f"GPU: {gpu}\n"
     )
     q_log.put(AssignLog(msg=msg, level='INFO'))
 
@@ -265,14 +252,14 @@ def analyze(
             'threshold': threshold,
             'analyzer_count': analyzer_count,
             'q_write': q_write,
-            'classes': config_model['classes'],
-            'framehop_s': embedder_noload.framehop_s,
-            'digits_time': embedder_noload.digits_time,
+            'classes': model_noload.config['classes'],
+            'framehop_s': model_noload.embedder.framehop_s,
+            'digits_time': model_noload.embedder.digits_time,
             'dir_audio': dir_audio,
             'dir_out': dir_out,
             'q_log': q_log,
             'event_analysisdone': event_analysisdone,
-            'digits_results': config_model['digits_results']
+            'digits_results': model_noload.config['digits_results']
         }
     )
     proc_writer.start()
@@ -289,7 +276,7 @@ def analyze(
                 'q_stream': q_stream,
                 'q_analyze': q_analyze,
                 'q_log': q_log,
-                'resample_rate': embedder_noload.samplerate,
+                'resample_rate': model_noload.embedder.samplerate,
             }
         )
 
@@ -307,7 +294,6 @@ def analyze(
                 'id_analyzer': a,
                 'processor': 'CPU',
                 'modelname': modelname,
-                'embeddername': config_model['embeddername'],
                 'framehop_prop': framehop_prop,
                 'q_write': q_write,
                 'q_analyze': q_analyze,
@@ -320,27 +306,9 @@ def analyze(
         
         proc_analyzers.append(proc_analyzer)
         proc_analyzers[-1].start()
-    
-    if gpu:
-        WorkerAnalyzer(
-            id_analyzer='g',
-            processor='GPU',
-            modelname=modelname,
-            embeddername=config_model['embeddername'],
-            framehop_prop=framehop_prop,
-            q_write=q_write,
-            q_analyze=q_analyze,
-            q_log=q_log,
-            streamer_count=streamer_count,
-            analyzer_count=analyzer_count,
-            dir_audio=dir_audio
-        )()  # call, blocking main thread in execution until analysis is finished
 
-    # wait for analysis to finish
-    # TODO: separate logger closing from files finishing
     event_analysisdone.wait()
 
-    # on terminate, clean up chunks
     for a in a_stream_list:
         path_audio = a.path_audio
         base_out = re.sub(dir_audio, dir_out, path_audio)
@@ -349,7 +317,7 @@ def analyze(
         chunklist_from_base(
             base_out=base_out,
             duration_audio=get_duration(path_audio),
-            framelength_s=embedder_noload.framelength_s,
+            framelength_s=model_noload.embedder.framelength_s,
             chunklength=chunklength
         )
         # Note: Can't use printlog here as logger has already exited
@@ -365,12 +333,11 @@ def analyze(
 
 
 if __name__ == "__main__":
-    analyze(
+    analyze_cpu(
         modelname='model_general_v3',
         classes_out='all',
-        dir_audio='/Users/luke/Documents/code projects/buzzdetect_repository/data/raw/full_recordings',
-        cpus=4,
+        cpus=3,
         framehop_prop=1,
-        chunklength=500,
+        chunklength=200,
         verbosity='DEBUG'
     )

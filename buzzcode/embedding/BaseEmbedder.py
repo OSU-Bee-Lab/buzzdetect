@@ -23,7 +23,7 @@ class BaseEmbedder(ABC):
         self.model = None
 
     @abstractmethod
-    def load(self):
+    def initialize(self):
         """Load embedding model; set load_model=False if you just need attributes"""
         pass
 

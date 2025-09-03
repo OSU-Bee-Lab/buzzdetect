@@ -1,23 +1,21 @@
 import logging
 import os
 import re
+import warnings
 from _queue import Empty
+from queue import Queue
 
 import librosa
 import numpy as np
 import soundfile as sf
-
 import tensorflow as tf
-import warnings
 
-from buzzcode.analysis.analysis import format_activations, format_detections
 from buzzcode.analysis.assignments import AssignLog, AssignStream, AssignAnalyze, AssignWrite
-from buzzcode.analysis.models import load_model
+from buzzcode.analysis.formatting import format_activations, format_detections
 from buzzcode.audio import handle_badread
 from buzzcode.config import SUFFIX_RESULT_PARTIAL
-from buzzcode.embedding.load_embedder import load_embedder
+from buzzcode.models.load_model import load_model
 from buzzcode.utils import Timer
-from queue import Queue
 
 
 # source code modified from Sergey Pleshakov's code here: https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
@@ -239,12 +237,11 @@ class WorkerWriter:
 
 
 class WorkerAnalyzer:
-    def __init__(self, id_analyzer, processor, modelname, embeddername, framehop_prop, q_write: Queue[AssignWrite], q_analyze: Queue[
+    def __init__(self, id_analyzer, processor, modelname, framehop_prop, q_write: Queue[AssignWrite], q_analyze: Queue[
         AssignAnalyze], q_log, streamer_count, analyzer_count, dir_audio):
         self.id_analyzer = id_analyzer
         self.processor = processor
         self.modelname = modelname
-        self.embeddername = embeddername
         self.framehop_prop = framehop_prop
         self.q_write = q_write
         self.q_analyze = q_analyze
@@ -257,16 +254,14 @@ class WorkerAnalyzer:
         self.timer_bottleneck = Timer()
 
         self.model = None
-        self.embedder = None
 
 
     def __call__(self):
         self.run()
 
-    def _initialize_models(self):
+    def _initialize_model(self):
         # lazy load because models can't be pickled
-        self.model = load_model(self.modelname)
-        self.embedder = load_embedder(embeddername=self.embeddername, framehop_prop=self.framehop_prop, load_model=True)
+        self.model = load_model(self.modelname, framehop_prop=self.framehop_prop, initialize=True)
 
     def _managememory(self):
         if self.processor == 'CPU':
@@ -306,21 +301,14 @@ class WorkerAnalyzer:
         self.timer_analysis.restart()
 
     def analyze_assignment(self, assignment: AssignAnalyze):
-        embeddings = self.embedder.embed(assignment.samples)
-        results = self.model(embeddings)['dense'] # hmm...
-        # the results are a dict now. That's either because of Keras 3 and it's new standard behavior,
-        # or it's the result of converting the Keras 2 models I'm currenlty testing to K3.
-        # will the output always have the 'dense' key? I dunno! But if you see an error later,
-        # check the class/shape/keys of these results.
-        # TODO: change models to modular based on ABC, like embedders;
-        # that will let us handle idiosyncracies
+        results = self.model.predict(assignment.samples)
 
         self.q_write.put(AssignWrite(path_audio=assignment.path_audio, chunk=assignment.chunk, results=results))
         self.report_rate(assignment.chunk, assignment.path_audio)
 
 
     def run(self):
-        self._initialize_models()
+        self._initialize_model()
         def loop_waiting():
             self.timer_bottleneck.restart()
             while True:
