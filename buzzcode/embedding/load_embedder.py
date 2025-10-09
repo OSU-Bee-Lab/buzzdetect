@@ -3,9 +3,7 @@ from pathlib import Path
 
 import buzzcode.config as cfg
 from buzzcode.embedding.BaseEmbedder import BaseEmbedder
-from buzzcode.utils import setthreads
 
-setthreads(1)
 
 def load_embedder(embeddername: str, framehop_prop: float, initialize: bool):
     """
