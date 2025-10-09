@@ -1,5 +1,5 @@
 # Sphinx configuration
-version: 1.0.1
+version: 2
 build:
   os: macos-sequoia-15.6.1
   tools:
