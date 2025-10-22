@@ -150,7 +150,7 @@ def analyze_cpu(
             f'Fully analyzed files will not be converted from {cfg.SUFFIX_RESULT_PARTIAL} to {cfg.SUFFIX_RESULT_COMPLETE}.'
             f'Repeated analysis will attempt to fill gaps between frames.'
         )
-        q_log.put(AssignLog(msg=msg, level='WARNING'))
+        q_log.put(AssignLog(msg=msg, level_str='WARNING'))
 
     # Build chunklists
     paths_audio_raw = search_dir(dir_audio, list(sf.available_formats().keys()))
@@ -158,7 +158,7 @@ def analyze_cpu(
         msg = f"no compatible audio files found in raw directory {dir_audio} \n" \
             f"audio format must be compatible with soundfile module version {sf.__version__} \n" \
             f"exiting analysis"
-        q_log.put(AssignLog(msg=msg, level='ERROR'))
+        q_log.put(AssignLog(msg=msg, level_str='ERROR'))
 
         early_exit(msg=msg, level='ERROR', event_analysisdone=event_analysisdone, event_closelogger=event_closelogger, proc_logger=proc_logger, q_log=q_log)
         return
@@ -174,7 +174,7 @@ def analyze_cpu(
 
     if not paths_audio:
         msg = f"all files in {dir_audio} are fully analyzed; exiting analysis"
-        q_log.put(AssignLog(msg=msg, level='WARNING'))
+        q_log.put(AssignLog(msg=msg, level_str='WARNING'))
         event_analysisdone.set()
         proc_logger.join()
         return
@@ -182,12 +182,12 @@ def analyze_cpu(
     a_stream_list = []
     for path_audio in paths_audio:
         if os.path.getsize(path_audio) < 5000:
-            q_log.put(AssignLog(msg=f'file too small, skipping: {path_audio}', level='WARNING'))
+            q_log.put(AssignLog(msg=f'file too small, skipping: {path_audio}', level_str='WARNING'))
             continue
 
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
-        q_log.put(AssignLog(msg=f'checking results for {re.sub(dir_out, "", base_out)}', level='INFO'))
+        q_log.put(AssignLog(msg=f'checking results for {re.sub(dir_out, "", base_out)}', level_str='PROGRESS'))
         duration_audio = get_duration(path_audio)
 
         chunklist = chunklist_from_base(
@@ -206,12 +206,13 @@ def analyze_cpu(
                 path_audio=path_audio,
                 chunklist=chunklist,
                 duration_audio=duration_audio,
-                terminate=False
+                terminate=False,
+                dir_audio=dir_audio
             )
         )
 
     if not a_stream_list:
-        q_log.put(AssignLog(msg=f'all files in {dir_audio} are fully analyzed; exiting analysis', level='WARNING'))
+        q_log.put(AssignLog(msg=f'all files in {dir_audio} are fully analyzed; exiting analysis', level_str='WARNING'))
         event_analysisdone.set()  # Signal shutdown directly
         proc_logger.join()
         return
@@ -240,7 +241,7 @@ def analyze_cpu(
         f"input directory: {dir_audio}\n"
         f"model: {modelname}\n"
     )
-    q_log.put(AssignLog(msg=msg, level='INFO'))
+    q_log.put(AssignLog(msg=msg, level_str='INFO'))
 
     proc_writer = ctx.Process(
         target=run_worker,
@@ -324,7 +325,7 @@ def analyze_cpu(
     timer_total.stop()
 
     # TODO: after seperating logger closing from analysis finishing, move this to log
-    q_log.put(AssignLog(msg=f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s", level='INFO'))
+    q_log.put(AssignLog(msg=f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s", level_str='INFO'))
     event_closelogger.set()
     proc_logger.join()
 
@@ -332,11 +333,13 @@ def analyze_cpu(
 
 
 if __name__ == "__main__":
+    cpus=4
     analyze_cpu(
         modelname='model_general_v3',
         classes_out='all',
-        cpus=3,
+        cpus=cpus,
+        chunklength=250,
+        concurrent_streamers=int(cpus*1.5),
         framehop_prop=1,
-        chunklength=200,
-        verbosity='DEBUG'
+        verbosity='PROGRESS'
     )

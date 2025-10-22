@@ -1,16 +1,12 @@
 import logging
+import re
 
 
 class AssignLog:
-    def __init__(self, msg: str, level):
+    def __init__(self, msg: str, level_str: str):
         self.item = msg
-
-        if level.__class__ is str:
-            self.level_int = log_levels[level]
-        elif level.__class__ is int:
-            self.level_int = level
-        else:
-            raise ValueError(f"level must be str or int, not {level.__class__}")
+        self.level_str = level_str
+        self.level_int = log_levels[level_str]
 
 
 class AssignStream:
@@ -19,7 +15,11 @@ class AssignStream:
         self.duration_audio = duration_audio
         self.chunklist = chunklist
         self.terminate = terminate
-        self.shortpath = None if dir_audio is None else path_audio.replace(dir_audio, '')
+        self.shortpath = None
+
+        if dir_audio is not None:
+            self.shortpath = path_audio.replace(dir_audio, '')
+            self.shortpath = re.sub('^/', '', self.shortpath)
 
 
 class AssignAnalyze:
@@ -36,9 +36,14 @@ class AssignWrite:
         self.results = results
 
 
+level_progress = {'level': logging.DEBUG-5, 'levelName': 'PROGRESS'}
+logging.addLevelName(level=level_progress['level'], levelName=level_progress['levelName'])
 log_levels = {
+    'NOTSET': logging.NOTSET,
+    level_progress['levelName']: level_progress['level'],
     'DEBUG': logging.DEBUG,
     'INFO': logging.INFO,
     'WARNING': logging.WARNING,
     'ERROR': logging.ERROR,
-    'CRITICAL': logging.CRITICAL}
+    'CRITICAL': logging.CRITICAL
+}

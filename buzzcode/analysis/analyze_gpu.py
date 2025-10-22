@@ -166,7 +166,7 @@ def analyze(
             f'Fully analyzed files will not be converted from {cfg.SUFFIX_RESULT_PARTIAL} to {cfg.SUFFIX_RESULT_COMPLETE}.'
             f'Repeated analysis will attempt to fill gaps between frames.'
         )
-        q_log.put(AssignLog(msg=msg, level='WARNING'))
+        q_log.put(AssignLog(msg=msg, level_str='WARNING'))
 
     # Build chunklists
     paths_audio_raw = search_dir(dir_audio, list(sf.available_formats().keys()))
@@ -174,7 +174,7 @@ def analyze(
         msg = f"no compatible audio files found in raw directory {dir_audio} \n" \
             f"audio format must be compatible with soundfile module version {sf.__version__} \n" \
             f"exiting analysis"
-        q_log.put(AssignLog(msg=msg, level='ERROR'))
+        q_log.put(AssignLog(msg=msg, level_str='ERROR'))
         event_analysisdone.set()  # Signal shutdown directly
         proc_logger.join()
         return
@@ -190,7 +190,7 @@ def analyze(
 
     if not paths_audio:
         msg = f"all files in {dir_audio} are fully analyzed; exiting analysis"
-        q_log.put(AssignLog(msg=msg, level='WARNING'))
+        q_log.put(AssignLog(msg=msg, level_str='WARNING'))
         event_analysisdone.set()
         proc_logger.join()
         return
@@ -198,12 +198,12 @@ def analyze(
     a_stream_list = []
     for path_audio in paths_audio:
         if os.path.getsize(path_audio) < 5000:
-            q_log.put(AssignLog(msg=f'file too small, skipping: {path_audio}', level='WARNING'))
+            q_log.put(AssignLog(msg=f'file too small, skipping: {path_audio}', level_str='WARNING'))
             continue
 
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
-        q_log.put(AssignLog(msg=f'checking results for {re.sub(dir_out, "", base_out)}', level='INFO'))
+        q_log.put(AssignLog(msg=f'checking results for {re.sub(dir_out, "", base_out)}', level_str='INFO'))
         duration_audio = get_duration(path_audio)
 
         chunklist = chunklist_from_base(
@@ -227,7 +227,7 @@ def analyze(
         )
 
     if not a_stream_list:
-        q_log.put(AssignLog(msg=f'all files in {dir_audio} are fully analyzed; exiting analysis', level='WARNING'))
+        q_log.put(AssignLog(msg=f'all files in {dir_audio} are fully analyzed; exiting analysis', level_str='WARNING'))
         event_analysisdone.set()  # Signal shutdown directly
         proc_logger.join()
         return
@@ -259,7 +259,7 @@ def analyze(
         f"CPU count: {cpus}\n"
         f"GPU: {gpu}\n"
     )
-    q_log.put(AssignLog(msg=msg, level='INFO'))
+    q_log.put(AssignLog(msg=msg, level_str='INFO'))
 
     proc_writer = ctx.Process(
         target=run_worker,
@@ -362,7 +362,7 @@ def analyze(
     timer_total.stop()
 
     # TODO: after seperating logger closing from analysis finishing, move this to log
-    q_log.put(AssignLog(msg=f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s", level='INFO'))
+    q_log.put(AssignLog(msg=f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s", level_str='INFO'))
     event_closelogger.set()
     proc_logger.join()
 
