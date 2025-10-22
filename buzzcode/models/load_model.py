@@ -3,9 +3,6 @@ from pathlib import Path
 
 import buzzcode.config as cfg
 from buzzcode.models.BaseModel import BaseModel
-from buzzcode.utils import setthreads
-
-setthreads(1)
 
 def load_model(modelname: str, framehop_prop: float, initialize: bool):
     """
