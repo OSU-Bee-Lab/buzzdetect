@@ -10,13 +10,16 @@ import numpy as np
 import soundfile as sf
 import tensorflow as tf
 
-from buzzcode.analysis.assignments import AssignLog, AssignStream, AssignAnalyze, AssignWrite
+from buzzcode.analysis.assignments import AssignLog, AssignStream, AssignAnalyze, AssignWrite, level_progress
 from buzzcode.analysis.formatting import format_activations, format_detections
 from buzzcode.audio import handle_badread
 from buzzcode.config import SUFFIX_RESULT_PARTIAL
 from buzzcode.models.load_model import load_model
 from buzzcode.utils import Timer
 
+class FilterDropProgress(logging.Filter):
+    def filter(self, record):
+        return record.levelno != level_progress['levelName']
 
 # source code modified from Sergey Pleshakov's code here: https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
 # might also consider loguru
@@ -58,7 +61,8 @@ class WorkerLogger:
 
         self.format_file = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         self.handle_file = logging.FileHandler(path_log)
-        self.handle_file.setLevel(logging.DEBUG)  # always write everything to file
+        self.handle_file.setLevel(logging.INFO)
+        self.handle_file.addFilter(FilterDropProgress())
         self.handle_file.setFormatter(self.format_file)
         self.log.addHandler(self.handle_file)
 
@@ -135,11 +139,11 @@ class WorkerStreamer:
     def run(self):
         a_stream = self.q_stream.get()
         while not a_stream.terminate:
-            self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: buffering {a_stream.shortpath}", level='INFO'))
+            self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: buffering {a_stream.shortpath}", level_str='PROGRESS'))
 
             self.stream_to_queue(a_stream)
             a_stream = self.q_stream.get()
-        self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: terminating", level='INFO'))
+        self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: terminating", level_str='INFO'))
 
         # Decrement streamer count
         with self.streamer_count.get_lock():
@@ -231,7 +235,7 @@ class WorkerWriter:
                 else:
                     continue
 
-        self.q_log.put(AssignLog(msg="writer: terminating", level='INFO'))
+        self.q_log.put(AssignLog(msg="writer: terminating", level_str='INFO'))
         self.shutdown_event.set()
 
 
@@ -282,7 +286,7 @@ class WorkerAnalyzer:
             if len(gpus) > 1:
                 warnings.warn("multi-processing on GPU is not yet explicitly supported; ")
 
-        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: processing on {self.processor}", level='INFO'))
+        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: processing on {self.processor}", level_str='INFO'))
 
 
     def report_rate(self, chunk, path_audio):
@@ -296,7 +300,7 @@ class WorkerAnalyzer:
                  f"chunk ({float(chunk[0])}, {float(chunk[1])}) "
                  f"in {self.timer_analysis.get_total()}s (rate: {analysis_rate})")
 
-        self.q_log.put(AssignLog(msg=msg, level='INFO'))
+        self.q_log.put(AssignLog(msg=msg, level_str='PROGRESS'))
 
         self.timer_analysis.restart()
 
@@ -316,7 +320,7 @@ class WorkerAnalyzer:
                     assignment = self.q_analyze.get(timeout=5)
                     self.timer_bottleneck.stop()
                     msg = f"BUFFER BOTTLENECK: analyzer {self.id_analyzer} received assignment after {self.timer_bottleneck.get_total().__round__(1)}s"
-                    self.q_log.put(AssignLog(msg=msg, level='DEBUG'))
+                    self.q_log.put(AssignLog(msg=msg, level_str='DEBUG'))
                     self.analyze_assignment(assignment)
                     return 'running'
                 except Empty:
@@ -336,7 +340,7 @@ class WorkerAnalyzer:
                 state = loop_waiting()
                 if state == 'TERMINATE':
                     break
-        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: terminating", level='INFO'))
+        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: terminating", level_str='INFO'))
 
         # Decrement analyzer count
         with self.analyzer_count.get_lock():
