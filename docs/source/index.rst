@@ -18,13 +18,15 @@ Contents
    :maxdepth: 2
    :caption: Documentation
 
-   installation
-   usage
-   changelog
+   analysis
+   cli
+   dictionary
+   setup
 
 Getting Started
 ---------------
 
-- :doc:`installation` — How to install buzzdetect and its dependencies
-- :doc:`usage` — Example commands and workflows
-- :doc:`changelog` — Release notes and version history
+- :doc:`setup` — First time setup for buzzdetect
+- :doc:`cli` — Running buzzdetect from the command line
+- :doc:`analysis` — Notes on buzzdetect analyses
+- :doc:`dictionary` - Understanding the labels used in annotations and model outputs

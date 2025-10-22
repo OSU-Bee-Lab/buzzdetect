@@ -1,28 +1,34 @@
-# Configuration file for the Sphinx documentation builder.
-#
-# For the full list of built-in configuration values, see the documentation:
-# https://www.sphinx-doc.org/en/master/usage/configuration.html
-
 # -- Project information -----------------------------------------------------
-# https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'buzzdetect'
 copyright = '2025, OSU Bee Lab'
 author = 'OSU Bee Lab'
+
+# The short X.Y version
+version = '1.0'
+
+# The full version, including alpha/beta/rc tags
 release = '1.0.1'
 
+
 # -- General configuration ---------------------------------------------------
-# https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
+# source_suffix = ['.rst', '.md']
+source_suffix = '.rst'
 
-extensions = []
 
-templates_path = ['_templates']
-exclude_patterns = []
-
+# List of patterns, relative to source directory, that match files and
+# directories to ignore when looking for source files.
+# This pattern also affects html_static_path and html_extra_path.
+exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 
 # -- Options for HTML output -------------------------------------------------
-# https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
+# The theme to use for HTML and HTML Help pages.  See the documentation for
+# a list of builtin themes.
+html_theme = 'sphinx_rtd_theme'
 
-html_theme = 'alabaster'
-html_static_path = ['_static']
+extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',  # for Google/Numpy style docstrings
+    'sphinx_rtd_theme'
+]
