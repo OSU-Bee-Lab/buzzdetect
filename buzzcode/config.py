@@ -27,7 +27,11 @@ TRAIN_DIRNAME_AUGMENT_COMBINE = 'augment_combine'
 
 TRAIN_DIR_AUGMENT = os.path.join(TRAIN_DIR, 'augmentation')
 
-# File tags
+# Files
 TAG_EOF = '_finalframe'
+
+# Results
 SUFFIX_RESULT_COMPLETE = '_buzzdetect.csv'
 SUFFIX_RESULT_PARTIAL = '_buzzpart.csv'
+PREFIX_COLUMN_ACTIVATION = 'activation_'
+PREFIX_COLUMN_DETECTION = 'detections_'
