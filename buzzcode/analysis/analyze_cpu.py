@@ -285,7 +285,7 @@ def analyze_cpu(
 
 
     proc_analyzers = []
-    for a in range(cpus):
+    for a in range(concurrent_analyzers):
         proc_analyzer = ctx.Process(
             target=run_worker,
             name=f"analysis_proc{a}",
