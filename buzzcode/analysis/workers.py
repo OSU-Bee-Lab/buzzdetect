@@ -151,17 +151,20 @@ class WorkerStreamer:
 
             if n_samples < read_size:
                 self.handle_bad_read(track, a_stream)
-                return False
+                chunk = (chunk[0], round(chunk[0] + (n_samples/track.samplerate), 1))
+                abort_stream = True
+            else:
+                abort_stream = False
 
             samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=self.resample_rate)
             a_analyze = AssignAnalyze(path_audio=a_stream.path_audio, chunk=chunk, samples=samples)
 
             self.q_assignments.put(a_analyze)
-            return True
+            return abort_stream
 
         for chunk in a_stream.chunklist:
-            queued = queue_chunk(chunk, track, samplerate_native)
-            if not queued:
+            abort_stream = queue_chunk(chunk, track, samplerate_native)
+            if abort_stream:
                 return
 
     def run(self):
