@@ -1,29 +1,49 @@
 import glob
 import os
 import re
-import warnings
 
 import numpy as np
 import soundfile as sf
-
-from buzzcode.config import TAG_EOF
 from numpy.lib.stride_tricks import sliding_window_view
 
-def get_duration(path_audio):
-    track = sf.SoundFile(path_audio)
+from buzzcode.analysis.assignments import AssignLog
+from buzzcode.config import TAG_EOF
+
+
+def extract_eof_frame(path_eof):
+    matches = re.findall(rf'{TAG_EOF}_(\d+)$', path_eof)
+    if not matches:
+        raise ValueError(f'Could not extract eof frame from {path_eof}')
+    elif len(matches) > 1:
+        raise ValueError(f'multiple final frame matches found in {path_eof}')
+    return int(matches[0])
+
+def resolve_multiple_eof(paths_eof):
+    dict_eof = {p: extract_eof_frame(p) for p in paths_eof}
+    list_eof = sorted(dict_eof.items(), key=lambda x: x[1])
+    for path, _ in list_eof[1:]:
+        os.remove(path)
+
+    return list_eof[0][1]
+
+def enumerate_eof_files(path_audio):
     base_eof = os.path.splitext(path_audio)[0] + TAG_EOF
     paths_eof = glob.glob(base_eof + '*')
+
+    return paths_eof
+
+def get_duration(path_audio, q_log=None):
+    track = sf.SoundFile(path_audio)
+    paths_eof = enumerate_eof_files(path_audio)
 
     if not paths_eof:
         frame_final = track.frames
     elif len(paths_eof) == 1:
-        match = re.search(base_eof + "_(.*)", paths_eof[0])
-        frame_final = int(match.group(1)) if match else track.frames
+        frame_final = extract_eof_frame(paths_eof[0])
     else:
-        warnings.warn(f"multiple EOF files found for {path_audio}; deleting all")
-        for p in paths_eof:
-            os.remove(p)
-        frame_final = track.frames
+        if q_log is not None:
+            q_log.put(AssignLog(msg=f"multiple EOF files found for {path_audio}; retaining earliest", level_str='WARNING'))
+        frame_final = resolve_multiple_eof(paths_eof)
 
     return frame_final / track.samplerate
 
@@ -31,6 +51,8 @@ def get_duration(path_audio):
 def frame_audio(audio_data, framelength, samplerate, framehop_s):
     """
     Frame audio data using NumPy's sliding_window_view for efficient processing.
+    NOTE! Do not use this to pre-frame audio that will be passed to an embedder.
+    Framing should be handled within embedders (it often occurs after spectrogram creation)
 
     Parameters:
     -----------
@@ -66,24 +88,7 @@ def frame_audio(audio_data, framelength, samplerate, framehop_s):
     return frames
 
 
-def mark_eof(path_audio, frame_final):
-    path_eof = os.path.splitext(path_audio)[0] + TAG_EOF + '_' + str(frame_final)
+def mark_eof(path_audio, final_frame):
+    path_eof = os.path.splitext(path_audio)[0] + TAG_EOF + '_' + str(final_frame)
     open(path_eof, 'a').close()
-
-
-def handle_badread(path_audio, duration_audio, track, end_intended):
-    frame_actual = track.tell()
-
-    # if we get a bad read in the middle of a file, this deserves a warning.
-    near_end = abs(end_intended - duration_audio) < 20  # not sure there's an objective way to tune this
-    if not near_end:
-        warnings.warn(f"Unreadable frames starting at {round(frame_actual / track.samplerate, 1)}s for {path_audio}.")
-        mark_eof(path_audio, frame_actual)
-        return
-
-    # if we get a bad read at the end of a file, this is pretty common when batteries run out.
-    # don't bother warning, just mark and move on.
-    mark_eof(path_audio, frame_actual)
-    return
-
 

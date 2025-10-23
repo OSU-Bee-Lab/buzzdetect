@@ -12,8 +12,8 @@ import tensorflow as tf
 
 from buzzcode.analysis.assignments import AssignLog, AssignStream, AssignAnalyze, AssignWrite, level_progress
 from buzzcode.analysis.formatting import format_activations, format_detections
-from buzzcode.audio import handle_badread
-from buzzcode.config import SUFFIX_RESULT_PARTIAL
+from buzzcode.audio import mark_eof
+from buzzcode.config import SUFFIX_RESULT_PARTIAL, BAD_READ_ALLOWANCE
 from buzzcode.models.load_model import load_model
 from buzzcode.utils import Timer
 
@@ -106,11 +106,31 @@ class WorkerStreamer:
     def __call__(self):
         self.run()
 
+
+    def handle_bad_read(self, track: sf.SoundFile, a_stream: AssignStream):
+        final_frame = track.tell()
+        mark_eof(path_audio=a_stream.path_audio, final_frame=final_frame)
+
+        final_second = final_frame/track.samplerate
+
+        msg = f"streamer {self.id_streamer}: Unreadable audio at {round(final_second, 1)}s out of {round(a_stream.duration_audio, 1)}s for {a_stream.shortpath}."
+        if 1 - (final_second/a_stream.duration_audio) > BAD_READ_ALLOWANCE:
+            # if we get a bad read in the middle of a file, this deserves a warning.
+            level = 'WARNING'
+            msg += '\nAborting early due to corrupt audio data.'
+        else:
+            # but bad reads at the ends of files are almost guaranteed when the batteries run out
+            level = 'DEBUG'
+            msg += '\nBad audio is near file end, results should be mostly unaffected.'
+
+        self.q_log.put(AssignLog(msg=msg, level_str=level))
+
+
     def stream_to_queue(self, a_stream: AssignStream):
         track = sf.SoundFile(a_stream.path_audio)
         samplerate_native = track.samplerate
 
-        def queue_assignment(chunk, track, samplerate_native):
+        def queue_chunk(chunk, track, samplerate_native):
             sample_from = int(chunk[0] * samplerate_native)
             sample_to = int(chunk[1] * samplerate_native)
             read_size = sample_to - sample_from
@@ -126,15 +146,19 @@ class WorkerStreamer:
             n_samples = len(samples)
 
             if n_samples < read_size:
-                handle_badread(path_audio=a_stream.path_audio, track=track, duration_audio=a_stream.duration_audio, end_intended=chunk[1])
+                self.handle_bad_read(track, a_stream)
+                return False
 
             samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=self.resample_rate)
             a_analyze = AssignAnalyze(path_audio=a_stream.path_audio, chunk=chunk, samples=samples)
 
             self.q_assignments.put(a_analyze)
+            return True
 
         for chunk in a_stream.chunklist:
-            queue_assignment(chunk, track, samplerate_native)
+            queued = queue_chunk(chunk, track, samplerate_native)
+            if not queued:
+                return
 
     def run(self):
         a_stream = self.q_stream.get()
@@ -143,6 +167,7 @@ class WorkerStreamer:
 
             self.stream_to_queue(a_stream)
             a_stream = self.q_stream.get()
+
         self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: terminating", level_str='INFO'))
 
         # Decrement streamer count
