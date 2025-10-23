@@ -1,8 +1,7 @@
-from datetime import datetime
-import pickle
-import warnings
 import os
+import pickle
 import re
+from datetime import datetime
 
 
 class Timer:

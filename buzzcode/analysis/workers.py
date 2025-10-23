@@ -80,16 +80,18 @@ class WorkerLogger:
                 self.getwrite(1)
             except Empty:
                 if self.event_closelogger.is_set():
+                    logging.debug('logger: queue is empty and event_closelogger is set; breaking into final getwrite loop')
                     break
                 # else: another writer might still put, so continue
 
-        # Final catch-up: keep draining until there's a real timeout
+        # Just in case there was a race condition, try a final draining loop.
+        # at this point, the workers are all closed, so a limit of 5 seconds should
+        # be plenty to avoid early exits
         while True:
             try:
-                self.getwrite(1)
+                self.getwrite(5)
             except Empty:
                 break
-
 
         logging.info("logger: exiting")
 
@@ -106,6 +108,8 @@ class WorkerStreamer:
     def __call__(self):
         self.run()
 
+    def log(self, msg, level_str):
+        self.q_log.put(AssignLog(msg=f'streamer {self.id_streamer}: {msg}', level_str=level_str))
 
     def handle_bad_read(self, track: sf.SoundFile, a_stream: AssignStream):
         final_frame = track.tell()
@@ -113,7 +117,7 @@ class WorkerStreamer:
 
         final_second = final_frame/track.samplerate
 
-        msg = f"streamer {self.id_streamer}: Unreadable audio at {round(final_second, 1)}s out of {round(a_stream.duration_audio, 1)}s for {a_stream.shortpath}."
+        msg = f"Unreadable audio at {round(final_second, 1)}s out of {round(a_stream.duration_audio, 1)}s for {a_stream.shortpath}."
         if 1 - (final_second/a_stream.duration_audio) > BAD_READ_ALLOWANCE:
             # if we get a bad read in the middle of a file, this deserves a warning.
             level = 'WARNING'
@@ -123,7 +127,7 @@ class WorkerStreamer:
             level = 'DEBUG'
             msg += '\nBad audio is near file end, results should be mostly unaffected.'
 
-        self.q_log.put(AssignLog(msg=msg, level_str=level))
+        self.log(msg, level)
 
 
     def stream_to_queue(self, a_stream: AssignStream):
@@ -161,29 +165,24 @@ class WorkerStreamer:
                 return
 
     def run(self):
+        self.log('launching', 'INFO')
         a_stream = self.q_stream.get()
         while not a_stream.terminate:
-            self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: buffering {a_stream.shortpath}", level_str='PROGRESS'))
+            self.log(f"buffering {a_stream.shortpath}", 'INFO')
 
             self.stream_to_queue(a_stream)
             a_stream = self.q_stream.get()
 
-        self.q_log.put(AssignLog(msg=f"streamer {self.id_streamer}: terminating", level_str='INFO'))
+        self.log("terminating", 'INFO')
 
         # Decrement streamer count
         with self.streamer_count.get_lock():
             self.streamer_count.value -= 1
+            self.log(f"after terminating, streamer count is {self.streamer_count.value}", 'DEBUG')
 
 class WorkerWriter:
     def __init__(self, classes_out, threshold, analyzer_count, q_write: Queue[AssignWrite], classes, framehop_s, digits_time,
                  dir_audio, dir_out, q_log, event_analysisdone, digits_results):
-        # TODO: what if someone starts an analysis with activations, then finishes with detections?
-        if classes_out is not None and threshold is not None:
-            raise ValueError("cannot specify both classes_out and threshold")
-
-        if classes_out is None and threshold is None:
-            raise ValueError("must specify either classes_out or threshold")
-
         self.classes_out = classes_out
         self.threshold = threshold
         self.analyzer_count = analyzer_count
@@ -229,6 +228,9 @@ class WorkerWriter:
     def __call__(self):
         self.run()
 
+    def log(self, msg, level_str):
+        self.q_log.put(AssignLog(msg=f'writer: {msg}', level_str=level_str))
+
     def write_results(self, assignment: AssignWrite):
         output = self.format(
             results=assignment.results.numpy(),
@@ -248,21 +250,20 @@ class WorkerWriter:
         output.to_csv(path_out, mode='a', header=not file_exists, index=False)
 
     def run(self):
+        self.log('launching', 'INFO')
         while True:
             try:
                 self.write_results(self.q_write.get(timeout=5))
             except Empty:
                 with self.analyzer_count.get_lock():
-                    current_analyzer_count = self.analyzer_count.value
+                    if self.analyzer_count.value == 0:
+                        break
+                    else:
+                        self.log('Write queue is empty, but workers are active. Continuing.', 'DEBUG')
+                        continue
 
-                if current_analyzer_count == 0:
-                    break
-                else:
-                    continue
-
-        self.q_log.put(AssignLog(msg="writer: terminating", level_str='INFO'))
+        self.log(msg="terminating", level_str='INFO')
         self.shutdown_event.set()
-
 
 
 class WorkerAnalyzer:
@@ -288,6 +289,9 @@ class WorkerAnalyzer:
     def __call__(self):
         self.run()
 
+    def log(self, msg, level_str):
+        self.q_log.put(AssignLog(msg=f'analyzer {self.id_analyzer}: {msg}', level_str=level_str))
+
     def _initialize_model(self):
         # lazy load because models can't be pickled
         self.model = load_model(self.modelname, framehop_prop=self.framehop_prop, initialize=True)
@@ -302,16 +306,16 @@ class WorkerAnalyzer:
             # let memory grow when processing on GPU
             gpus = tf.config.experimental.list_physical_devices('GPU')
             if not gpus:
-                warnings.warn("GPU not found; using CPU")
+                self.log("GPU not found; using CPU", 'WARNING')
                 self.processor = 'CPU'
             else:
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
 
             if len(gpus) > 1:
-                warnings.warn("multi-processing on GPU is not yet explicitly supported; ")
+                self.log("multi-processing on GPU is untested", 'WARNING')
 
-        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: processing on {self.processor}", level_str='INFO'))
+        self.log(f"processing on {self.processor}", 'INFO')
 
 
     def report_rate(self, chunk, path_audio):
@@ -321,12 +325,10 @@ class WorkerAnalyzer:
         analysis_rate = (chunk_duration / self.timer_analysis.get_total()).__round__(1)
         path_short = re.sub(self.dir_audio, '', path_audio)
 
-        msg = (f"analyzer {self.id_analyzer}: analyzed {path_short}, "
-                 f"chunk ({float(chunk[0])}, {float(chunk[1])}) "
+        msg = (f"analyzed {path_short}, chunk ({float(chunk[0])}, {float(chunk[1])}) "
                  f"in {self.timer_analysis.get_total()}s (rate: {analysis_rate})")
 
-        self.q_log.put(AssignLog(msg=msg, level_str='PROGRESS'))
-
+        self.log(msg, 'PROGRESS')
         self.timer_analysis.restart()
 
     def analyze_assignment(self, assignment: AssignAnalyze):
@@ -337,6 +339,7 @@ class WorkerAnalyzer:
 
 
     def run(self):
+        self.log('launching', 'INFO')
         self._initialize_model()
         def loop_waiting():
             self.timer_bottleneck.restart()
@@ -345,18 +348,16 @@ class WorkerAnalyzer:
                     assignment = self.q_analyze.get(timeout=5)
                     self.timer_bottleneck.stop()
                     msg = f"BUFFER BOTTLENECK: analyzer {self.id_analyzer} received assignment after {self.timer_bottleneck.get_total().__round__(1)}s"
-                    self.q_log.put(AssignLog(msg=msg, level_str='DEBUG'))
+                    self.log(msg, 'DEBUG')
                     self.analyze_assignment(assignment)
                     return 'running'
                 except Empty:
                     # Check if streamers are still active using shared counter
                     with self.streamer_count.get_lock():
-                        current_streamer_count = self.streamer_count.value
-
-                    if current_streamer_count > 0:
-                        continue
-                    else:
-                        return 'TERMINATE'
+                        if self.streamer_count.value > 0:
+                            continue
+                        else:
+                            return 'TERMINATE'
 
         while True:
             try:
@@ -365,10 +366,11 @@ class WorkerAnalyzer:
                 state = loop_waiting()
                 if state == 'TERMINATE':
                     break
-        self.q_log.put(AssignLog(msg=f"analyzer {self.id_analyzer}: terminating", level_str='INFO'))
+        self.log("terminating", 'INFO')
 
         # Decrement analyzer count
         with self.analyzer_count.get_lock():
             self.analyzer_count.value -= 1
+            self.log(f"after exiting, analyzer count is {self.analyzer_count.value}",'DEBUG')
 
 

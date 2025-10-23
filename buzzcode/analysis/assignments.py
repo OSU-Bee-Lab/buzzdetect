@@ -36,7 +36,7 @@ class AssignWrite:
         self.results = results
 
 
-level_progress = {'level': logging.DEBUG-5, 'levelName': 'PROGRESS'}
+level_progress = {'level': logging.INFO-5, 'levelName': 'PROGRESS'}
 logging.addLevelName(level=level_progress['level'], levelName=level_progress['levelName'])
 log_levels = {
     'NOTSET': logging.NOTSET,

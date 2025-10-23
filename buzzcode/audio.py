@@ -32,7 +32,7 @@ def enumerate_eof_files(path_audio):
 
     return paths_eof
 
-def get_duration(path_audio, q_log=None):
+def get_duration(path_audio, q_log):
     track = sf.SoundFile(path_audio)
     paths_eof = enumerate_eof_files(path_audio)
 

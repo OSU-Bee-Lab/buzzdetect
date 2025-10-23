@@ -113,10 +113,8 @@ def analyze_cpu(
     if stream_buffer_depth is None:
         stream_buffer_depth = concurrent_streamers*2
 
-    # Create multiprocessing context for spawn
     ctx = multiprocessing.get_context('spawn')
 
-    # interprocess communication using spawn context
     q_log = ctx.Queue()
     q_stream = ctx.Queue()
     q_analyze = ctx.Queue(maxsize=stream_buffer_depth)
@@ -125,9 +123,7 @@ def analyze_cpu(
     event_analysisdone = ctx.Event()
     event_closelogger = ctx.Event()
 
-    # Logging
-    log_timestamp = timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")
-    path_log = os.path.join(dir_out, f"log {log_timestamp}.log")
+    path_log = os.path.join(dir_out, f"{timer_total.time_start.strftime("%Y-%m-%d_%H%M%S")}.log")
     os.makedirs(os.path.dirname(path_log), exist_ok=True)
 
     proc_logger = ctx.Process(
@@ -143,11 +139,13 @@ def analyze_cpu(
     )
     proc_logger.start()
 
+    q_log.put(AssignLog('Launching analysis...', 'INFO'))
+
     if framehop_prop > 1:
         msg = (
-            'Currently, analyses with framehop > 1 will produce valid results,'
-            'but buzzdetect will interpret the resulting gaps as errors.'
-            f'Fully analyzed files will not be converted from {cfg.SUFFIX_RESULT_PARTIAL} to {cfg.SUFFIX_RESULT_COMPLETE}.'
+            'Currently, analyses with framehop > 1 will produce valid results, '
+            'but buzzdetect will interpret the resulting gaps as missing data.\n'
+            f'Fully analyzed files will not be converted from {cfg.SUFFIX_RESULT_PARTIAL} to {cfg.SUFFIX_RESULT_COMPLETE}.\n'
             f'Repeated analysis will attempt to fill gaps between frames.'
         )
         q_log.put(AssignLog(msg=msg, level_str='WARNING'))
@@ -158,8 +156,6 @@ def analyze_cpu(
         msg = f"no compatible audio files found in raw directory {dir_audio} \n" \
             f"audio format must be compatible with soundfile module version {sf.__version__} \n" \
             f"exiting analysis"
-        q_log.put(AssignLog(msg=msg, level_str='ERROR'))
-
         early_exit(msg=msg, level='ERROR', event_analysisdone=event_analysisdone, event_closelogger=event_closelogger, proc_logger=proc_logger, q_log=q_log)
         return
 
@@ -182,13 +178,13 @@ def analyze_cpu(
     a_stream_list = []
     for path_audio in paths_audio:
         if os.path.getsize(path_audio) < 5000:
-            q_log.put(AssignLog(msg=f'file too small, skipping: {path_audio}', level_str='WARNING'))
+            q_log.put(AssignLog(msg=f'Skipping miniscule file: {path_audio}', level_str='WARNING'))
             continue
 
         base_out = re.sub(dir_audio, dir_out, path_audio)
         base_out = os.path.splitext(base_out)[0]
-        q_log.put(AssignLog(msg=f'checking results for {re.sub(dir_out, "", base_out)}', level_str='PROGRESS'))
-        duration_audio = get_duration(path_audio)
+        q_log.put(AssignLog(msg=f'Checking results for {re.sub(dir_out, "", base_out)}', level_str='INFO'))
+        duration_audio = get_duration(path_audio, q_log=q_log)
 
         chunklist = chunklist_from_base(
             base_out=base_out,
@@ -212,7 +208,7 @@ def analyze_cpu(
         )
 
     if not a_stream_list:
-        q_log.put(AssignLog(msg=f'all files in {dir_audio} are fully analyzed; exiting analysis', level_str='WARNING'))
+        q_log.put(AssignLog(msg=f'All files in {dir_audio} are fully analyzed; exiting analysis', level_str='WARNING'))
         event_analysisdone.set()  # Signal shutdown directly
         proc_logger.join()
         return
@@ -316,15 +312,13 @@ def analyze_cpu(
 
         chunklist_from_base(
             base_out=base_out,
-            duration_audio=get_duration(path_audio),
+            duration_audio=get_duration(path_audio, q_log),
             framelength_s=model_noload.embedder.framelength_s,
             chunklength=chunklength
         )
-        # Note: Can't use printlog here as logger has already exited
 
     timer_total.stop()
 
-    # TODO: after seperating logger closing from analysis finishing, move this to log
     q_log.put(AssignLog(msg=f"{datetime.now()} - analysis complete; total time: {timer_total.get_total()}s", level_str='INFO'))
     event_closelogger.set()
     proc_logger.join()
@@ -333,7 +327,7 @@ def analyze_cpu(
 
 
 if __name__ == "__main__":
-    cpus=4
+    cpus=3
     analyze_cpu(
         modelname='model_general_v3',
         classes_out='all',
@@ -341,5 +335,5 @@ if __name__ == "__main__":
         chunklength=250,
         concurrent_streamers=int(cpus*1.5),
         framehop_prop=1,
-        verbosity='PROGRESS'
+        verbosity='DEBUG'
     )
