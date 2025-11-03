@@ -39,3 +39,6 @@ PREFIX_COLUMN_DETECTION = 'detections_'
 # Audio
 BAD_READ_ALLOWANCE = 0.01  # as a proportion, how much of the tail end of a file can be corrupt without elevating the message to a warning?
 # see WorkerStreamer; we often have bad reads at the very end of mp3 audio when the recorder dies during recording; these will be treated as DEBUG reports
+
+# Analysis
+DEFAULT_MODEL = 'model_general_v3'

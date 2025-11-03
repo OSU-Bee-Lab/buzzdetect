@@ -3,28 +3,31 @@ import re
 
 
 class AssignLog:
-    def __init__(self, msg: str, level_str: str):
+    def __init__(self, msg: str, level_str: str, terminate_gui: bool = False):
         self.item = msg
         self.level_str = level_str
         self.level_int = log_levels[level_str]
+        self.terminate_gui = terminate_gui
 
 
 class AssignStream:
-    def __init__(self, path_audio, duration_audio, chunklist, terminate=False, dir_audio=None):
+    def __init__(self, path_audio, duration_audio, chunklist, dir_audio, terminate=False):
         self.path_audio = path_audio
         self.duration_audio = duration_audio
         self.chunklist = chunklist
         self.terminate = terminate
-        self.shortpath = None
 
-        if dir_audio is not None:
-            self.shortpath = path_audio.replace(dir_audio, '')
+        if dir_audio is None:
+            self.shortpath = None
+        else:
+            self.shortpath = self.path_audio.replace(dir_audio, '')
             self.shortpath = re.sub('^/', '', self.shortpath)
 
 
 class AssignAnalyze:
-    def __init__(self, path_audio, chunk, samples):
+    def __init__(self, path_audio, shortpath, chunk, samples):
         self.path_audio = path_audio
+        self.shortpath = shortpath
         self.chunk = chunk
         self.samples = samples
 

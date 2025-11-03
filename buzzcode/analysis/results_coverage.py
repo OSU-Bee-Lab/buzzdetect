@@ -75,14 +75,14 @@ def gaps_to_chunklist(gaps_in, chunklength, decimals=2):
     return chunklist
 
 
-def chunklist_from_base(base_out, duration_audio, framelength_s, chunklength):
-    path_complete = base_out + SUFFIX_RESULT_COMPLETE
+def clean_and_chunk(ident_out, duration_audio, framelength_s, chunklength):
+    path_complete = ident_out + SUFFIX_RESULT_COMPLETE
 
     # if finished analysis file exists, return no chunks
     if os.path.exists(path_complete):
         return []
 
-    path_partial = base_out + SUFFIX_RESULT_PARTIAL
+    path_partial = ident_out + SUFFIX_RESULT_PARTIAL
 
     # if the file hasn't been started, chunk the whole file
     if not os.path.exists(path_partial):
@@ -102,7 +102,7 @@ def chunklist_from_base(base_out, duration_audio, framelength_s, chunklength):
             gap_tolerance=framelength_s / 4
         )
 
-    # if we find no gaps, this file was actually finished!
+    # if we find no gaps, this file was actually finished and never cleaned!
     # output to the finished file
     if not gaps:
         df.sort_values("start", inplace=True)

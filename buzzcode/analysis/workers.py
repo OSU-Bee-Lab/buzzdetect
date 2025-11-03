@@ -1,7 +1,7 @@
 import logging
+import multiprocessing
 import os
 import re
-import warnings
 from _queue import Empty
 from queue import Queue
 
@@ -17,70 +17,69 @@ from buzzcode.config import SUFFIX_RESULT_PARTIAL, BAD_READ_ALLOWANCE
 from buzzcode.models.load_model import load_model
 from buzzcode.utils import Timer
 
+
 class FilterDropProgress(logging.Filter):
     def filter(self, record):
         return record.levelno != level_progress['levelName']
 
-# source code modified from Sergey Pleshakov's code here: https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
-# might also consider loguru
-class PrintFormatter(logging.Formatter):
-    gray = "\x1b[38;20m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
-    format = "[%(levelname)s] %(message)s"
-
-    FORMATS = {
-        logging.DEBUG: gray + format + reset,
-        logging.INFO: gray + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset
-    }
-
-    def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
 
 class WorkerLogger:
-    def __init__(self, path_log, q_log: Queue[AssignLog], event_closelogger, verbosity):
+    def __init__(self, 
+                 path_log,
+                 q_log,
+                 event_analysisdone,
+                 event_stopanalysis,
+                 verbosity_print='PROGRESS',
+                 verbosity_log="DEBUG",
+                 log_progress=False,
+                 q_gui=None,):
         self.path_log = path_log
+        self.verbosity = verbosity_print
+        
         self.q_log = q_log
-        self.event_closelogger = event_closelogger
-        self.verbosity = verbosity
+        self.q_gui = q_gui
+        self.event_analysisdone = event_analysisdone
+        self.event_stopanalysis = event_stopanalysis
 
         self.log = logging.getLogger()
         self.log.setLevel(0)
 
         self.handle_stream = logging.StreamHandler()
-        self.handle_stream.setLevel(verbosity)
-        self.handle_stream.setFormatter(PrintFormatter())
+        self.handle_stream.setLevel(verbosity_print)
         self.log.addHandler(self.handle_stream)
+        
 
         self.format_file = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         self.handle_file = logging.FileHandler(path_log)
-        self.handle_file.setLevel(logging.INFO)
-        self.handle_file.addFilter(FilterDropProgress())
+        self.handle_file.setLevel(verbosity_log)
+
+        if not log_progress:
+            self.handle_file.addFilter(FilterDropProgress())
+
         self.handle_file.setFormatter(self.format_file)
         self.log.addHandler(self.handle_file)
 
     def __call__(self):
         self.run()
 
-    def getwrite(self, time):
+    def write_log(self, time):
         a_log = self.q_log.get(timeout=time)
         logging.log(msg=a_log.item, level=a_log.level_int)
+        if self.q_gui is not None:
+            self.q_gui.put(a_log)
 
     def run(self):
         # Main loop: drain while work is still coming or writers alive
         while True:
             try:
-                self.getwrite(1)
+                self.write_log(1)
             except Empty:
-                if self.event_closelogger.is_set():
-                    logging.debug('logger: queue is empty and event_closelogger is set; breaking into final getwrite loop')
+                if self.event_analysisdone.is_set():
+                    logging.debug('logger: queue is empty and event_analysisdone is set; breaking into final getwrite loop')
+                    break
+
+                if self.event_stopanalysis.is_set():
+                    logging.debug('logger: queue is empty and event_stopanalysis is set; breaking into final getwrite loop')
                     break
                 # else: another writer might still put, so continue
 
@@ -89,21 +88,29 @@ class WorkerLogger:
         # be plenty to avoid early exits
         while True:
             try:
-                self.getwrite(5)
+                self.write_log(5)
             except Empty:
                 break
 
         logging.info("logger: exiting")
 
-
 class WorkerStreamer:
-    def __init__(self, id_streamer, streamer_count, q_stream: Queue[AssignStream], q_analyze: Queue[AssignAnalyze], q_log, resample_rate):
+    def __init__(self,
+                 id_streamer,
+                 resample_rate,
+                 streamers_live: multiprocessing.Value,
+                 q_stream: Queue,
+                 q_analyze: Queue,
+                 q_log: Queue,
+                 event_stopanalysis: multiprocessing.Event,):
         self.id_streamer = id_streamer
-        self.streamer_count = streamer_count
-        self.q_stream = q_stream
-        self.q_assignments = q_analyze
-        self.q_log = q_log
         self.resample_rate = resample_rate
+
+        self.q_log = q_log
+        self.q_stream = q_stream
+        self.q_analyze = q_analyze
+        self.event_stopanalysis = event_stopanalysis
+        self.streamers_live = streamers_live
 
     def __call__(self):
         self.run()
@@ -157,9 +164,9 @@ class WorkerStreamer:
                 abort_stream = False
 
             samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=self.resample_rate)
-            a_analyze = AssignAnalyze(path_audio=a_stream.path_audio, chunk=chunk, samples=samples)
+            a_analyze = AssignAnalyze(path_audio=a_stream.path_audio, shortpath=a_stream.shortpath, chunk=chunk, samples=samples)
 
-            self.q_assignments.put(a_analyze)
+            self.q_analyze.put(a_analyze)
             return abort_stream
 
         for chunk in a_stream.chunklist:
@@ -167,10 +174,14 @@ class WorkerStreamer:
             if abort_stream:
                 return
 
+            if self.event_stopanalysis.is_set():
+                self.log('stop analysis event is set, terminating', 'DEBUG')
+                return
+
     def run(self):
         self.log('launching', 'INFO')
         a_stream = self.q_stream.get()
-        while not a_stream.terminate:
+        while not a_stream.terminate and not self.event_stopanalysis.is_set():
             self.log(f"buffering {a_stream.shortpath}", 'INFO')
 
             self.stream_to_queue(a_stream)
@@ -179,25 +190,41 @@ class WorkerStreamer:
         self.log("terminating", 'INFO')
 
         # Decrement streamer count
-        with self.streamer_count.get_lock():
-            self.streamer_count.value -= 1
-            self.log(f"after terminating, streamer count is {self.streamer_count.value}", 'DEBUG')
+        with self.streamers_live.get_lock():
+            self.streamers_live.value -= 1
+            self.log(f"after terminating, streamer count is {self.streamers_live.value}", 'DEBUG')
+
 
 class WorkerWriter:
-    def __init__(self, classes_out, threshold, analyzer_count, q_write: Queue[AssignWrite], classes, framehop_s, digits_time,
-                 dir_audio, dir_out, q_log, event_analysisdone, digits_results):
+    def __init__(self,
+                 classes_out,
+                 threshold,
+                 classes,
+                 framehop_s,
+                 digits_time,
+                 dir_audio,
+                 dir_out,
+                 digits_results,
+                 q_write: Queue,
+                 q_log: Queue,
+                 event_stopanalysis: multiprocessing.Event,
+                 event_analysisdone: multiprocessing.Event,
+                 analyzers_live: multiprocessing.Value, ):
+
         self.classes_out = classes_out
         self.threshold = threshold
-        self.analyzer_count = analyzer_count
-        self.q_write = q_write
         self.classes = classes
         self.framehop_s = framehop_s
         self.digits_time = digits_time
         self.dir_audio = dir_audio
         self.dir_out = dir_out
-        self.q_log = q_log
-        self.shutdown_event = event_analysisdone
         self.digits_results = digits_results
+
+        self.q_log = q_log
+        self.q_write = q_write
+        self.event_stopanalysis = event_stopanalysis
+        self.event_analysisdone = event_analysisdone
+        self.analyzers_live = analyzers_live
 
         if classes_out is not None:
             def format_func(results, time_start):
@@ -255,49 +282,54 @@ class WorkerWriter:
     def run(self):
         self.log('launching', 'INFO')
         while True:
+            if self.event_stopanalysis.is_set():
+                self.log('stop analysis event is set, terminating', 'DEBUG')
+                break
             try:
                 self.write_results(self.q_write.get(timeout=5))
             except Empty:
-                with self.analyzer_count.get_lock():
-                    if self.analyzer_count.value == 0:
+                with self.analyzers_live.get_lock():
+                    if self.analyzers_live.value == 0:
                         break
                     else:
                         self.log('Write queue is empty, but workers are active. Continuing.', 'DEBUG')
                         continue
 
         self.log(msg="terminating", level_str='INFO')
-        self.shutdown_event.set()
+        self.event_analysisdone.set()
 
 
 class WorkerAnalyzer:
-    def __init__(self, id_analyzer, processor, modelname, framehop_prop, q_write: Queue[AssignWrite], q_analyze: Queue[
-        AssignAnalyze], q_log, streamer_count, analyzer_count, dir_audio):
+    def __init__(self,
+                 id_analyzer,
+                 processor: str,
+                 modelname: str,
+                 framehop_prop: float,
+                 q_log: Queue,
+                 q_write: Queue,
+                 q_analyze: Queue,
+                 event_stopanalysis: multiprocessing.Event,
+                 streamers_live: multiprocessing.Value,
+                 analyzers_live: multiprocessing.Value,):
+
         self.id_analyzer = id_analyzer
         self.processor = processor
-        self.modelname = modelname
-        self.framehop_prop = framehop_prop
-        self.q_write = q_write
-        self.q_analyze = q_analyze
-        self.q_log = q_log
-        self.streamer_count = streamer_count
-        self.analyzer_count = analyzer_count
-        self.dir_audio = dir_audio
-
+        self.model = load_model(modelname, framehop_prop, initialize=False)
         self.timer_analysis = Timer()
         self.timer_bottleneck = Timer()
 
-        self.model = None
-
+        self.q_log = q_log
+        self.q_write = q_write
+        self.q_analyze = q_analyze
+        self.event_stopanalysis = event_stopanalysis
+        self.streamers_live = streamers_live
+        self.analyzers_live = analyzers_live
 
     def __call__(self):
         self.run()
 
     def log(self, msg, level_str):
         self.q_log.put(AssignLog(msg=f'analyzer {self.id_analyzer}: {msg}', level_str=level_str))
-
-    def _initialize_model(self):
-        # lazy load because models can't be pickled
-        self.model = load_model(self.modelname, framehop_prop=self.framehop_prop, initialize=True)
 
     def _managememory(self):
         if self.processor == 'CPU':
@@ -321,12 +353,11 @@ class WorkerAnalyzer:
         self.log(f"processing on {self.processor}", 'INFO')
 
 
-    def report_rate(self, chunk, path_audio):
+    def report_rate(self, chunk, path_short):
         chunk_duration = chunk[1] - chunk[0]
 
         self.timer_analysis.stop()
         analysis_rate = (chunk_duration / self.timer_analysis.get_total()).__round__(1)
-        path_short = re.sub(self.dir_audio, '', path_audio)
 
         msg = (f"analyzed {path_short}, chunk ({float(chunk[0])}, {float(chunk[1])}) "
                  f"in {self.timer_analysis.get_total()}s (rate: {analysis_rate})")
@@ -338,26 +369,29 @@ class WorkerAnalyzer:
         results = self.model.predict(assignment.samples)
 
         self.q_write.put(AssignWrite(path_audio=assignment.path_audio, chunk=assignment.chunk, results=results))
-        self.report_rate(assignment.chunk, assignment.path_audio)
+        self.report_rate(assignment.chunk, assignment.shortpath)
 
 
     def run(self):
         self.log('launching', 'INFO')
-        self._initialize_model()
+        self.model.initialize()
         def loop_waiting():
             self.timer_bottleneck.restart()
             while True:
                 try:
-                    assignment = self.q_analyze.get(timeout=5)
+                    assignment = self.q_analyze.get(timeout=1)
                     self.timer_bottleneck.stop()
                     msg = f"BUFFER BOTTLENECK: analyzer {self.id_analyzer} received assignment after {self.timer_bottleneck.get_total().__round__(1)}s"
                     self.log(msg, 'DEBUG')
                     self.analyze_assignment(assignment)
                     return 'running'
                 except Empty:
+                    if self.event_stopanalysis.is_set():
+                        self.log('stop analysis event is set, terminating', 'DEBUG')
+                        return 'TERMINATE'
                     # Check if streamers are still active using shared counter
-                    with self.streamer_count.get_lock():
-                        if self.streamer_count.value > 0:
+                    with self.streamers_live.get_lock():
+                        if self.streamers_live.value > 0:
                             continue
                         else:
                             return 'TERMINATE'
@@ -372,8 +406,6 @@ class WorkerAnalyzer:
         self.log("terminating", 'INFO')
 
         # Decrement analyzer count
-        with self.analyzer_count.get_lock():
-            self.analyzer_count.value -= 1
-            self.log(f"after exiting, analyzer count is {self.analyzer_count.value}",'DEBUG')
-
-
+        with self.analyzers_live.get_lock():
+            self.analyzers_live.value -= 1
+            self.log(f"after exiting, analyzer count is {self.analyzers_live.value}", 'DEBUG')

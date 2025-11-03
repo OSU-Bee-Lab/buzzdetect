@@ -4,6 +4,9 @@ import re
 
 import numpy as np
 import soundfile as sf
+import librosa
+import math
+import scipy.signal
 from numpy.lib.stride_tricks import sliding_window_view
 
 from buzzcode.analysis.assignments import AssignLog
@@ -91,4 +94,3 @@ def frame_audio(audio_data, framelength, samplerate, framehop_s):
 def mark_eof(path_audio, final_frame):
     path_eof = os.path.splitext(path_audio)[0] + TAG_EOF + '_' + str(final_frame)
     open(path_eof, 'a').close()
-

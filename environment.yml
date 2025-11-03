@@ -1,12 +1,10 @@
 name: buzzdetect
 channels:
   - defaults
-  - conda-forge
 dependencies:
   - python=3.13
-  - pip=23.2.1
   - pip:
-    - tensorflow[and-cuda]>=2.16
+    - tensorflow>=2.16
     - librosa
     - soundfile
     - pandas
