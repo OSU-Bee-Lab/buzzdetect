@@ -116,8 +116,7 @@ def validate_analyzers_cpu(analyzers_cpu: int):
     return validate_int(
         value=analyzers_cpu,
         value_min=0,
-        none_ok=False,
-        argname='CPU analyzer count'
+        none_ok=False
     )
 
 def validate_analyzer_gpu(analyzer_gpu: bool):
@@ -125,16 +124,14 @@ def validate_analyzer_gpu(analyzer_gpu: bool):
         value=analyzer_gpu,
         value_min=0,
         none_ok=False,
-        value_max=1,
-        argname='GPU analyzer'
+        value_max=1
     )
 
 def validate_n_streamers(n_streamers: int):
     return validate_int(
         value=n_streamers,
         value_min=0,
-        none_ok=True,
-        argname='Number of streamers'
+        none_ok=True
     )
 
 
@@ -142,8 +139,7 @@ def validate_stream_buffer_depth(stream_buffer_depth: int):
     return validate_int(
         value=stream_buffer_depth,
         value_min=0,
-        none_ok=True,
-        argname='Stream buffer depth'
+        none_ok=True
     )
 
 def validate_dir_audio(dir_audio: str):
@@ -165,7 +161,6 @@ def validate_log_progress(log_progress: bool):
     return validate_int(
         value=log_progress,
         none_ok=False,
-        argname='log_progress',
         value_max=1,
     )
 

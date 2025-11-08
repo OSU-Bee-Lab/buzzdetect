@@ -112,5 +112,4 @@ def analyze(
 
 
 if __name__ == "__main__":
-    analyze(modelname=cfg.DEFAULT_MODEL, dir_audio='/Volumes/LukeSSD/r projects/buzzdetect_repository/buzzdetect_repository_deposited/data/raw/snip_recordings/mustard')
-
+    analyze(modelname=cfg.DEFAULT_MODEL)

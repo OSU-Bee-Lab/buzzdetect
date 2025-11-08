@@ -72,6 +72,9 @@ class FilePathEntry(TextEntry):
 
     def _browse(self):
         dir_selected = filedialog.askdirectory(initialdir=self.initialdir, title=self.browsetitle)
+        if dir_selected == '':  # window was closed; do nothing
+            return
+
         self.initialdir = dir_selected  # keep "memory" of initial dir
         self.var.set(dir_selected)
 

@@ -11,8 +11,9 @@ def analyze_gui():
     settings = AnalysisSettings()
     settings.mainloop()
 
-    analysis = AnalysisWindow(settings.vars_analysis)
-    analysis.mainloop()
+    if settings.run:
+        analysis = AnalysisWindow(settings.vars_analysis)
+        analysis.mainloop()
 
 if __name__ == "__main__":
     analyze_gui()

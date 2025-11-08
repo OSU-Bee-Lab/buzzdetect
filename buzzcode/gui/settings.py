@@ -7,7 +7,7 @@ import customtkinter as ctk
 import buzzcode.analysis.validation as val
 import buzzcode.config as cfg
 import buzzcode.gui.config as cfg_gui
-import buzzcode.gui.entries as ent
+import buzzcode.gui.ctk_entries as ent
 from buzzcode.analysis.analyze import analyze
 from buzzcode.analysis.assignments import loglevels
 
@@ -32,6 +32,7 @@ def analysis_defaults():
 class AnalysisSettings(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.run = False
         self.vars_analysis = analysis_defaults()
 
         # drop q_gui and event_stopanalysis; handled by analaysis window
@@ -40,7 +41,7 @@ class AnalysisSettings(ctk.CTk):
 
         self.vars_tkinter = {
             'modelname': ctk.StringVar(self, ''),  # will be loaded at end of init; ctk coerces None to '' so just set to ''
-            'precision': ctk.DoubleVar(self, self.vars_analysis['precision']),
+            'precision': ctk.StringVar(self, self.vars_analysis['precision']),
             'framehop_prop': ctk.StringVar(self, self.vars_analysis['framehop_prop']),
             'chunklength': ctk.StringVar(self, self.vars_analysis['chunklength']),
             'analyzers_cpu': ctk.StringVar(self, self.vars_analysis['analyzers_cpu']),
@@ -119,7 +120,7 @@ class AnalysisSettings(ctk.CTk):
         self.entry_precision = ent.TextEntry(
             master=self.tabview_format.tab('Detections'), label='Precision', var=self.vars_tkinter['precision'],
             tooltip='Precision with which to call detections, between 0 and 1.\nA value equal to or above 0.95 is recommended.',
-            validation_function=val.validate_precision,
+            validation_function=lambda v: val.validate_precision(v if v != '' else None),
         )
         self.entry_precision.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
 
@@ -301,7 +302,7 @@ class AnalysisSettings(ctk.CTk):
         if mode == 'Activations':
             self.vars_analysis['precision'] = None
         else:
-            self.vars_analysis['precision'] = self.vars_tkinter['precision'].get()
+            self.vars_analysis['precision'] = float(self.vars_analysis['precision']) if self.vars_analysis['precision'] != '' else None
 
         self.vars_analysis['classes_out'] = [k for k, v in self.neuron_checkboxes.items() if v.get()]
 
@@ -312,9 +313,6 @@ class AnalysisSettings(ctk.CTk):
         self.vars_analysis['analyzer_gpu'] = bool(self.vars_analysis['analyzer_gpu'])
         self.vars_analysis['n_streamers'] = int(self.vars_analysis['n_streamers']) if self.vars_analysis['n_streamers'] != '' else None
         self.vars_analysis['stream_buffer_depth'] = int(self.vars_analysis['stream_buffer_depth']) if self.vars_analysis['stream_buffer_depth'] != '' else None
-
-        if self.vars_analysis['precision'] is not None:  # already turned to
-            self.vars_analysis['precision'] = float(self.vars_analysis['precision'])
 
         self.vars_analysis = self.vars_analysis
 
@@ -337,6 +335,7 @@ class AnalysisSettings(ctk.CTk):
             self.update_idletasks()
         if self._validate():
             self._update_vars_analysis()
+            self.run = True
             self.destroy()
 
 
