@@ -40,7 +40,6 @@ class AnalysisWindow(ctk.CTk):
         self.after(cfg_gui.poll_interval_ms, self.poll_queue)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
-
         self.proc_analysis = None
         self.launch_analysis()  # no need to wait; should only get here via settings window
 

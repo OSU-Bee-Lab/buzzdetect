@@ -85,7 +85,7 @@ def validate_chunklength(chunklength_s: float):
 
     return ArgValid(True, None)
 
-def validate_int(value: int, none_ok: bool, value_min: int = None, value_max: int = None, argname=None):
+def validate_int(value: int, none_ok: bool, value_min: int = None, value_max: int = None):
     if value is None:
         if none_ok:
             return ArgValid(True, None)

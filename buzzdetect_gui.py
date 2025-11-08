@@ -1,6 +1,6 @@
 import customtkinter as ctk
-from buzzcode.gui.Settings import AnalysisSettings
-from buzzcode.gui.Analysis import AnalysisWindow
+from buzzcode.gui.settings import AnalysisSettings
+from buzzcode.gui.analysis import AnalysisWindow
 import multiprocessing
 
 def analyze_gui():

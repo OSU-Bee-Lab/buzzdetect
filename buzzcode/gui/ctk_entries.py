@@ -73,7 +73,7 @@ class FilePathEntry(TextEntry):
     def _browse(self):
         dir_selected = filedialog.askdirectory(initialdir=self.initialdir, title=self.browsetitle)
         self.initialdir = dir_selected  # keep "memory" of initial dir
-        return dir_selected
+        self.var.set(dir_selected)
 
 
 class DropDownEntry(AbstractEntry):
