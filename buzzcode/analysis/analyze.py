@@ -3,7 +3,6 @@ import multiprocessing
 import buzzcode.config as cfg
 from buzzcode.analysis.analysis import Analyzer, Coordinator
 
-
 def analyze(
         modelname: str,
         classes_out: list = 'all',
@@ -113,5 +112,5 @@ def analyze(
 
 
 if __name__ == "__main__":
-    analyze(modelname=cfg.DEFAULT_MODEL)
+    analyze(modelname=cfg.DEFAULT_MODEL, dir_audio='/Volumes/LukeSSD/r projects/buzzdetect_repository/buzzdetect_repository_deposited/data/raw/snip_recordings/mustard')
 

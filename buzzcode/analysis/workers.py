@@ -357,7 +357,7 @@ class WorkerAnalyzer:
         chunk_duration = chunk[1] - chunk[0]
 
         self.timer_analysis.stop()
-        analysis_rate = (chunk_duration / self.timer_analysis.get_total()).__round__(1)
+        analysis_rate = (chunk_duration / self.timer_analysis.get_total(5)).__round__(1)
 
         msg = (f"analyzed {path_short}, chunk ({float(chunk[0])}, {float(chunk[1])}) "
                  f"in {self.timer_analysis.get_total()}s (rate: {analysis_rate})")

@@ -6,7 +6,7 @@ class AssignLog:
     def __init__(self, msg: str, level_str: str, terminate_gui: bool = False):
         self.item = msg
         self.level_str = level_str
-        self.level_int = log_levels[level_str]
+        self.level_int = loglevels[level_str]
         self.terminate_gui = terminate_gui
 
 
@@ -41,7 +41,7 @@ class AssignWrite:
 
 level_progress = {'level': logging.INFO-5, 'levelName': 'PROGRESS'}
 logging.addLevelName(level=level_progress['level'], levelName=level_progress['levelName'])
-log_levels = {
+loglevels = {
     'NOTSET': logging.NOTSET,
     level_progress['levelName']: level_progress['level'],
     'DEBUG': logging.DEBUG,

@@ -185,6 +185,8 @@ class Analyzer:
             chunklength / self.model.embedder.framelength_s
         ) * self.model.embedder.framelength_s
         chunklength = round(chunklength, self.model.embedder.digits_time)
+        if chunklength < self.model.embedder.framelength_s:
+            chunklength = self.model.embedder.framelength_s
 
         return chunklength
 
@@ -230,8 +232,6 @@ class Analyzer:
             }
         )
         self.proc_logger.start()
-
-        self.coordinator.q_log.put(AssignLog('Launching analysis...', 'INFO'))
 
         if self.framehop_prop > 1:
             msg = (
