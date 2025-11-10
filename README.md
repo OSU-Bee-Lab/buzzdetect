@@ -1,7 +1,8 @@
-# buzzdetect
 [![DOI](https://zenodo.org/badge/685544295.svg)](https://doi.org/10.5281/zenodo.15537954)
+
+# buzzdetect
 <div align="center">
-    <img src="documentation/images/title_transparent.png" alt="Project Header" />
+    <img src="docs/source/_images/title_transparent.png" alt="Project Header" />
 </div>
 
 
