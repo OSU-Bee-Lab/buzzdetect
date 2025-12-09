@@ -17,8 +17,17 @@ class AnalysisWindow(ctk.CTk):
         self.vars_analysis['event_stopanalysis'] = multiprocessing.Event()
         self.vars_analysis['q_gui'] = multiprocessing.Queue()
 
-        self.title("buzzdetect analysis")
-        self.geometry("500x500")
+        window_width = 500
+        window_height = 500
+
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.geometry(f'{window_width}x{window_height}+{x}+{y}')
+        self.title("buzzdetect - analysis")
+        self.geometry(f"{window_width}x{window_height}")
+
         self.update()
         self.minsize(self.winfo_width(), self.winfo_height())
 

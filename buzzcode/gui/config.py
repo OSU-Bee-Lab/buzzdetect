@@ -1,6 +1,9 @@
 font_textheader = ('TkDefaultFont', 16, "bold")
 font_textentry = ('TkDefaultFont', 14)
 font_hint = ('TkDefaultFont', 12, 'italic')
+font_splash = ('TkDefaultFont', 18)
+
+color_text_splash = 'white'
 
 path_settingscache = "guisettings.json"
 
