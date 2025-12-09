@@ -7,10 +7,12 @@ Install the package manager `Conda <https://conda.io/projects/conda/en/latest/us
 
 2. Get files
 --------------
-Open a terminal wherever you want to store the buzzdetect folder.
-We'll refer to your chosen location as the "project directory."
-Clone the buzzdetect files from this GitHub repo to the directory wherever you want to store buzzdetect.
-``git clone "https://github.com/OSU-Bee-Lab/buzzdetect" [path/to/project_directory]``
+1. Open a terminal wherever you want to store the buzzdetect folder.
+2. git clone the buzzdetect files from this GitHub repo.
+
+    - Command: ``git clone "https://github.com/OSU-Bee-Lab/buzzdetect" buzzdetect``
+    - This installs buzzdetect to the subdirectory "buzzdetect" under your current working directory.
+    - We'll refer to the buzzdetect folder in your chosen location as the "project directory."
 
 .. _conda_env:
 3. Install dependencies
@@ -27,14 +29,15 @@ If this is not done, all processing will occur on CPU.
 You can install your Conda environment wherever you wish, but these steps will install it in the same directory as the buzzdetect project.
 
 1. Open a terminal in the the project directory
-2. Run the command: ``conda env create -f environment.yml -p ./environment``
+2. Run the command: ``conda env create -f environment.yml -p ./.venv``
+
     - The -p argument is the path where the Conda environment will be created
 
-3. Conda will create the ``./environment`` subdirectory and install an environment with all required packages there.
+3. Conda will create the ``./.venv`` subdirectory and install a virtual environment with all required packages there.
 
 4. Confirm proper installation
 -------------------------------
-1. Activate the conda environment by running ``conda activate ./environment``.
+1. Activate the conda environment by running ``conda activate ./venv``.
 2. Run ``conda list``; you should be able to see all of the specified dependencies (along with many other packages).
 
 5. Test an audio file
@@ -47,9 +50,6 @@ Try running an analysis!
     - If you like buttons, read :doc:`the GUI documentation <gui>`.
     - If you're savvy in the command line, read :doc:`the command line documentation <cli>`.
     - If you're using buzzdetect in another Python project, check out :doc:`the API documentation <api>`.
-
-If you keep the default output directory setting, you will see the results file get written to the "output" subdirectory of the model you chose.
-E.g., "models/model_general_v3/output/testbuzz_buzzdetect.csv"
 
 For further reading, see :doc:`workflow`.
 
