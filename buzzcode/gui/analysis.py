@@ -105,8 +105,7 @@ class AnalysisWindow(ctk.CTk):
     def poll_queue(self):
         while not self.vars_analysis['q_gui'].empty():
             msg: AssignLog = self.vars_analysis['q_gui'].get()
-            if msg.terminate_gui:
-                self.stop_analysis()
+            if not self.proc_analysis.is_alive or self.vars_analysis['event_stopanalysis'].is_set():
                 break
 
             # Determine tag (based on level)
@@ -118,7 +117,7 @@ class AnalysisWindow(ctk.CTk):
 
             # Insert text with tag
             at_bottom = self._is_at_bottom()  # check BEFORE inserting
-            self.textbox.insert("end", msg.item + "\n", msg.level_str)
+            self.textbox.insert("end", msg.message + "\n", msg.level_str)
             self._trim_if_needed()
             if at_bottom:
                 self.textbox.see("end")

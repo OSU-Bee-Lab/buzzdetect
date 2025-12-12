@@ -1,7 +1,9 @@
 import multiprocessing
 
 import buzzcode.config as cfg
-from buzzcode.analysis.analysis import Analyzer, Coordinator
+from buzzcode.analysis.analysis import Analyzer
+from buzzcode.analysis.workers import Coordinator
+
 
 def analyze(
         modelname: str,

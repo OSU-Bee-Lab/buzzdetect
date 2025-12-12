@@ -1,90 +1,18 @@
-import multiprocessing
 import os
 import re
 import signal
-import threading
 from datetime import datetime
-from queue import Queue
-
-import soundfile as sf
 
 from buzzcode import config as cfg
 from buzzcode.analysis.assignments import AssignLog, AssignStream
 from buzzcode.analysis.results_coverage import clean_and_chunk
-from buzzcode.analysis.workers import WorkerLogger, WorkerStreamer, WorkerWriter, WorkerAnalyzer
+from buzzcode.analysis.workers import WorkerLogger, WorkerStreamer, WorkerWriter, WorkerAnalyzer, WorkerChecker, \
+    Coordinator
 from buzzcode.audio import get_duration
 from buzzcode.models.load_model import load_model
 from buzzcode.training.test import pull_sx
-from buzzcode.utils import Timer, search_dir
+from buzzcode.utils import Timer
 
-
-class Coordinator:
-    def __init__(self,
-                 analyzers_cpu,
-                 analyzer_gpu: bool=False,
-                 streamers_total: int=None,
-                 depth: int=None,
-                 q_gui: Queue=None,
-                 event_stopanalysis: multiprocessing.Event=None,
-                 force_threads: bool = False,):
-
-        self.analyzers_cpu = analyzers_cpu
-        self.analyzer_gpu = analyzer_gpu
-
-        self.analyzers_total = analyzers_cpu + analyzer_gpu
-        self.analyzers_live = multiprocessing.Value('i', self.analyzers_total)
-        self.streamers_total = self._setup_streamers(self.analyzers_total) if streamers_total is None else streamers_total
-        self.streamers_live = multiprocessing.Value('i', self.streamers_total)
-
-        self.queue_depth = self._setup_depth() if depth is None else depth
-        self.q_gui = q_gui
-
-        # these can be tweaked (don't forget to change corresponding queues),
-        # but we find that leaving everything threaded is, strangely, the most
-        # performant approach. The time to pickle and enqueue seems to outweigh
-        # the savings of parallel processing.
-        self.concurrency_logger = threading.Thread
-        self.concurrency_streamer = threading.Thread
-        self.concurrency_writer = threading.Thread
-        self.concurrency_analyzer = threading.Thread
-
-        self.q_log = Queue()
-        self.q_stream = Queue()
-        self.q_analyze = Queue(maxsize=self.queue_depth)
-        self.q_write = Queue()
-
-        self.event_stopanalysis = event_stopanalysis if event_stopanalysis is not None else multiprocessing.Event()
-        self.event_analysisdone = multiprocessing.Event()
-        self.event_closelogger = multiprocessing.Event()
-
-        self.force_threads = force_threads
-
-    def _setup_queues(self):
-        if self.analyzer_gpu or self.force_threads:
-            concurrency = Queue
-        else:
-            concurrency = multiprocessing.Queue
-
-        q_stream = concurrency()  # don't set a max size here! These are just the paths to analyze; need to build all before analysis
-        q_analyze = concurrency(maxsize=self.queue_depth)
-
-        return q_stream, q_analyze
-
-    def _setup_streamers(self, n_analyzers):
-        if self.analyzer_gpu:
-            n_streamers = n_analyzers*8
-        else:
-            n_streamers = n_analyzers
-
-        return n_streamers
-
-    def _setup_depth(self):
-        return self.streamers_total * 2
-
-
-def early_exit(msg: str, level: str, coordinator: Coordinator):
-    coordinator.q_log.put(AssignLog(msg=msg, level_str=level))
-    coordinator.event_stopanalysis.set()
 
 def run_worker(workerclass, **kwargs):
     worker = workerclass(**kwargs)
@@ -100,6 +28,7 @@ class GracefulKiller:
   def exit_gracefully(self, signum, frame):
       print(f"Received signal {signum}; exiting gracefully.")
       self.event_stopanalysis.set()
+
 
 
 class Analyzer:
@@ -174,7 +103,7 @@ class Analyzer:
         self.proc_analyzers = []
 
     def _log_debug(self, msg):
-        self.coordinator.q_log.put(AssignLog(msg=msg, level_str='DEBUG'))
+        self.coordinator.q_log.put(AssignLog(message=msg, level_str='DEBUG'))
         print(f'DEBUG: {msg}')
 
     # Setup methods
@@ -241,107 +170,7 @@ class Analyzer:
                 f'to {cfg.SUFFIX_RESULT_COMPLETE}.\n'
                 f'Repeated analysis will attempt to fill gaps between frames.'
             )
-            self.coordinator.q_log.put(AssignLog(msg=msg, level_str='WARNING'))
-
-    def _build_assignments(self):
-        """Discover audio files and build processing assignments."""
-        # Find compatible audio files
-        paths_audio_raw = search_dir(self.dir_audio, list(sf.available_formats().keys()))
-
-        if len(paths_audio_raw) == 0:
-            msg = (
-                f"no compatible audio files found in raw directory {self.dir_audio} \n"
-                f"audio format must be compatible with soundfile module version {sf.__version__} \n"
-                f"exiting analysis"
-            )
-
-            early_exit(
-                msg=msg,
-                level='ERROR',
-                coordinator=self.coordinator,
-            )
-            return False
-
-        # Filter out already-completed files
-        paths_audio = []
-        for path_audio in paths_audio_raw:
-            path_out = re.sub(self.dir_audio, self.dir_out, path_audio)
-            path_out = os.path.splitext(path_out)[0] + cfg.SUFFIX_RESULT_COMPLETE
-            if not os.path.exists(path_out):
-                paths_audio.append(path_audio)
-
-        if not paths_audio:
-            msg = f"all files in {self.dir_audio} are fully analyzed; exiting analysis"
-            self.coordinator.q_log.put(AssignLog(msg=msg, level_str='WARNING'))
-            self.coordinator.event_analysisdone.set()
-            self.proc_logger.join()
-            return False
-
-        # Build assignment list
-        self.a_stream_list = []
-        for path_audio in paths_audio:
-            if os.path.getsize(path_audio) < 5000:
-                self.coordinator.q_log.put(
-                    AssignLog(msg=f'Skipping miniscule file: {path_audio}', level_str='WARNING')
-                )
-                continue
-
-            base_out = re.sub(self.dir_audio, self.dir_out, path_audio)
-            base_out = os.path.splitext(base_out)[0]
-            self.coordinator.q_log.put(
-                AssignLog(msg=f'Checking results for {re.sub(self.dir_out, "", base_out)}', level_str='INFO')
-            )
-
-            duration_audio = get_duration(path_audio, q_log=self.coordinator.q_log)
-            chunklist = clean_and_chunk(
-                ident_out=base_out,
-                duration_audio=duration_audio,
-                framelength_s=self.model.embedder.framelength_s,
-                chunklength=self.chunklength
-            )
-
-            if not chunklist:
-                continue
-
-            self.a_stream_list.append(
-                AssignStream(
-                    path_audio=path_audio,
-                    chunklist=chunklist,
-                    duration_audio=duration_audio,
-                    terminate=False,
-                    dir_audio=self.dir_audio
-                )
-            )
-
-        self._log_debug(f'checking stream list')
-        if not self.a_stream_list:
-            self._log_debug(f'no files in stream list')
-            self.coordinator.q_log.put(
-                AssignLog(msg=f'All files in {self.dir_audio} are fully analyzed; exiting analysis',
-                          level_str='WARNING')
-            )
-            self.coordinator.event_analysisdone.set()
-            self.proc_logger.join()
-            return False
-        else:
-            self._log_debug(f'found {len(self.a_stream_list)} files in stream list')
-
-        for a in self.a_stream_list:
-            self.coordinator.q_stream.put(a)
-
-        # queue termination sentinels for streamers at end of analysis
-        a_stream_terminate = AssignStream(
-            path_audio=None,
-            dir_audio=None,
-            duration_audio=None,
-            chunklist=None,
-            terminate=True
-        )
-
-        for _ in range(self.coordinator.streamers_total):
-            self.coordinator.q_stream.put(a_stream_terminate)
-
-        return True
+            self.coordinator.q_log.put(AssignLog(message=msg, level_str='WARNING'))
 
     def _log_startup(self):
         msg = (
@@ -358,8 +187,7 @@ class Analyzer:
             f'Queue depth: {self.coordinator.queue_depth}\n'
         )
 
-        self.coordinator.q_log.put(AssignLog(msg=msg, level_str='INFO'))
-
+        self.coordinator.q_log.put(AssignLog(message=msg, level_str='INFO'))
 
     def _launch_streamers(self):
         """Launch streamer workers (threads or processes based on mode)."""
@@ -434,7 +262,7 @@ class Analyzer:
     def _run_gpu_analyzer(self):
         """Run GPU analyzer blocking in main thread (GPU mode only)."""
         if not self.coordinator.analyzer_gpu:
-            self.coordinator.q_log.put(AssignLog(msg='GPU mode disabled; skipping GPU analyzer', level_str='WARNING'))
+            self.coordinator.q_log.put(AssignLog(message='GPU mode disabled; skipping GPU analyzer', level_str='WARNING'))
             return
 
         # GPU analyzer runs in main thread to avoid pickling issues
@@ -452,29 +280,6 @@ class Analyzer:
             analyzers_live=self.coordinator.analyzers_live
         )()  # Call directly, blocking execution
 
-    # TODO: this can probably be a Cleaner class invoked at start and end of anlaysis; holds stream list in attrib
-    def _cleanup(self):
-        """Perform final chunklist checks and cleanup."""
-        for a in self.a_stream_list:
-            path_audio = a.path_audio
-            base_out = re.sub(self.dir_audio, self.dir_out, path_audio)
-            base_out = os.path.splitext(base_out)[0]
-
-            clean_and_chunk(
-                ident_out=base_out,
-                duration_audio=get_duration(path_audio, self.coordinator.q_log),
-                framelength_s=self.model.embedder.framelength_s,
-                chunklength=self.chunklength
-            )
-
-        self.timer_total.stop()
-
-        self.coordinator.q_log.put(
-            AssignLog(
-                msg=f"{datetime.now()} - analysis complete; total time: {self.timer_total.get_total()}s",
-                level_str='INFO'
-            )
-        )
 
     def run(self):
         """Execute the complete analysis workflow."""
@@ -482,9 +287,16 @@ class Analyzer:
         self._launch_logger()
 
         self._log_debug('building assignments')
-        self._build_assignments()
-        if not self.a_stream_list:
-            return
+
+        checker = WorkerChecker(
+            dir_audio=self.dir_audio,
+            dir_out=self.dir_out,
+            framelength_s=self.model.embedder.framelength_s,
+            chunklength=self.chunklength,
+            coordinator=self.coordinator
+        )
+
+        checker.queue_assignments()
 
         self._log_debug('initializing killer')
         killer = GracefulKiller(self.coordinator.event_stopanalysis)
@@ -506,6 +318,6 @@ class Analyzer:
         self.coordinator.event_analysisdone.wait()
 
         # Cleanup
-        self._cleanup()
+        checker.cleanup()
         self.coordinator.event_analysisdone.set()
         self.proc_logger.join()

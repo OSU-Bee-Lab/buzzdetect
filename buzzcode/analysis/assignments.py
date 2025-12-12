@@ -3,11 +3,10 @@ import re
 
 
 class AssignLog:
-    def __init__(self, msg: str, level_str: str, terminate_gui: bool = False):
-        self.item = msg
+    def __init__(self, message: str, level_str: str):
+        self.message = message
         self.level_str = level_str
         self.level_int = loglevels[level_str]
-        self.terminate_gui = terminate_gui
 
 
 class AssignStream:
@@ -22,6 +21,7 @@ class AssignStream:
         else:
             self.shortpath = self.path_audio.replace(dir_audio, '')
             self.shortpath = re.sub('^/', '', self.shortpath)
+
 
 
 class AssignAnalyze:
@@ -39,12 +39,10 @@ class AssignWrite:
         self.results = results
 
 
-level_progress = {'level': logging.INFO-5, 'levelName': 'PROGRESS'}
-logging.addLevelName(level=level_progress['level'], levelName=level_progress['levelName'])
 loglevels = {
     'NOTSET': logging.NOTSET,
-    level_progress['levelName']: level_progress['level'],
     'DEBUG': logging.DEBUG,
+    'PROGRESS': logging.INFO-5,
     'INFO': logging.INFO,
     'WARNING': logging.WARNING,
     'ERROR': logging.ERROR,

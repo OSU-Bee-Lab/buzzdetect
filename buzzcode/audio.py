@@ -1,19 +1,63 @@
+"""
+Handling of audio files
+
+Most functions are for custom handling of audio duration.
+soundfile.SoundFile.frames is not reliable for determining duration.
+The "EOF" (end of file) handling provides a reliable way for buzzdetect to
+determine the actual readable duration of audio files.
+
+"""
+
 import glob
+import multiprocessing
 import os
 import re
 
 import numpy as np
 import soundfile as sf
-import librosa
-import math
-import scipy.signal
 from numpy.lib.stride_tricks import sliding_window_view
 
 from buzzcode.analysis.assignments import AssignLog
 from buzzcode.config import TAG_EOF
 
 
+def get_duration(path_audio, q_log: multiprocessing.Queue = None):
+    """
+    Get the duration of an audio file in seconds.
+
+    If EOF files exist, use those to determine the actual duration.
+    If multiple EOF files exist, call resolve_multiple_eof().
+
+    Parameters:
+    -----------
+    path_audio : str
+        Path to audio file
+    q_log : multiprocessing.Queue or None
+        The queue for logging messages. If None, no messages will be logged.
+
+    Returns:
+    --------
+    float
+        The duration of the audio file in seconds.
+    """
+    track = sf.SoundFile(path_audio)
+    paths_eof = enumerate_eof_files(path_audio)
+
+    if not paths_eof:
+        frame_final = track.frames
+    elif len(paths_eof) == 1:
+        frame_final = extract_eof_frame(paths_eof[0])
+    else:
+        if q_log is not None:
+            q_log.put(AssignLog(message=f"multiple EOF files found for {path_audio}; retaining earliest", level_str='WARNING'))
+        frame_final = resolve_multiple_eof(paths_eof)
+
+    return frame_final / track.samplerate
+
 def extract_eof_frame(path_eof):
+    """
+    Extract the final frame number from a path to an EOF file
+    """
     matches = re.findall(rf'{TAG_EOF}_(\d+)$', path_eof)
     if not matches:
         raise ValueError(f'Could not extract eof frame from {path_eof}')
@@ -34,21 +78,6 @@ def enumerate_eof_files(path_audio):
     paths_eof = glob.glob(base_eof + '*')
 
     return paths_eof
-
-def get_duration(path_audio, q_log):
-    track = sf.SoundFile(path_audio)
-    paths_eof = enumerate_eof_files(path_audio)
-
-    if not paths_eof:
-        frame_final = track.frames
-    elif len(paths_eof) == 1:
-        frame_final = extract_eof_frame(paths_eof[0])
-    else:
-        if q_log is not None:
-            q_log.put(AssignLog(msg=f"multiple EOF files found for {path_audio}; retaining earliest", level_str='WARNING'))
-        frame_final = resolve_multiple_eof(paths_eof)
-
-    return frame_final / track.samplerate
 
 
 def frame_audio(audio_data, framelength, samplerate, framehop_s):

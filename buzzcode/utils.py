@@ -8,7 +8,6 @@ class Timer:
     def __init__(self):
         self.time_start = datetime.now()
         self.time_end = datetime.now()
-        # self.state = 'running'  # not pursuing it right now, but I could add exceptions for illegal start/stop
 
     def stop(self):
         self.time_end = datetime.now()
@@ -24,11 +23,6 @@ class Timer:
         total_formatted = time_total.total_seconds().__round__(decimals)
 
         return total_formatted
-
-
-def clip_name(filepath, clippath):
-    clip = re.sub(clippath, "", filepath)
-    return clip
 
 
 def search_dir(dir_in, extensions=None):
@@ -76,27 +70,8 @@ def read_pickle_generator(path_pickle):
                 break
 
 
-def make_chunklist(duration, chunklength, chunk_overlap=0, chunk_min=0):
-    if chunk_overlap > chunklength:
-        raise ValueError('chunk overlap must be less than chunk length')
-
-    if chunklength > duration:
-        return [(0, duration)]
-
-    chunklist = []
-    chunk_start = 0
-    chunk_stop = chunklength
-    while chunk_stop < duration:
-        chunklist.append((chunk_start, chunk_stop))
-
-        chunk_start = chunk_stop - chunk_overlap
-        chunk_stop = chunk_start + chunklength
-        if (duration - chunk_stop) <= chunk_min:
-            chunklist.append((chunk_start, duration))
-            break
-
-    return chunklist
-
+def shortpath(path, dir_root):
+    return re.sub(dir_root, "", path)
 
 def build_ident(path, root_dir, tag=None):
     ident = re.sub(root_dir, '', path)
