@@ -1,9 +1,10 @@
 import json
 import os
-import buzzcode.config as cfg
-
 from abc import ABC, abstractmethod
+
+import buzzcode.config as cfg
 from buzzcode.embedding.load_embedder import load_embedder, BaseEmbedder
+
 
 class BaseModel(ABC):
     """Abstract base class for all buzzdetect models"""

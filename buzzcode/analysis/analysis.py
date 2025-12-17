@@ -1,14 +1,11 @@
 import os
-import re
 import signal
-from datetime import datetime
+import threading
 
 from buzzcode import config as cfg
-from buzzcode.analysis.assignments import AssignLog, AssignStream
-from buzzcode.analysis.results_coverage import clean_and_chunk
+from buzzcode.analysis.assignments import AssignLog
 from buzzcode.analysis.workers import WorkerLogger, WorkerStreamer, WorkerWriter, WorkerAnalyzer, WorkerChecker, \
     Coordinator
-from buzzcode.audio import get_duration
 from buzzcode.models.load_model import load_model
 from buzzcode.training.test import pull_sx
 from buzzcode.utils import Timer
@@ -17,18 +14,7 @@ from buzzcode.utils import Timer
 def run_worker(workerclass, **kwargs):
     worker = workerclass(**kwargs)
     worker()
-
-
-class GracefulKiller:
-  def __init__(self, event_stopanalysis):
-      signal.signal(signal.SIGINT, self.exit_gracefully)
-      signal.signal(signal.SIGTERM, self.exit_gracefully)
-      self.event_stopanalysis = event_stopanalysis
-
-  def exit_gracefully(self, signum, frame):
-      print(f"Received signal {signum}; exiting gracefully.")
-      self.event_stopanalysis.set()
-
+    print(f"DEBUG, run_worker: {worker.__class__.__name__} finished.")
 
 
 class Analyzer:
@@ -97,14 +83,14 @@ class Analyzer:
 
         self.a_stream_list = []
 
-        self.proc_logger = None
-        self.proc_writer = None
-        self.proc_streamers = []
-        self.proc_analyzers = []
+        self.thread_logger = None
+        self.thread_writer = None
+        self.threads_streamers = []
+        self.threads_analyzers = []
 
     def _log_debug(self, msg):
         self.coordinator.q_log.put(AssignLog(message=msg, level_str='DEBUG'))
-        print(f'DEBUG: {msg}')
+        print(f'DEBUG, ANALYZER: {msg}')
 
     # Setup methods
     #
@@ -141,26 +127,20 @@ class Analyzer:
         )
         os.makedirs(os.path.dirname(path_log), exist_ok=True)
 
-        self.proc_logger = self.coordinator.concurrency_logger(
+        self.thread_logger = threading.Thread(
             target=run_worker,
             name='logger_proc',
 
-            # unfortunately, we can't just send the coordinator, because
-            # some workers are multiprocessing.Processes and we can't
-            # pickle the threading objects in coordinator
             kwargs={
                 'workerclass': WorkerLogger,
                 'path_log': path_log,
-                'q_log': self.coordinator.q_log,
-                'event_analysisdone': self.coordinator.event_analysisdone,
-                'event_stopanalysis': self.coordinator.event_stopanalysis,
                 'verbosity_print': self.verbosity_print,
                 'verbosity_log': self.verbosity_log,
                 'log_progress': self.log_progress,
-                'q_gui': self.coordinator.q_gui,
+                'coordinator': self.coordinator,
             }
         )
-        self.proc_logger.start()
+        self.thread_logger.start()
 
         if self.framehop_prop > 1:
             msg = (
@@ -176,7 +156,7 @@ class Analyzer:
         msg = (
             f'Model: {self.modelname}\n'
             f'Frame hop: {self.framehop_prop}\n'
-            f'Treshold: {self.threshold}\n'
+            f'Threshold: {self.threshold}\n'
             f'Output classes: {", ".join(self.classes_out)}\n'
             f'Input directory: {self.dir_audio}\n'
             f'Output directory: {self.dir_out}\n'
@@ -192,27 +172,23 @@ class Analyzer:
     def _launch_streamers(self):
         """Launch streamer workers (threads or processes based on mode)."""
         for s in range(self.coordinator.streamers_total):
-            streamer = self.coordinator.concurrency_streamer(
+            streamer = threading.Thread(
                 target=run_worker,
                 name=f'streamer_{s}',
                 kwargs={
                     'workerclass': WorkerStreamer,
                     'id_streamer': s,
                     'resample_rate': self.model.embedder.samplerate,
-                    'streamers_live': self.coordinator.streamers_live,
-                    'q_stream': self.coordinator.q_stream,
-                    'q_analyze': self.coordinator.q_analyze,
-                    'q_log': self.coordinator.q_log,
-                    'event_stopanalysis': self.coordinator.event_stopanalysis,
+                    'coordinator': self.coordinator,
                 }
             )
-            self.proc_streamers.append(streamer)
-            self.proc_streamers[-1].start()
+            self.threads_streamers.append(streamer)
+            self.threads_streamers[-1].start()
 
 
     def _launch_writer(self):
         """Launch the writer process."""
-        self.proc_writer = self.coordinator.concurrency_writer(
+        self.thread_writer = threading.Thread(
             target=run_worker,
             name='writer_proc',
             kwargs={
@@ -225,19 +201,15 @@ class Analyzer:
                 'dir_audio': self.dir_audio,
                 'dir_out': self.dir_out,
                 'digits_results': self.model.config['digits_results'],
-                'q_write': self.coordinator.q_write,
-                'q_log': self.coordinator.q_log,
-                'event_stopanalysis': self.coordinator.event_stopanalysis,
-                'event_analysisdone': self.coordinator.event_analysisdone,
-                'analyzers_live': self.coordinator.analyzers_live,
+                'coordinator': self.coordinator
 
             }
         )
-        self.proc_writer.start()
+        self.thread_writer.start()
 
-    def _launch_cpu_analyzers(self):
+    def _launch_analyzers(self):
         for a in range(self.coordinator.analyzers_total):
-            analyzer = self.coordinator.concurrency_analyzer(
+            analyzer = threading.Thread(
                 target=run_worker,
                 name=f"analyzer_cpu_{a}",
                 kwargs={
@@ -246,47 +218,37 @@ class Analyzer:
                     'processor': 'CPU',
                     'modelname': self.modelname,
                     'framehop_prop': self.framehop_prop,
-
-                    'q_log': self.coordinator.q_log,
-                    'q_write': self.coordinator.q_write,
-                    'q_analyze': self.coordinator.q_analyze,
-                    'event_stopanalysis': self.coordinator.event_stopanalysis,
-                    'streamers_live': self.coordinator.streamers_live,
-                    'analyzers_live': self.coordinator.analyzers_live,
+                    'coordinator': self.coordinator,
                 }
             )
 
-            self.proc_analyzers.append(analyzer)
-            self.proc_analyzers[-1].start()
+            self.threads_analyzers.append(analyzer)
 
-    def _run_gpu_analyzer(self):
-        """Run GPU analyzer blocking in main thread (GPU mode only)."""
-        if not self.coordinator.analyzer_gpu:
-            self.coordinator.q_log.put(AssignLog(message='GPU mode disabled; skipping GPU analyzer', level_str='WARNING'))
-            return
+        if self.coordinator.analyzer_gpu:
+            os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+            analyzer_gpu = threading.Thread(
+                target=run_worker,
+                name='analyzer_gpu',
+                kwargs={
+                    'workerclass': WorkerAnalyzer,
+                    'id_analyzer': 'GPU',
+                    'processor': 'GPU',
+                    'modelname': self.modelname,
+                    'framehop_prop': self.framehop_prop,
+                    'coordinator': self.coordinator,
+                }
+            )
 
-        # GPU analyzer runs in main thread to avoid pickling issues
-        os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
-        WorkerAnalyzer(
-            id_analyzer='GPU',
-            processor='GPU',
-            modelname=self.modelname,
-            framehop_prop=self.framehop_prop,
-            q_log=self.coordinator.q_log,
-            q_write=self.coordinator.q_write,
-            q_analyze=self.coordinator.q_analyze,
-            event_stopanalysis=self.coordinator.event_stopanalysis,
-            streamers_live=self.coordinator.streamers_live,
-            analyzers_live=self.coordinator.analyzers_live
-        )()  # Call directly, blocking execution
+            self.threads_analyzers.append(analyzer_gpu)
 
+        for t in self.threads_analyzers:
+            t.start()
 
     def run(self):
         """Execute the complete analysis workflow."""
-        self._log_debug('launching logger')
+        self._log_startup()
         self._launch_logger()
 
-        self._log_debug('building assignments')
 
         checker = WorkerChecker(
             dir_audio=self.dir_audio,
@@ -298,26 +260,28 @@ class Analyzer:
 
         checker.queue_assignments()
 
-        self._log_debug('initializing killer')
-        killer = GracefulKiller(self.coordinator.event_stopanalysis)
-        # Launch all workers
-        self._log_debug('launching writing')
+        # checker can trigger an early exit based on the state of the files;
+        # if this happens, don't even launch
+        if self.coordinator.event_exitanalysis.is_set():
+            self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
+            return
+
         self._launch_writer()
-
-        self._log_debug('launching streamers')
         self._launch_streamers()
+        self._launch_analyzers()
 
-        self._log_debug('launching analyzers')
-        self._launch_cpu_analyzers()
+        self.coordinator.wait_for_exit(
+            threads_streamers=self.threads_streamers,
+            threads_analyzers=self.threads_analyzers,
+            thread_writer=self.thread_writer
+        )
 
-        # GPU analyzer runs blocking in main thread if enabled
-        if self.coordinator.analyzer_gpu:
-            self._run_gpu_analyzer()
+        if self.coordinator.end_reason == 'completed':
+            checker.cleanup()
+            self.timer_total.stop()
+            analysis_time = self.timer_total.get_total()
 
-        # Wait for completion
-        self.coordinator.event_analysisdone.wait()
+            self.coordinator.q_log.put(AssignLog(message=f'\nAll files analyzed and cleaned.\nTotal analysis time: {analysis_time.__format__(',')}s', level_str='INFO', terminate=False))
 
-        # Cleanup
-        checker.cleanup()
-        self.coordinator.event_analysisdone.set()
-        self.proc_logger.join()
+        self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
+        self.thread_logger.join()

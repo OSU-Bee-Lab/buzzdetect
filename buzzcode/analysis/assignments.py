@@ -3,10 +3,11 @@ import re
 
 
 class AssignLog:
-    def __init__(self, message: str, level_str: str):
+    def __init__(self, message: str, level_str: str, terminate: bool = False):
         self.message = message
         self.level_str = level_str
         self.level_int = loglevels[level_str]
+        self.terminate = terminate
 
 
 class AssignStream:

@@ -1,7 +1,9 @@
-import buzzcode.config as cfg
-from buzzcode.analysis.assignments import loglevels
 import numbers
 import os
+
+import buzzcode.config as cfg
+from buzzcode.analysis.assignments import loglevels
+
 
 class ArgValid:
     def __init__(self, valid, message):

@@ -93,7 +93,7 @@ def analyze(
         streamers_total=n_streamers,
         depth=stream_buffer_depth,
         q_gui=q_gui,
-        event_stopanalysis=event_stopanalysis
+        event_analysisdone=event_stopanalysis
     )
 
     analyzer = Analyzer(

@@ -8,7 +8,7 @@ Install the package manager `Conda <https://conda.io/projects/conda/en/latest/us
 2. Get files
 --------------
 1. Open a terminal wherever you want to store the buzzdetect folder.
-2. git clone the buzzdetect files from this GitHub repo.
+2. git clone the buzzdetect files from `the GitHub repo <https://github.com/OSU-Bee-Lab/buzzdetect>`_.
 
     - Command: ``git clone "https://github.com/OSU-Bee-Lab/buzzdetect" buzzdetect``
     - This installs buzzdetect to the subdirectory "buzzdetect" under your current working directory.

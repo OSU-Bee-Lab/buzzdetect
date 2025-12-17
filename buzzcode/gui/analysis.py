@@ -4,8 +4,43 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 import buzzcode.gui.config as cfg_gui
-from buzzcode.analysis.analyze import analyze
+from buzzcode.analysis.analysis import Analyzer
 from buzzcode.analysis.assignments import AssignLog
+from buzzcode.analysis.workers import Coordinator
+import threading
+import time
+
+
+def run_analysis(vars_analysis, q_gui, event_analysisdone, q_earlyexit):
+    coordinator = Coordinator(
+        analyzers_cpu=vars_analysis['analyzers_cpu'],
+        analyzer_gpu=vars_analysis['analyzer_gpu'],
+        streamers_total=vars_analysis['n_streamers'],
+        depth=vars_analysis['stream_buffer_depth'],
+        q_gui=q_gui,
+        event_analysisdone=event_analysisdone,
+        q_earlyexit=q_earlyexit
+    )
+
+    analyzer = Analyzer(
+        modelname=vars_analysis['modelname'],
+        classes_out=vars_analysis['classes_out'],
+        precision=vars_analysis['precision'],
+        framehop_prop=vars_analysis['framehop_prop'],
+        chunklength=vars_analysis['chunklength'],
+        dir_audio=vars_analysis['dir_audio'],
+        dir_out=vars_analysis['dir_out'],
+        verbosity_print=vars_analysis['verbosity_print'],
+        verbosity_log=vars_analysis['verbosity_log'],
+        log_progress=vars_analysis['log_progress'],
+        coordinator=coordinator
+    )
+
+    print('DEBUG: starting analysis')
+    analyzer.run()
+    time.sleep(10)
+    print('DEBUG: analysis complete')
+    print("Child threads still alive:", [t.name for t in threading.enumerate()])
 
 
 # --- GUI main process ---
@@ -14,8 +49,9 @@ class AnalysisWindow(ctk.CTk):
         super().__init__()
         self.vars_analysis = vars_analysis
 
-        self.vars_analysis['event_stopanalysis'] = multiprocessing.Event()
-        self.vars_analysis['q_gui'] = multiprocessing.Queue()
+        self.q_gui = multiprocessing.Queue()
+        self.event_analysisdone = multiprocessing.Event()
+        self.q_earlyexit = multiprocessing.Queue()
 
         window_width = 500
         window_height = 500
@@ -34,7 +70,7 @@ class AnalysisWindow(ctk.CTk):
         self.textbox = ctk.CTkTextbox(self, wrap="word")
         self.textbox.pack(expand=True, fill="both", padx=10, pady=10)
 
-        self.start_btn = ctk.CTkButton(self, text="Launch Analysis", command=self.launch_analysis)
+        self.start_btn = ctk.CTkButton(self, text="Re-run analysis", command=self.launch_analysis)
         self.start_btn.pack(side=ctk.LEFT, padx=5, pady=5)
         self.stop_btn = ctk.CTkButton(
             self,
@@ -76,12 +112,14 @@ class AnalysisWindow(ctk.CTk):
         if self.proc_analysis and self.proc_analysis.is_alive():
             return
 
-        self.vars_analysis['event_stopanalysis'].clear()  # allows reruns
+        self.event_analysisdone.clear()
+
         self.proc_analysis = multiprocessing.Process(
-            target=analyze,
-            name='gui_analysis',
-            kwargs=self.vars_analysis,
+            target=run_analysis,
+            args=(self.vars_analysis, self.q_gui, self.event_analysisdone, self.q_earlyexit),
+            name='gui_analysis'
         )
+
         self.proc_analysis.start()
         self.textbox.insert("end", "Launching analysis...\n")
         self.start_btn.configure(state="disabled")
@@ -96,28 +134,27 @@ class AnalysisWindow(ctk.CTk):
         if not messagebox.askyesno("Confirm Stop", "Stopping will leave partially-analyzed files.\nAre you sure you want to stop?"):
             return False
 
-        self.vars_analysis['event_stopanalysis'].set()
-        self.textbox.insert("end", "Stopping analysis...\n")
+        self.q_earlyexit.put('Analysis stopped by user')
         self.start_btn.configure(state="normal")
-        self.stop_btn.configure(state="disabled")
+        # self.stop_btn.configure(state="disabled")
         return True
 
     def poll_queue(self):
-        while not self.vars_analysis['q_gui'].empty():
-            msg: AssignLog = self.vars_analysis['q_gui'].get()
-            if not self.proc_analysis.is_alive or self.vars_analysis['event_stopanalysis'].is_set():
+        while not self.q_gui.empty():
+            a_log: AssignLog = self.q_gui.get()
+            if a_log.terminate:
                 break
 
             # Determine tag (based on level)
-            color = cfg_gui.levelcolors.get(msg.level_str, "black")
+            color = cfg_gui.levelcolors.get(a_log.level_str, "black")
 
             # Make sure the tag exists and has a color
-            if msg.level_str not in self.textbox.tag_names():
-                self.textbox.tag_config(msg.level_str, foreground=color)
+            if a_log.level_str not in self.textbox.tag_names():
+                self.textbox.tag_config(a_log.level_str, foreground=color)
 
             # Insert text with tag
-            at_bottom = self._is_at_bottom()  # check BEFORE inserting
-            self.textbox.insert("end", msg.message + "\n", msg.level_str)
+            at_bottom = self._is_at_bottom()
+            self.textbox.insert("end", a_log.message + "\n", a_log.level_str)
             self._trim_if_needed()
             if at_bottom:
                 self.textbox.see("end")
@@ -127,3 +164,27 @@ class AnalysisWindow(ctk.CTk):
     def _close(self):
         if self.stop_analysis():
             self.destroy()
+
+
+if __name__ == '__main__':
+    vars_analysis = {
+        'modelname': 'model_general_v3',
+        'classes_out': 'all',
+        'precision': None,
+        'framehop_prop': 1,
+        'chunklength': 200,
+        'analyzers_cpu': 1,
+        'analyzer_gpu': False,
+        'n_streamers': None,
+        'stream_buffer_depth': None,
+        'dir_audio': 'audio_in',
+        'dir_out': None,
+        'verbosity_print': 'NOTSET',
+        'verbosity_log': 'NOTSET',
+        'log_progress': False,
+        'q_gui': None,
+        'event_stopanalysis': None
+    }
+
+    window = AnalysisWindow(vars_analysis)
+    window.mainloop()

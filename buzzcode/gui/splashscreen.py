@@ -1,5 +1,6 @@
 import customtkinter as ctk
 from PIL import Image, ImageTk
+
 import buzzcode.gui.config as cfg_gui
 
 

@@ -201,7 +201,7 @@ class AnalysisSettings(ctk.CTk):
 
     def _open_advanced_settings_window(self):
         """Opens the Advanced Settings in a new window."""
-        adv_window = AdvancedSettingsWindow(self, vars_analysis=self.vars_analysis, vars_tkinter= self.vars_tkinter)
+        adv_window = AdvancedSettings(self, vars_analysis=self.vars_analysis, vars_tkinter= self.vars_tkinter)
         self.wait_window(adv_window)
 
     def _load_available_models(self):
@@ -286,7 +286,7 @@ class AnalysisSettings(ctk.CTk):
 
     def _advanced_settings(self):
         """Opens the Advanced Settings in a new window."""
-        adv_window = AdvancedSettingsWindow(self, self.vars_analysis, self.vars_tkinter)
+        adv_window = AdvancedSettings(self, self.vars_analysis, self.vars_tkinter)
         self.wait_window(adv_window)
 
     def _update_vars_analysis(self):
@@ -340,7 +340,7 @@ class AnalysisSettings(ctk.CTk):
 
 
 # --- Advanced Settings Window ---
-class AdvancedSettingsWindow(ctk.CTkToplevel):
+class AdvancedSettings(ctk.CTkToplevel):
     def __init__(self, master: AnalysisSettings, vars_analysis, vars_tkinter):
         super().__init__(master)
 
