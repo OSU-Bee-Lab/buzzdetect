@@ -414,7 +414,8 @@ class WorkerStreamer:
         for chunk in a_stream.chunklist:
             abort_stream = queue_chunk(chunk, track, samplerate_native)
             if abort_stream:
-                return False
+                return True # Note! This is whether to continue to *next file*, the abort for this file is handled by return
+                # need to refactor to make clearer...a lot of these methods could be independent functions
 
             if self.coordinator.event_exitanalysis.is_set():
                 self.log("exit event set, terminating", 'DEBUG')
