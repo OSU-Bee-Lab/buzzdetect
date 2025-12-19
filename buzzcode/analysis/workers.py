@@ -281,7 +281,7 @@ class WorkerChecker:
             self.coordinator.exit_analysis(
                 ExitSignal(
                     message=f"Exiting analysis: no compatible audio files found in raw directory {self.dir_audio}.\n"
-                            f"audio format must be one of: \n{'\n'.join(sf.available_formats().keys())}",
+                            f"audio format must be one of: \n{', '.join(sf.available_formats().keys())}",
                     level='WARNING',
                     end_reason='no files'
                 )
@@ -403,14 +403,12 @@ class WorkerStreamer:
 
             samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=self.resample_rate)
             a_analyze = AssignAnalyze(path_audio=a_stream.path_audio, shortpath=a_stream.shortpath, chunk=chunk, samples=samples)
-            print(f'DEBUG: queuing analyze')
             while not self.coordinator.event_exitanalysis.is_set():
                 try:
                     self.coordinator.q_analyze.put(a_analyze, timeout=3)
                     break
                 except Full:
                     continue
-            print(f'DEBUG: analyze queued')
             return abort_stream
 
         for chunk in a_stream.chunklist:

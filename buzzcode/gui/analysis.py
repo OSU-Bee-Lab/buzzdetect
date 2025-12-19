@@ -7,8 +7,6 @@ import buzzcode.gui.config as cfg_gui
 from buzzcode.analysis.analysis import Analyzer
 from buzzcode.analysis.assignments import AssignLog
 from buzzcode.analysis.workers import Coordinator
-import threading
-import time
 
 
 def run_analysis(vars_analysis, q_gui, event_analysisdone, q_earlyexit):
@@ -35,15 +33,9 @@ def run_analysis(vars_analysis, q_gui, event_analysisdone, q_earlyexit):
         log_progress=vars_analysis['log_progress'],
         coordinator=coordinator
     )
-
-    print('DEBUG: starting analysis')
     analyzer.run()
-    time.sleep(10)
-    print('DEBUG: analysis complete')
-    print("Child threads still alive:", [t.name for t in threading.enumerate()])
 
 
-# --- GUI main process ---
 class AnalysisWindow(ctk.CTk):
     def __init__(self, vars_analysis):
         super().__init__()
@@ -52,6 +44,11 @@ class AnalysisWindow(ctk.CTk):
         self.q_gui = multiprocessing.Queue()
         self.event_analysisdone = multiprocessing.Event()
         self.q_earlyexit = multiprocessing.Queue()
+
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self.proc_analysis = multiprocessing.Process(target=lambda: None, name='gui_analysis_idle')
+
+        self.new_analysis_requested = False
 
         window_width = 500
         window_height = 500
@@ -67,28 +64,46 @@ class AnalysisWindow(ctk.CTk):
         self.update()
         self.minsize(self.winfo_width(), self.winfo_height())
 
-        self.textbox = ctk.CTkTextbox(self, wrap="word")
-        self.textbox.pack(expand=True, fill="both", padx=10, pady=10)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self.start_btn = ctk.CTkButton(self, text="Re-run analysis", command=self.launch_analysis)
-        self.start_btn.pack(side=ctk.LEFT, padx=5, pady=5)
-        self.stop_btn = ctk.CTkButton(
-            self,
+        self.textbox = ctk.CTkTextbox(self, wrap="word")
+        self.textbox.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        self.frame_button = ctk.CTkFrame(self)
+        self.frame_button.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.frame_button.grid_columnconfigure(0, weight=1, uniform="buttons")
+        self.frame_button.grid_columnconfigure(1, weight=1, uniform="buttons")
+        self.frame_button.grid_columnconfigure(2, weight=1, uniform="buttons")
+
+        self.button_stop = ctk.CTkButton(
+            self.frame_button,
             text="Stop Analysis",
             command=self.stop_analysis,
-            fg_color=("pink", "pink"),
-            text_color=("black", "black"),
+            fg_color='pink',
+            text_color='black'
         )
-        self.stop_btn.pack(side=ctk.RIGHT, padx=5, pady=5)
-        self.stop_btn.configure(state="disabled")
+
+        self.button_stop.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+
+        self.button_relaunch = ctk.CTkButton(
+            self.frame_button,
+            text="Re-run analysis",
+            command=self.launch_analysis
+        )
+        self.button_relaunch.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+
+        self.button_new = ctk.CTkButton(
+            self.frame_button,
+            text="New Analysis",
+            command=self.new_analysis
+        )
+        self.button_new.grid(row=0, column=2, sticky="ew", padx=5, pady=5)
+
 
         self.after(cfg_gui.poll_interval_ms, self.poll_queue)
-        self.protocol("WM_DELETE_WINDOW", self._close)
-
-        self.proc_analysis = None
         self.launch_analysis()  # no need to wait; should only get here via settings window
 
-    # ---- smart autoscroll helpers ----
     def _is_at_bottom(self) -> bool:
         self.update_idletasks()
 
@@ -109,35 +124,59 @@ class AnalysisWindow(ctk.CTk):
             self.textbox.delete("1.0", f"{delete_to + 1}.0")
 
     def launch_analysis(self):
-        if self.proc_analysis and self.proc_analysis.is_alive():
+        if self.proc_analysis.is_alive():
             return
 
         self.event_analysisdone.clear()
-
         self.proc_analysis = multiprocessing.Process(
             target=run_analysis,
             args=(self.vars_analysis, self.q_gui, self.event_analysisdone, self.q_earlyexit),
             name='gui_analysis'
         )
-
         self.proc_analysis.start()
-        self.textbox.insert("end", "Launching analysis...\n")
-        self.start_btn.configure(state="disabled")
-        self.stop_btn.configure(state="normal")
 
+        self.textbox.insert("end", "Launching analysis...\n")
 
     def stop_analysis(self):
         """Terminate the process and all its children."""
-        if not self.proc_analysis or not self.proc_analysis.is_alive():
+        if not self.proc_analysis.is_alive():
             return True
 
-        if not messagebox.askyesno("Confirm Stop", "Stopping will leave partially-analyzed files.\nAre you sure you want to stop?"):
+        if not messagebox.askyesno("Confirm Stop", "Stopping will leave partially-analyzed files.\nThe next analysis will pick up where this one left off.\nAre you sure you want to stop?"):
             return False
 
         self.q_earlyexit.put('Analysis stopped by user')
-        self.start_btn.configure(state="normal")
-        # self.stop_btn.configure(state="disabled")
+        self.configure_buttons()
         return True
+
+    def new_analysis(self):
+        self.new_analysis_requested = True
+        self._close()
+
+    def determine_state(self):
+        if not self.proc_analysis.is_alive():
+            return "idle"
+
+        # if the event is set, but the process is still alive, we must be shutting down
+        if self.event_analysisdone.is_set():
+            return "stopping"
+
+        return "running"
+
+    def configure_buttons(self):
+        state = self.determine_state()
+        if state == 'idle':
+            self.button_stop.configure(state="disabled", text='Stop Analysis')
+            self.button_relaunch.configure(state="normal")
+            self.button_new.configure(state="normal")
+        elif state == 'stopping':
+            self.button_stop.configure(state="disabled", text='Stopping...')
+            self.button_relaunch.configure(state="disabled")
+            self.button_new.configure(state="disabled")
+        elif state == 'running':
+            self.button_stop.configure(state="normal", text='Stop Analysis')
+            self.button_relaunch.configure(state="disabled")
+            self.button_new.configure(state="disabled")
 
     def poll_queue(self):
         while not self.q_gui.empty():
@@ -159,10 +198,12 @@ class AnalysisWindow(ctk.CTk):
             if at_bottom:
                 self.textbox.see("end")
 
+        self.configure_buttons()
         self.after(cfg_gui.poll_interval_ms, self.poll_queue)
 
     def _close(self):
         if self.stop_analysis():
+            self.proc_analysis.join()
             self.destroy()
 
 
@@ -178,7 +219,7 @@ if __name__ == '__main__':
         'n_streamers': None,
         'stream_buffer_depth': None,
         'dir_audio': 'audio_in',
-        'dir_out': None,
+        'dir_out': 'local/tmp',
         'verbosity_print': 'NOTSET',
         'verbosity_log': 'NOTSET',
         'log_progress': False,

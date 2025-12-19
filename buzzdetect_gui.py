@@ -15,12 +15,17 @@ def analyze_gui():
     from buzzcode.gui.analysis import AnalysisWindow
     splash.destroy()
 
-    settings = AnalysisSettings()
-    settings.mainloop()
+    new_analysis_requested = True
+    while new_analysis_requested:
+        settings = AnalysisSettings()
+        settings.mainloop()
 
-    if settings.run:
+        if not settings.run:
+            return
+
         analysis = AnalysisWindow(settings.vars_analysis)
         analysis.mainloop()
+        new_analysis_requested = analysis.new_analysis_requested
 
 if __name__ == "__main__":
     analyze_gui()
