@@ -251,7 +251,7 @@ class Analyzer:
 
         checker = WorkerChecker(
             dir_audio=self.dir_audio,
-            dir_out=self.dir_out,
+            dir_results=self.dir_out,
             framelength_s=self.model.embedder.framelength_s,
             chunklength=self.chunklength,
             coordinator=self.coordinator

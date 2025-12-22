@@ -1,9 +1,4 @@
-import os
-
 import numpy as np
-import pandas as pd
-
-from buzzcode.config import SUFFIX_RESULT_COMPLETE, SUFFIX_RESULT_PARTIAL
 
 
 def melt_coverage(cover_df, framelength=None):

@@ -1,42 +1,49 @@
 import logging
-import re
+import os
+import numpy as np
+from dataclasses import dataclass
+
+import buzzcode.config as cfg
+import tensorflow as tf
+from buzzcode.utils import build_ident
 
 
+@dataclass
 class AssignLog:
-    def __init__(self, message: str, level_str: str, terminate: bool = False):
-        self.message = message
-        self.level_str = level_str
-        self.level_int = loglevels[level_str]
-        self.terminate = terminate
+    message: str
+    level_str: str
+    terminate: bool = False
+
+    def __post_init__(self):
+        self.level_int = loglevels[self.level_str]
 
 
-class AssignStream:
-    def __init__(self, path_audio, duration_audio, chunklist, dir_audio, terminate=False):
-        self.path_audio = path_audio
-        self.duration_audio = duration_audio
-        self.chunklist = chunklist
-        self.terminate = terminate
+@dataclass
+class AssignFile:
+    path_audio: str
+    dir_audio: str
+    dir_results: str
+    duration_audio: float | None = None
+    chunklist: list[tuple[float, float]] | None = None
 
-        if dir_audio is None:
-            self.shortpath = None
-        else:
-            self.shortpath = self.path_audio.replace(dir_audio, '')
-            self.shortpath = re.sub('^/', '', self.shortpath)
+    def __post_init__(self):
+        self.ident = build_ident(self.path_audio, self.dir_audio, tag=None)
 
+        self.path_results_base = self.dir_results + '/' + self.ident
+        self.path_results_partial = self.path_results_base + cfg.SUFFIX_RESULT_PARTIAL
+        self.path_results_complete = self.path_results_base + cfg.SUFFIX_RESULT_COMPLETE
 
-class AssignAnalyze:
-    def __init__(self, path_audio, shortpath, chunk, samples):
-        self.path_audio = path_audio
-        self.shortpath = shortpath
-        self.chunk = chunk
-        self.samples = samples
+        self.extension_audio = os.path.splitext(self.path_audio)[1]
 
+        self.shortpath_audio = self.ident + '.' + self.extension_audio
+        self.shortpath_results_complete = self.ident + cfg.SUFFIX_RESULT_COMPLETE
 
-class AssignWrite:
-    def __init__(self, path_audio, chunk, results):
-        self.path_audio = path_audio
-        self.chunk = chunk
-        self.results = results
+@dataclass
+class AssignChunk:
+    file : AssignFile
+    chunk: tuple[float, float] | None = None
+    samples: np.ndarray = None
+    results: tf.Tensor = None
 
 
 loglevels = {

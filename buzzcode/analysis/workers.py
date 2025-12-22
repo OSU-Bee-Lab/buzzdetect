@@ -1,7 +1,7 @@
 import logging
 import multiprocessing
 import os
-import re
+import threading
 from _queue import Empty
 from queue import Queue, Full
 
@@ -12,13 +12,12 @@ import soundfile as sf
 import tensorflow as tf
 
 import buzzcode.config as cfg
-import threading
-from buzzcode.analysis.assignments import AssignLog, AssignStream, AssignAnalyze, AssignWrite, loglevels
+from buzzcode.analysis.assignments import AssignLog, AssignFile, AssignChunk, loglevels
 from buzzcode.analysis.formatting import format_activations, format_detections
 from buzzcode.analysis.results_coverage import melt_coverage, get_gaps, smooth_gaps, gaps_to_chunklist
 from buzzcode.audio import mark_eof, get_duration
 from buzzcode.models.load_model import load_model
-from buzzcode.utils import Timer, build_ident, shortpath, search_dir
+from buzzcode.utils import Timer, search_dir
 
 
 class FilterDropProgress(logging.Filter):
@@ -53,10 +52,10 @@ class Coordinator:
         self.queue_depth = self._setup_depth() if depth is None else depth
         self.q_gui = q_gui
 
-        self.q_log = Queue()
-        self.q_stream = Queue()
-        self.q_analyze = Queue(maxsize=self.queue_depth)
-        self.q_write = Queue()
+        self.q_log: Queue[AssignLog] = Queue()
+        self.q_stream: Queue[AssignFile | None] = Queue()
+        self.q_analyze: Queue[AssignChunk] = Queue(maxsize=self.queue_depth)
+        self.q_write: Queue[AssignChunk] = Queue()
 
         self.streamers_done = threading.Event()
         self.analyzers_done = threading.Event()
@@ -170,34 +169,17 @@ class WorkerLogger:
         self.write_log(AssignLog(message='logger closing', level_str='DEBUG'))
 
 
-class FileIn:
-    def __init__(self, path_audio, dir_audio, dir_out):
-        self.path_audio = path_audio
-        self.dir_audio = dir_audio
-        self.dir_out = dir_out
-
-        self.path_audio_short = shortpath(self.path_audio, self.dir_audio)
-
-        self.ident = build_ident(path_audio, dir_audio)
-        self.conflicting_ident = None
-
-        self.path_out_partial = os.path.join(self.dir_out, self.ident + cfg.SUFFIX_RESULT_PARTIAL)
-        self.path_out_complete = os.path.join(self.dir_out, self.ident + cfg.SUFFIX_RESULT_COMPLETE)
-
-        self.duration_audio = None
-
-
 class WorkerChecker:
     def __init__(self,
                  dir_audio: str,
-                 dir_out: str,
+                 dir_results: str,
                  framelength_s: float,
                  chunklength: float,
                  coordinator: Coordinator,
                  ):
 
         self.dir_audio = dir_audio
-        self.dir_out = dir_out
+        self.dir_results = dir_results
         self.framelength_s = framelength_s
         self.chunklength = chunklength
         self.coordinator = coordinator
@@ -206,61 +188,57 @@ class WorkerChecker:
 
 
     def _build_inputs(self):
-        paths_in = search_dir(self.dir_audio, extensions=list(sf.available_formats().keys()))
-        files_in = [FileIn(p, self.dir_audio, self.dir_out) for p in paths_in]
+        files_in = []
+        for p in search_dir(self.dir_audio, extensions=list(sf.available_formats().keys())):
+            a_file = AssignFile(path_audio=p, dir_audio=self.dir_audio, dir_results = self.dir_results)
+            files_in.append(a_file)
 
         # check for conflicting idents; i.e., two files have identical names but different extensions
         # causes results to be written to the same file.
         idents = [f.ident for f in files_in]
 
-        idents_conflicting = []
-        for file_in in files_in:
-            if idents.count(file_in.ident) > 1:
-                idents_conflicting.append(file_in.ident)
-                file_in.conflicting_ident = True
-            else:
-                file_in.conflicting_ident = False
+        idents_conflicting = {ident for ident in idents if idents.count(ident) > 1}
 
-        for ident_conflicting in set(idents_conflicting):
-            paths_conflicting = [f.path_audio for f in files_in if f.ident == ident_conflicting]
+        for ident_conflicting in idents_conflicting:
+            paths_conflicting = [f.shortpath_audio for f in files_in if f.ident == ident_conflicting]
             msg = (f'The following files have conflicting names and will be skipped:\n'
                    f'{', '.join(paths_conflicting)}\n'
                    f'These files must be renamed before they can be analyzed.')
             self.coordinator.q_log.put(AssignLog(msg, 'WARNING'))
 
-        return [f for f in files_in if not f.conflicting_ident]
+        return [f for f in files_in if f.ident not in idents_conflicting]
 
 
-    def _chunk_file(self, file_in: FileIn):
-        self.coordinator.q_log.put(AssignLog(message=f'Checking results for {file_in.path_audio_short}', level_str='INFO'))
+    def _chunk_file(self, a_file: AssignFile):
+        self.coordinator.q_log.put(AssignLog(message=f'Checking results for {a_file.shortpath_audio}', level_str='INFO'))
 
-        if os.path.exists(file_in.path_out_complete):
-            self.coordinator.q_log.put(AssignLog(f'Skipping {file_in.path_audio_short}; fully analyzed', 'DEBUG'))
+        if os.path.exists(a_file.path_results_complete):
+            self.coordinator.q_log.put(AssignLog(f'Skipping {a_file.shortpath_audio}; fully analyzed', 'DEBUG'))
             return None
 
 
-        if os.path.getsize(file_in.path_audio) < cfg.FILE_SIZE_MINIMUM:
+        if os.path.getsize(a_file.path_audio) < cfg.FILE_SIZE_MINIMUM:
             self.coordinator.q_log.put(AssignLog(
-                message=f'Skipping {file_in.path_audio_short}; below minimum analyzeable size', level_str='INFO'))
+                message=f'Skipping {a_file.shortpath_audio}; below minimum analyzeable size', level_str='INFO'))
             return None
 
-        if file_in.duration_audio is None:
-            file_in.duration_audio = get_duration(file_in.path_audio, q_log=self.coordinator.q_log)
+        if a_file.duration_audio is None:
+            a_file.duration_audio = get_duration(a_file.path_audio, q_log=self.coordinator.q_log)
 
         # if the file hasn't been started, chunk the whole file
-        if not os.path.exists(file_in.path_out_partial):
-            gaps = [(0, file_in.duration_audio)]
+        if not os.path.exists(a_file.path_results_partial):
+            gaps = [(0, a_file.duration_audio)]
         else:
             # otherwise, read the file and calculate chunks
-            df = pd.read_csv(file_in.path_out_partial)
+            df = pd.read_csv(a_file.path_results_partial)
             coverage = melt_coverage(df, self.framelength_s)
             gaps = get_gaps(
-                range_in=(0, file_in.duration_audio),
+                range_in=(0, a_file.duration_audio),
                 coverage_in=coverage
             )
             gaps = smooth_gaps(
                 gaps,
-                range_in=(0, file_in.duration_audio),
+                range_in=(0, a_file.duration_audio),
                 framelength=self.framelength_s,
                 gap_tolerance=self.framelength_s / 4
             )
@@ -269,8 +247,8 @@ class WorkerChecker:
             # output to the finished file
             if not gaps:
                 df.sort_values("start", inplace=True)
-                df.to_csv(file_in.path_out_complete, index=False)
-                os.remove(file_in.path_out_partial)
+                df.to_csv(a_file.path_results_complete, index=False)
+                os.remove(a_file.path_results_partial)
                 return None
 
         return gaps_to_chunklist(gaps, self.chunklength)
@@ -289,23 +267,14 @@ class WorkerChecker:
 
             return
 
+        for a_file in self.files_in:
+            a_file.chunklist = self._chunk_file(a_file)
 
-        assignments_stream = []
-        for file_in in self.files_in:
-            c = self._chunk_file(file_in)
-            if c is not None:
-                assignments_stream.append(
-                    AssignStream(
-                        path_audio=file_in.path_audio,
-                        duration_audio=file_in.duration_audio,
-                        dir_audio=self.dir_audio,
-                        chunklist=c,
-                        terminate=False
-                    )
-                )
+        # drop finished files
+        self.files_in = [f for f in self.files_in if f.chunklist is not None]
 
         # exit if no files with chunks
-        if not assignments_stream:
+        if not self.files_in:
             self.coordinator.exit_analysis(
                 ExitSignal(
                     message=f"All files in {self.dir_audio} are fully analyzed; exiting analysis",
@@ -316,37 +285,28 @@ class WorkerChecker:
             return
 
         # else, queue 'em up
-        for a_stream in assignments_stream:
-            self.coordinator.q_stream.put(a_stream)
+        for a_file in self.files_in:
+            self.coordinator.q_stream.put(a_file)
 
+        # queue termination sentinels
         for _ in range(self.coordinator.streamers_total):
-            self.coordinator.q_stream.put(
-                AssignStream(
-                    path_audio=None,
-                    dir_audio=None,
-                    duration_audio=None,
-                    chunklist=None,
-                    terminate=True
-                )
-            )
-
+            self.coordinator.q_stream.put(None)
         return
 
     def cleanup(self):
-        for file_in in self.files_in:
-            self._chunk_file(file_in)
+        for a_file in self.files_in:
+            self._chunk_file(a_file)
 
 
 class WorkerStreamer:
     def __init__(self,
                  id_streamer,
-                 resample_rate,
+                 resample_rate: float,
                  coordinator: Coordinator,):
 
         self.id_streamer = id_streamer
         self.resample_rate = resample_rate
         self.coordinator = coordinator
-
 
     def __call__(self):
         self.run()
@@ -354,18 +314,18 @@ class WorkerStreamer:
     def log(self, msg, level_str):
         self.coordinator.q_log.put(AssignLog(message=f'streamer {self.id_streamer}: {msg}', level_str=level_str))
 
-    def handle_bad_read(self, track: sf.SoundFile, a_stream: AssignStream):
+    def handle_bad_read(self, track: sf.SoundFile, a_file: AssignFile):
         # we've found that many of our .mp3 files give an incorrect .frames count, or else headers are broken
         # this appears to be because our recorders ran out of battery while recording
         # SoundFile does not handle this gracefully, so we catch it here.
 
         final_frame = track.tell()
-        mark_eof(path_audio=a_stream.path_audio, final_frame=final_frame)
+        mark_eof(path_audio=a_file.path_audio, final_frame=final_frame)
 
         final_second = final_frame/track.samplerate
 
-        msg = f"Unreadable audio at {round(final_second, 1)}s out of {round(a_stream.duration_audio, 1)}s for {a_stream.shortpath}."
-        if 1 - (final_second/a_stream.duration_audio) > cfg.BAD_READ_ALLOWANCE:
+        msg = f"Unreadable audio at {round(final_second, 1)}s out of {round(a_file.duration_audio, 1)}s for {a_file.shortpath_audio}."
+        if 1 - (final_second / a_file.duration_audio) > cfg.BAD_READ_ALLOWANCE:
             # if we get a bad read in the middle of a file, this deserves a warning.
             level = 'WARNING'
             msg += '\nAborting early due to corrupt audio data.'
@@ -377,8 +337,8 @@ class WorkerStreamer:
         self.log(msg, level)
 
 
-    def stream_to_queue(self, a_stream: AssignStream):
-        track = sf.SoundFile(a_stream.path_audio)
+    def stream_to_queue(self, a_file: AssignFile):
+        track = sf.SoundFile(a_file.path_audio)
         samplerate_native = track.samplerate
 
 
@@ -395,23 +355,24 @@ class WorkerStreamer:
             n_samples = len(samples)
 
             if n_samples < read_size:
-                self.handle_bad_read(track, a_stream)
+                self.handle_bad_read(track, a_file)
                 chunk = (chunk[0], round(chunk[0] + (n_samples/track.samplerate), 1))
                 abort_stream = True
             else:
                 abort_stream = False
 
             samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=self.resample_rate)
-            a_analyze = AssignAnalyze(path_audio=a_stream.path_audio, shortpath=a_stream.shortpath, chunk=chunk, samples=samples)
+            
+            a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples)
             while not self.coordinator.event_exitanalysis.is_set():
                 try:
-                    self.coordinator.q_analyze.put(a_analyze, timeout=3)
+                    self.coordinator.q_analyze.put(a_chunk, timeout=3)
                     break
                 except Full:
                     continue
             return abort_stream
 
-        for chunk in a_stream.chunklist:
+        for chunk in a_file.chunklist:
             abort_stream = queue_chunk(chunk, track, samplerate_native)
             if abort_stream:
                 return True # Note! This is whether to continue to *next file*, the abort for this file is handled by return
@@ -426,8 +387,8 @@ class WorkerStreamer:
     def run(self):
         self.log('launching', 'INFO')
         a_stream = self.coordinator.q_stream.get()
-        while not a_stream.terminate:
-            self.log(f"buffering {a_stream.shortpath}", 'INFO')
+        while a_stream is not None:
+            self.log(f"buffering {a_stream.shortpath_audio}", 'INFO')
             keep_streaming = self.stream_to_queue(a_stream)
             if not keep_streaming:
                 break
@@ -483,13 +444,13 @@ class WorkerAnalyzer:
         self.log(f"processing on {self.processor}", 'INFO')
 
 
-    def report_rate(self, chunk, path_short):
-        chunk_duration = chunk[1] - chunk[0]
+    def report_rate(self, a_chunk: AssignChunk):
+        chunk_duration = a_chunk.chunk[1] - a_chunk.chunk[0]
 
         self.timer_analysis.stop()
         analysis_rate = (chunk_duration / self.timer_analysis.get_total(5)).__round__(1)
 
-        msg = (f"analyzed {path_short}, chunk ({float(chunk[0])}, {float(chunk[1])}) "
+        msg = (f"analyzed {a_chunk.file.shortpath_audio}, chunk ({float(a_chunk.chunk[0])}, {float(a_chunk.chunk[1])}) "
                  f"in {self.timer_analysis.get_total()}s (rate: {analysis_rate})")
 
         self.log(msg, 'PROGRESS')
@@ -499,11 +460,11 @@ class WorkerAnalyzer:
         msg = f"BUFFER BOTTLENECK: analyzer {self.id_analyzer} received assignment after {self.timer_bottleneck.get_total().__round__(1)}s"
         self.log(msg, 'DEBUG')
 
-    def analyze_assignment(self, assignment: AssignAnalyze):
-        results = self.model.predict(assignment.samples)
+    def analyze_assignment(self, a_chunk: AssignChunk):
+        a_chunk.results = self.model.predict(a_chunk.samples)
 
-        self.coordinator.q_write.put(AssignWrite(path_audio=assignment.path_audio, chunk=assignment.chunk, results=results))
-        self.report_rate(assignment.chunk, assignment.shortpath)
+        self.coordinator.q_write.put(a_chunk)
+        self.report_rate(a_chunk)
 
 
     def run(self):
@@ -513,11 +474,11 @@ class WorkerAnalyzer:
         self.timer_bottleneck.restart()
         while not self.coordinator.event_exitanalysis.is_set():
             try:
-                assignment = self.coordinator.q_analyze.get(timeout=1)
+                a_chunk = self.coordinator.q_analyze.get(timeout=1)
                 self.timer_bottleneck.stop()
                 if self.timer_bottleneck.get_total() > 0.01:
                     self.report_bottleneck()
-                self.analyze_assignment(assignment)
+                self.analyze_assignment(a_chunk)
                 self.timer_bottleneck.restart()
             except Empty:
                 # if the streamers are done, exit as usual
@@ -588,23 +549,21 @@ class WorkerWriter:
     def log(self, msg, level_str):
         self.coordinator.q_log.put(AssignLog(message=f'writer: {msg}', level_str=level_str))
 
-    def write_results(self, assignment: AssignWrite):
+    def write_results(self, a_chunk: AssignChunk):
         output = self.format(
-            results=assignment.results.numpy(),
-            time_start=assignment.chunk[0]
+            results=a_chunk.results.numpy(),
+            time_start=a_chunk.chunk[0]
         )
 
-        base_out = os.path.splitext(assignment.path_audio)[0]
-        base_out = re.sub(self.dir_audio, self.dir_out, base_out)
-        path_out = base_out + cfg.SUFFIX_RESULT_PARTIAL
+        path_results_partial = a_chunk.file.path_results_partial
 
-        os.makedirs(os.path.dirname(path_out), exist_ok=True)
+        os.makedirs(os.path.dirname(path_results_partial), exist_ok=True)
 
         # Check if file exists to determine if we need to write headers
-        file_exists = os.path.exists(path_out)
+        file_exists = os.path.exists(path_results_partial)
 
         # Append to existing file or create new one with headers
-        output.to_csv(path_out, mode='a', header=not file_exists, index=False)
+        output.to_csv(path_results_partial, mode='a', header=not file_exists, index=False)
 
     def run(self):
         self.log('launching', 'INFO')
