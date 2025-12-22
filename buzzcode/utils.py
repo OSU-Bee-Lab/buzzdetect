@@ -49,27 +49,6 @@ def search_dir(dir_in, extensions=None):
     return paths
 
 
-def read_pickle_exhaustive(path_pickle):
-    elements = []
-    with open(path_pickle, 'rb') as f:
-        while True:
-            try:
-                element = pickle.load(f)
-                elements.append(element)
-            except EOFError:
-                break
-    return elements
-
-
-def read_pickle_generator(path_pickle):
-    with open(path_pickle, 'rb') as f:
-        while True:
-            try:
-                yield pickle.load(f)
-            except EOFError:
-                break
-
-
 def shortpath(path, dir_root):
     return re.sub(dir_root, "", path)
 

@@ -426,7 +426,7 @@ class WorkerStreamer:
     def run(self):
         self.log('launching', 'INFO')
         a_stream = self.coordinator.q_stream.get()
-        while not a_stream.terminate and not self.coordinator.event_exitanalysis.is_set():
+        while not a_stream.terminate:
             self.log(f"buffering {a_stream.shortpath}", 'INFO')
             keep_streaming = self.stream_to_queue(a_stream)
             if not keep_streaming:

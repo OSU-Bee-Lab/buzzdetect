@@ -114,4 +114,4 @@ def analyze(
 
 
 if __name__ == "__main__":
-    analyze(modelname=cfg.DEFAULT_MODEL)
+    analyze(modelname=cfg.DEFAULT_MODEL, verbosity_print='DEBUG')

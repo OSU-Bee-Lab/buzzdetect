@@ -1,5 +1,4 @@
 import os
-import signal
 import threading
 
 from buzzcode import config as cfg
@@ -7,7 +6,7 @@ from buzzcode.analysis.assignments import AssignLog
 from buzzcode.analysis.workers import WorkerLogger, WorkerStreamer, WorkerWriter, WorkerAnalyzer, WorkerChecker, \
     Coordinator
 from buzzcode.models.load_model import load_model
-from buzzcode.training.test import pull_sx
+from buzzcode.models.thresholds import pull_sx
 from buzzcode.utils import Timer
 
 

@@ -24,7 +24,6 @@ class AssignStream:
             self.shortpath = re.sub('^/', '', self.shortpath)
 
 
-
 class AssignAnalyze:
     def __init__(self, path_audio, shortpath, chunk, samples):
         self.path_audio = path_audio
