@@ -3,9 +3,9 @@ from idlelib.tooltip import Hovertip
 from tkinter import filedialog as filedialog
 
 import customtkinter as ctk
+from src.validation import ArgValid
 
-from buzzcode.analysis.validation import ArgValid
-from buzzcode.gui import config as cfg_gui
+from src.gui import config as cfg_gui
 
 
 class AbstractEntry(ctk.CTkFrame):

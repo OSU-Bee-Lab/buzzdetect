@@ -13,12 +13,10 @@ import multiprocessing
 import os
 import re
 
-import numpy as np
 import soundfile as sf
-from numpy.lib.stride_tricks import sliding_window_view
 
-from buzzcode.analysis.assignments import AssignLog
-from buzzcode.config import TAG_EOF
+from src.config import TAG_EOF
+from src.pipeline.assignments import AssignLog
 
 
 def get_duration(path_audio, q_log: multiprocessing.Queue = None):
@@ -78,46 +76,6 @@ def enumerate_eof_files(path_audio):
     paths_eof = glob.glob(base_eof + '*')
 
     return paths_eof
-
-
-def frame_audio(audio_data, framelength, samplerate, framehop_s):
-    """
-    Frame audio data using NumPy's sliding_window_view for efficient processing.
-    NOTE! Do not use this to pre-frame audio that will be passed to an embedder.
-    Framing should be handled within embedders (it often occurs after spectrogram creation)
-
-    Parameters:
-    -----------
-    audio_data : array-like
-        Input audio data
-    framelength : float
-        Frame length in seconds
-    samplerate : int or float
-        Sample rate in Hz
-    framehop_s : float
-        Hop size between frames in seconds
-
-    Returns:
-    --------
-    np.ndarray
-        2D array where each row is a frame
-    """
-    audio_data = np.asarray(audio_data)
-    framelength_samples = int(framelength * samplerate)
-    audio_samples = len(audio_data)
-
-    if audio_samples < framelength_samples:
-        raise ValueError('sub-frame audio given')
-
-    step = int(framehop_s * samplerate)
-
-    # Use sliding_window_view for efficient framing
-    windowed = sliding_window_view(audio_data, window_shape=framelength_samples)
-
-    # Extract frames at specified hop intervals
-    frames = windowed[::step]
-
-    return frames
 
 
 def mark_eof(path_audio, final_frame):

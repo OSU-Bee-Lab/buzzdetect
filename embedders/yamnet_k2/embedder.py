@@ -1,6 +1,6 @@
 import os
 
-from buzzcode.embedding.BaseEmbedder import BaseEmbedder
+from src.inference.embedding import BaseEmbedder
 
 class YamnetK2(BaseEmbedder):
     # Class attributes - no config file needed!

@@ -1,5 +1,4 @@
 import os
-import pickle
 import re
 from datetime import datetime
 
@@ -48,9 +47,6 @@ def search_dir(dir_in, extensions=None):
     paths = [p for p in paths if True in [bool(re.search(e, p.lower())) for e in extensions]]
     return paths
 
-
-def shortpath(path, dir_root):
-    return re.sub(dir_root, "", path)
 
 def build_ident(path, root_dir, tag=None):
     ident = re.sub(root_dir, '', path)

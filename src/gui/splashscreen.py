@@ -1,7 +1,7 @@
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
-import buzzcode.gui.config as cfg_gui
+import src.gui.config as cfg_gui
 
 
 class SplashScreen(ctk.CTk):

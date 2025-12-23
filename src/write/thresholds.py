@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from buzzcode import config as cfg
+from src import config as cfg
 
 
 def sx(results_join, precision_requested):

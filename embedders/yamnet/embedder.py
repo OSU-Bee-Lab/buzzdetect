@@ -3,7 +3,7 @@ import os
 import tensorflow as tf
 from tensorflow.keras import Model
 
-from buzzcode.embedding.BaseEmbedder import BaseEmbedder
+from src.embedding.BaseEmbedder import BaseEmbedder
 from embedders.yamnet.yamnet import WaveformFeatures  # NEEDED for model loading; custom class in model
 
 """Feature computation for YAMNet."""

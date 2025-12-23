@@ -3,10 +3,10 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-import buzzcode.gui.config as cfg_gui
-from buzzcode.analysis.analysis import Analyzer
-from buzzcode.analysis.assignments import AssignLog
-from buzzcode.analysis.workers import Coordinator
+import src.gui.config as cfg_gui
+from src.analyze import Analyzer
+from src.pipeline.assignments import AssignLog
+from src.pipeline.coordination import Coordinator
 
 
 def run_analysis(vars_analysis, q_gui, event_analysisdone, q_earlyexit):

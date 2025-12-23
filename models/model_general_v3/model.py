@@ -1,7 +1,7 @@
 import os
 
-import buzzcode.config as cfg
-from buzzcode.models.BaseModel import BaseModel
+import src.config as cfg
+from src.inference.models import BaseModel
 
 class ModelGeneralV3(BaseModel):
     modelname = "model_general_v3"

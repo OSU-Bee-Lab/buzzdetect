@@ -2,7 +2,7 @@ import multiprocessing
 
 import customtkinter as ctk
 
-from buzzcode.gui.splashscreen import SplashScreen
+from src.gui.splashscreen import SplashScreen
 
 
 def analyze_gui():
@@ -11,8 +11,8 @@ def analyze_gui():
     ctk.set_default_color_theme("blue")  # Themes: "blue" (default), "dark-blue", "green"
 
     splash = SplashScreen()
-    from buzzcode.gui.settings import AnalysisSettings
-    from buzzcode.gui.analysis import AnalysisWindow
+    from src.gui.settings import AnalysisSettings
+    from src.gui.analysis import AnalysisWindow
     splash.destroy()
 
     new_analysis_requested = True

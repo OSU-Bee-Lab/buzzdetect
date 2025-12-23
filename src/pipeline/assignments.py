@@ -1,21 +1,12 @@
-import logging
 import os
-import numpy as np
 from dataclasses import dataclass
 
-import buzzcode.config as cfg
+import numpy as np
 import tensorflow as tf
-from buzzcode.utils import build_ident
 
-
-@dataclass
-class AssignLog:
-    message: str
-    level_str: str
-    terminate: bool = False
-
-    def __post_init__(self):
-        self.level_int = loglevels[self.level_str]
+import src.config as cfg
+from src.pipeline.loglevels import loglevels
+from src.utils import build_ident
 
 
 @dataclass
@@ -46,12 +37,11 @@ class AssignChunk:
     results: tf.Tensor = None
 
 
-loglevels = {
-    'NOTSET': logging.NOTSET,
-    'DEBUG': logging.DEBUG,
-    'PROGRESS': logging.INFO-5,
-    'INFO': logging.INFO,
-    'WARNING': logging.WARNING,
-    'ERROR': logging.ERROR,
-    'CRITICAL': logging.CRITICAL
-}
+@dataclass
+class AssignLog:
+    message: str
+    level_str: str
+    terminate: bool = False
+
+    def __post_init__(self):
+        self.level_int = loglevels[self.level_str]

@@ -1,8 +1,8 @@
 import numbers
 import os
 
-import buzzcode.config as cfg
-from buzzcode.analysis.assignments import loglevels
+import src.config as cfg
+from src.pipeline.loglevels import loglevels
 
 
 class ArgValid:

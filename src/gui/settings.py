@@ -3,13 +3,13 @@ import json
 import os
 
 import customtkinter as ctk
+import src.validation as val
+from src.analyze import analyze
+from src.pipeline.loglevels import loglevels
 
-import buzzcode.analysis.validation as val
-import buzzcode.config as cfg
-import buzzcode.gui.config as cfg_gui
-import buzzcode.gui.ctk_entries as ent
-from buzzcode.analysis.analyze import analyze
-from buzzcode.analysis.assignments import loglevels
+import src.config as cfg
+import src.gui.config as cfg_gui
+import src.gui.ctk_entries as ent
 
 
 def analysis_defaults():
