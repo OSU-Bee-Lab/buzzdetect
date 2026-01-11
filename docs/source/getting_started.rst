@@ -5,18 +5,35 @@ Setting up buzzdetect for the first time
 --------------
 Install the package manager `Conda <https://conda.io/projects/conda/en/latest/user-guide/install/index.html>`_.
 
-2. Get files
+2. Download buzzdetect
 --------------
+
+There are two ways to acquire buzzdetect.
+You can download an archive (.zip or .tar.gz) from our latest release, or you can use git to clone the current state of the repository to your machine.
+While we try to ensure the repository always reflects fully functioning code, some bugs may slip through the cracks.
+The releases will likely be a more stable experience, but use git if you want to get the latest improvements.
+
+Release (stable)
+^^^^^^^^^^^^^^^^^
+You can download a release of buzzdetect as a .zip or .tar.gz folder through our `GitHub Releases page <https://github.com/OSU-Bee-Lab/buzzdetect/releases>`_.
+See the "Assets" accordion menu for each release and download the "Source code" asset in whichever format you want.
+
+
+Git (development)
+^^^^^^^^^^^^^^^^^^
+On Windows, you'll need to `install Git <https://git-scm.com/install/windows>`_ if you haven't already.
+
 1. Open a terminal wherever you want to store the buzzdetect folder.
-2. git clone the buzzdetect files from `the GitHub repo <https://github.com/OSU-Bee-Lab/buzzdetect>`_.
+2. Git clone the buzzdetect files from `the GitHub repo <https://github.com/OSU-Bee-Lab/buzzdetect>`_.
 
     - Command: ``git clone "https://github.com/OSU-Bee-Lab/buzzdetect" buzzdetect``
     - This installs buzzdetect to the subdirectory "buzzdetect" under your current working directory.
-    - We'll refer to the buzzdetect folder in your chosen location as the "project directory."
 
 .. _conda_env:
 3. Install dependencies
 ------------------------
+We'll refer to the buzzdetect folder in your chosen location as the "project directory."
+
 The project directory contains a file named `environment.yml <https://github.com/OSU-Bee-Lab/buzzdetect/blob/main/environment.yml>`_.
 This file specifies all of buzzdetect's dependencies.
 Using Conda, we can install all of the packages buzzdetect requires into one location.
