@@ -27,9 +27,9 @@ def sx(results_join, precision_requested):
 
 
 def pull_sx(modelname, precision_requested):
-    dir_tests = os.path.join(cfg.DIR_MODELS, modelname, 'tests')
+    dir_tests = os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_TESTS)
     try:
-        df_sx = pd.read_csv(os.path.join(dir_tests, 'sx.csv'))
+        df_sx = pd.read_csv(os.path.join(dir_tests, cfg.FNAME_SX))
 
     except FileNotFoundError:
         raise FileNotFoundError(f'tests not available for model "{modelname}"; run test_model({modelname}) and proceed') from None
@@ -37,4 +37,4 @@ def pull_sx(modelname, precision_requested):
     if precision_requested in df_sx['precision'].values:
         return df_sx[df_sx['precision'] == precision_requested].iloc[0].to_dict()
 
-    return sx(pd.read_csv(os.path.join(dir_tests, 'results.csv')), precision_requested)
+    return sx(pd.read_csv(os.path.join(dir_tests, cfg.FNAME_TESTRESULTS)), precision_requested)
