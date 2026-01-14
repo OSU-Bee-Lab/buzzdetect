@@ -11,7 +11,7 @@ from src.pipeline.logger import WorkerLogger
 from src.pipeline.assignments import AssignLog
 from src.stream.worker import WorkerStreamer
 from src.utils import Timer
-from src.write.thresholds import pull_sx
+from src.write.thresholds import calculate_threshold
 from src.write.worker import WorkerWriter
 
 
@@ -118,7 +118,7 @@ class Analyzer:
         if precision is None:
             return None
         else:
-            return pull_sx(self.modelname, precision)['threshold']
+            return calculate_threshold(self.modelname, precision)
 
     def _launch_logger(self):
         """Start the logging process."""

@@ -301,8 +301,11 @@ class AnalysisSettings(ctk.CTk):
         mode = self.tabview_format.get()
         if mode == 'Activations':
             self.vars_analysis['precision'] = None
+        elif mode == 'Detections':
+            val_precision = self.vars_tkinter['precision'].get()
+            self.vars_analysis['precision'] = float(val_precision) if val_precision != '' else None
         else:
-            self.vars_analysis['precision'] = float(self.vars_analysis['precision']) if self.vars_analysis['precision'] != '' else None
+            raise ValueError(f"Invalid tabview mode: {mode}")
 
         self.vars_analysis['classes_out'] = [k for k, v in self.neuron_checkboxes.items() if v.get()]
 

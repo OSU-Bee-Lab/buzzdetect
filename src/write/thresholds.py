@@ -26,15 +26,16 @@ def sx(results_join, precision_requested):
     return {'threshold': threshold.__round__(2), 'precision': precision_requested.__round__(2), 'sensitivity': sensitivity.__round__(2)}
 
 
-def pull_sx(modelname, precision_requested):
+def calculate_threshold(modelname, precision_requested, tolerance=0.01):
     dir_tests = os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_TESTS)
+
     try:
-        df_sx = pd.read_csv(os.path.join(dir_tests, cfg.FNAME_SX))
-
+        metrics = pd.read_csv(os.path.join(dir_tests, cfg.FNAME_METRICS))
     except FileNotFoundError:
-        raise FileNotFoundError(f'tests not available for model "{modelname}"; run test_model({modelname}) and proceed') from None
+        raise FileNotFoundError(f'metrics not available for model "{modelname}"; run test_model({modelname}) and proceed') from None
 
-    if precision_requested in df_sx['precision'].values:
-        return df_sx[df_sx['precision'] == precision_requested].iloc[0].to_dict()
+    # filter for where precision is +- tolerance/2 of requested
+    metrics['delta'] = abs(metrics['precision'] - precision_requested)
+    metrics = metrics[metrics['delta'] <= tolerance/2]
 
-    return sx(pd.read_csv(os.path.join(dir_tests, cfg.FNAME_TESTRESULTS)), precision_requested)
+    return metrics['threshold'].mean()

@@ -28,7 +28,7 @@ class WorkerWriter:
         self.digits_results = digits_results
         self.coordinator = coordinator
 
-        if classes_out is not None:
+        if self.threshold is None:
             def format_func(results, time_start):
                 out = format_activations(
                     results=results,
