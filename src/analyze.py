@@ -164,7 +164,7 @@ class Analyzer:
             f'Input directory: {self.dir_audio}\n'
             f'Output directory: {self.dir_out}\n'
             f'CPU analyzers: {self.coordinator.analyzers_cpu}\n'
-            f'GPU analyzer: {self.coordinator.analyzer_gpu}\n'
+            f'GPU analyzers: {self.coordinator.analyzers_gpu}\n'
             f'Chunk length: {self.chunklength}s\n'
             f'Streamers: {self.coordinator.streamers_total}\n'
             f'Queue depth: {self.coordinator.queue_depth}\n'
@@ -211,13 +211,13 @@ class Analyzer:
 
 
     def _launch_analyzers(self):
-        for a in range(self.coordinator.analyzers_total):
+        for a in range(self.coordinator.analyzers_cpu):
             analyzer = threading.Thread(
                 target=run_worker,
                 name=f"analyzer_cpu_{a}",
                 kwargs={
                     'workerclass': WorkerInferer,
-                    'id_analyzer': a,
+                    'id_analyzer': f'cpu {a}',
                     'processor': 'CPU',
                     'modelname': self.modelname,
                     'framehop_prop': self.framehop_prop,
@@ -227,14 +227,14 @@ class Analyzer:
 
             self.threads_analyzers.append(analyzer)
 
-        if self.coordinator.analyzer_gpu:
+        for a in range(self.coordinator.analyzers_gpu):
             os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
-            analyzer_gpu = threading.Thread(
+            analyzer = threading.Thread(
                 target=run_worker,
-                name='analyzer_gpu',
+                name=f"analyzer_gpu_{a}",
                 kwargs={
                     'workerclass': WorkerInferer,
-                    'id_analyzer': 'GPU',
+                    'id_analyzer': f'gpu {a}',
                     'processor': 'GPU',
                     'modelname': self.modelname,
                     'framehop_prop': self.framehop_prop,
@@ -242,7 +242,7 @@ class Analyzer:
                 }
             )
 
-            self.threads_analyzers.append(analyzer_gpu)
+            self.threads_analyzers.append(analyzer)
 
         for t in self.threads_analyzers:
             t.start()
@@ -298,7 +298,7 @@ def analyze(
         framehop_prop: float = 1,
         chunklength: float = 200,
         analyzers_cpu: int = 1,
-        analyzer_gpu: bool = False,
+        analyzers_gpu: int = 0,
         n_streamers: int = None,
         stream_buffer_depth: int = None,
         dir_audio: str = cfg.DIR_AUDIO,
@@ -375,7 +375,7 @@ def analyze(
 
     coordinator = Coordinator(
         analyzers_cpu=analyzers_cpu,
-        analyzer_gpu=analyzer_gpu,
+        analyzers_gpu=analyzers_gpu,
         streamers_total=n_streamers,
         depth=stream_buffer_depth,
         q_gui=q_gui,

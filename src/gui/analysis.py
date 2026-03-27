@@ -12,7 +12,7 @@ from src.pipeline.coordination import Coordinator
 def run_analysis(vars_analysis, q_gui, event_analysisdone, q_earlyexit):
     coordinator = Coordinator(
         analyzers_cpu=vars_analysis['analyzers_cpu'],
-        analyzer_gpu=vars_analysis['analyzer_gpu'],
+        analyzers_gpu=vars_analysis['analyzers_gpu'],
         streamers_total=vars_analysis['n_streamers'],
         depth=vars_analysis['stream_buffer_depth'],
         q_gui=q_gui,
@@ -215,7 +215,7 @@ if __name__ == '__main__':
         'framehop_prop': 1,
         'chunklength': 200,
         'analyzers_cpu': 1,
-        'analyzer_gpu': False,
+        'analyzers_gpu': 0,
         'n_streamers': None,
         'stream_buffer_depth': None,
         'dir_audio': 'audio_in',
