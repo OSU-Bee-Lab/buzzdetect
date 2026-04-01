@@ -35,7 +35,8 @@ Key Features
 
    getting_started
    gui
-   workflow
+   result_files
+   tuning
 
 .. toctree::
    :maxdepth: 2

@@ -17,13 +17,14 @@ Settings that can be adjusted are given in bold, with names as they appear in th
 
 Streamers
 ^^^^^^^^^^
+
 1. A number of **concurrent streamers** are launched. Each streamer is assigned its own audio file.
 2. The streamer begins reading audio data from the start of the file (or it picks up where an interrupted analysis left off).
 3. Once the streamer has read audio data up to its set **chunk length**, it places that data into a queue for the analyzer to process.
 4. The streamer continues reading audio data until the queue is full;
-the queue can hold a number of chunks equal to its **stream buffer depth**.
-If a streamer goes to enqueue a chunk and the buffer is full, it waits until a chunk is taken out of the queue by the analyzer.
-Multiple streamers might wait on the queue at the same time.
+   the queue can hold a number of chunks equal to its **stream buffer depth**.
+   If a streamer goes to enqueue a chunk and the buffer is full, it waits until a chunk is taken out of the queue by the analyzer.
+   Multiple streamers might wait on the queue at the same time.
 
 
 Analyzers
@@ -32,14 +33,14 @@ Analyzers
 1. A number of **GPU analyzers** and **CPU analyzers** are launched.
 2. Each analyzer waits for an audio chunk to be streamed into the queue.
 3. On receiving the chunk, the analyzer applies an embedder model.
-This is a pre-trained model, not one produced by the OSU Bee Lab but one that we can leverage to fine-tune our own models.
-The embedder outputs embeddings, lower-dimension, higher-information-density representations of our input audio for prediction.
-The embedder model has some **frame hop** that determines the spacing between frames.
-The frame hop is given as a proportion of the frame length, where a frame is the discrete duration of audio over which a prediction is made.
-For example, YAMNet has a frame length of 0.96s.
-Giving YAMNet a frame hop of 1.0 means that the second frame will come 0.96s after the first, producing contiguous frames.
+   This is a pre-trained model, not one produced by the OSU Bee Lab but one that we can leverage to fine-tune our own models.
+   The embedder outputs embeddings, lower-dimension, higher-information-density representations of our input audio for prediction.
+   The embedder model has some **frame hop** that determines the spacing between frames.
+   The frame hop is given as a proportion of the frame length, where a frame is the discrete duration of audio over which a prediction is made.
+   For example, YAMNet has a frame length of 0.96s.
+   Giving YAMNet a frame hop of 1.0 means that the second frame will come 0.96s after the first, producing contiguous frames.
 4. The analyzer then applies the prediction model, which has been fine-tuned on our classes of interest.
-This produces the neuron activations that buzzdetect ultimately outputs.
+   This produces the neuron activations that buzzdetect ultimately outputs.
 5. The model hands output the neuron activations to a results writer.
 
 
@@ -76,10 +77,12 @@ This is probably due to the infamous Python GIL, which means that we can't ever 
 
 
 You might want a shorter chunk length if:
+
 * You're seeing BUFFER BOTTLENECKs reported by analyzers in the logs
 * You're using multiple GPU analyzers
 
 You might want a longer chunk length if:
+
 * Your streamers are outpacing your analyzer
 
 
@@ -152,5 +155,5 @@ a streamer waiting to place items into the queue is just waiting patiently.
 It isn't even a problem to have dozens of streamers waiting to enqueue; they don't burn any processing power while they're waiting.
 
 Try cranking the streamer count way up and see what happens.
-We find good results with as many as 24 streamers to our 1 GPU,
+We find good results with as many as 24 streamers to our 1 GPU, though your optimal configuration may be different depending on your hardware and audio files.
 

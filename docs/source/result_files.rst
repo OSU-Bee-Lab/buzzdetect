@@ -91,11 +91,7 @@ saving storage
 The total volume of results files from large experiments can reach dozens of gigabytes.
 One easy way to save space is to output only the results corresponding to neurons of interest (usually just ins_buzz).
 
-Additionally, while buzzdetect outputs CSVs for simplicity and interoperability,
-you may want to convert large result datasets to another format for analysis or storage.
-An R .rds file will be ~28% the size of the corresponding .csv and will read much faster.
-
 For more extreme space saving, see the ``trim_directory()`` function in the companion package `buzzr <https://osu-bee-lab.github.io/buzzr/reference/trim_directory.html>`_.
-
 Trimming result files to only ins_buzz, rounding activations to 1 decimal (from 2), and saving as a compressed RDS
 results in a 29:1 compression ratio with no meaninful information loss.
+The results also read more quickly than a CSV!
