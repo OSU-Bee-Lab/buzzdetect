@@ -55,8 +55,10 @@ class Coordinator:
         self.q_log.put(AssignLog(message=f'coordinator: {msg}', level_str=level_str))
 
     def _setup_streamers(self, n_analyzers):
-        n_streamers = 6
-        warnings.warn('n_streamers is currently hard-coded for testing')
+        if self.analyzers_gpu > 0:
+            n_streamers = n_analyzers*8
+        else:
+            n_streamers = n_analyzers
 
         return n_streamers
 
