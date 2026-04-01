@@ -24,10 +24,21 @@ Documentation is still underway; please bear with us!
 Key Features
 -------------
 
-* Automated detection of insect buzzes in audio recordings
-* Support for arbitrarily large datasets
-* Support for multiple audio formats
-* Flexible usage through command line, Python API, and graphical interface
+- **Automated observation.** Enables passive acoustic monitoring of pollinators by detecting the buzz of insect flight in audio.
+  Drop your recorders in the field and let them do your observation for you.
+
+- **Big data.** Support for arbitrarily large datasets.
+  Input audio files can be days long, input datasets can be years long,
+  buzzdetect intelligently streams audio one chunk at a time.
+  Interrupted analyses can pick right back up from where you left off - no data lost!
+
+- **From sounds to stats.** Check out our companion package, `buzzr <https://github.com/OSU-Bee-Lab/buzzr>`_ and `our walkthrough <https://lukehearon.com/blog/2026/buzzdetect-walkthrough/>`_
+  for everything you need to go from recordings to results.
+
+- **Flexible application.** Support for a wide variety of audio formats, run analyses through command line, Python API, and graphical interface.
+
+- **It's FOSS!** buzzdetect's source code is licensed under MIT, free as in speech, free as in pizza.
+  **NOTE:** embedding models could be subject to their own licenses! Check out `NOTICE <https://github.com/OSU-Bee-Lab/buzzdetect/blob/main/NOTICE>`_ and `LICENSES/ <https://github.com/OSU-Bee-Lab/buzzdetect/tree/main/LICENSES>`_ for more info.
 
 .. toctree::
    :maxdepth: 2
