@@ -1,5 +1,6 @@
 import multiprocessing
 import threading
+import warnings
 from queue import Queue
 
 from src.pipeline.assignments import AssignFile, AssignChunk, AssignLog
@@ -18,7 +19,7 @@ class Coordinator:
     """
     def __init__(self,
                  analyzers_cpu: int,
-                 analyzer_gpu: bool=False,
+                 analyzers_gpu: int=0,
                  streamers_total: int=None,
                  depth: int=None,
                  q_gui: Queue[AssignLog]=None,
@@ -26,9 +27,9 @@ class Coordinator:
                  q_earlyexit: multiprocessing.Queue=None,):
 
         self.analyzers_cpu = analyzers_cpu
-        self.analyzer_gpu = analyzer_gpu
+        self.analyzers_gpu = analyzers_gpu
 
-        self.analyzers_total = analyzers_cpu + analyzer_gpu
+        self.analyzers_total = analyzers_cpu + analyzers_gpu
         self.streamers_total = self._setup_streamers(self.analyzers_total) if streamers_total is None else streamers_total
 
         self.queue_depth = self._setup_depth() if depth is None else depth
@@ -54,10 +55,8 @@ class Coordinator:
         self.q_log.put(AssignLog(message=f'coordinator: {msg}', level_str=level_str))
 
     def _setup_streamers(self, n_analyzers):
-        if self.analyzer_gpu:
-            n_streamers = n_analyzers*8
-        else:
-            n_streamers = n_analyzers
+        n_streamers = 6
+        warnings.warn('n_streamers is currently hard-coded for testing')
 
         return n_streamers
 

@@ -45,7 +45,7 @@ class AnalysisSettings(ctk.CTk):
             'framehop_prop': ctk.StringVar(self, self.vars_analysis['framehop_prop']),
             'chunklength': ctk.StringVar(self, self.vars_analysis['chunklength']),
             'analyzers_cpu': ctk.StringVar(self, self.vars_analysis['analyzers_cpu']),
-            'analyzer_gpu': ctk.BooleanVar(self, self.vars_analysis['analyzer_gpu']),
+            'analyzers_gpu': ctk.StringVar(self, self.vars_analysis['analyzers_gpu']),
             'n_streamers': ctk.StringVar(self, self.vars_analysis['n_streamers']),
             'stream_buffer_depth': ctk.StringVar(self, self.vars_analysis['stream_buffer_depth']),
             'dir_audio': ctk.StringVar(self, self.vars_analysis['dir_audio']),
@@ -161,11 +161,12 @@ class AnalysisSettings(ctk.CTk):
         self.entry_analyzers_cpu.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
         # gpu
-        self.entry_analyzer_gpu = ent.CheckBoxEntry(
-            master=self.analysis_params_frame, label='GPU Analyzer', var=self.vars_tkinter['analyzer_gpu'],
-            tooltip="Whether or not to launch a GPU-based analyzer.\nNote! If you're using GPU, you probably don't want any CPU workers."
+        self.entry_analyzers_gpu = ent.TextEntry(
+            master=self.analysis_params_frame, label='GPU Analyzers', var=self.vars_tkinter['analyzers_gpu'],
+            tooltip="The number of GPU-bazed workers to launch.\nIf you're using GPU, you probably don't want any CPU analyzers.",
+            validation_function=val.validate_analyzers_cpu,
         )
-        self.entry_analyzer_gpu.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.entry_analyzers_gpu.grid(row=2, column=0, padx=5, pady=5, sticky="w")
 
         # chunklength
         self.entry_chunklength = ent.TextEntry(
@@ -313,14 +314,14 @@ class AnalysisSettings(ctk.CTk):
         self.vars_analysis['framehop_prop'] = float(self.vars_analysis['framehop_prop'])
         self.vars_analysis['chunklength'] = int(self.vars_analysis['chunklength'])
         self.vars_analysis['analyzers_cpu'] = int(self.vars_analysis['analyzers_cpu'])
-        self.vars_analysis['analyzer_gpu'] = bool(self.vars_analysis['analyzer_gpu'])
+        self.vars_analysis['analyzers_gpu'] = int(self.vars_analysis['analyzers_gpu'])
         self.vars_analysis['n_streamers'] = int(self.vars_analysis['n_streamers']) if self.vars_analysis['n_streamers'] != '' else None
         self.vars_analysis['stream_buffer_depth'] = int(self.vars_analysis['stream_buffer_depth']) if self.vars_analysis['stream_buffer_depth'] != '' else None
 
         self.vars_analysis = self.vars_analysis
 
     def _validate(self):
-        entries = [self.entry_dir_audio, self.entry_dir_out, self.entry_analyzers_cpu, self.entry_chunklength]
+        entries = [self.entry_dir_audio, self.entry_dir_out, self.entry_analyzers_cpu, self.entry_analyzers_gpu, self.entry_chunklength]
         issues = [f"{entry.name}: {entry.argvalid.message}" for entry in entries if not entry.argvalid.valid]
 
         if not issues:

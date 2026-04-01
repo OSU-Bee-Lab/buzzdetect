@@ -1,5 +1,6 @@
 from queue import Full
 
+import tensorflow as tf
 import librosa
 import numpy as np
 import soundfile as sf
@@ -74,6 +75,8 @@ class WorkerStreamer:
                 abort_stream = False
 
             samples = librosa.resample(y=samples, orig_sr=track.samplerate, target_sr=self.resample_rate)
+            # pre-convert samples to tensors so that GPU workers aren't wasting CPU ops on conversion
+            samples = tf.convert_to_tensor(samples, dtype=tf.float32)
 
             a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples)
             while not self.coordinator.event_exitanalysis.is_set():
