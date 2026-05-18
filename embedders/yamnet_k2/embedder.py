@@ -1,5 +1,5 @@
 import os
-
+import tensorflow as tf
 from src.inference.embedding import BaseEmbedder
 
 class YamnetK2(BaseEmbedder):

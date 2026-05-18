@@ -3,8 +3,11 @@ import os
 import tensorflow as tf
 from tensorflow.keras import Model
 
-from src.embedding.BaseEmbedder import BaseEmbedder
+from src.inference.embedding import BaseEmbedder
 from embedders.yamnet.yamnet import WaveformFeatures  # NEEDED for model loading; custom class in model
+
+WaveformFeatures.__name__  # this line is just here so that optimizing imports doesn't remove the WaveFormFeatures import
+# Which is needed even though PyCharm doesn't realize it
 
 """Feature computation for YAMNet."""
 
@@ -17,15 +20,17 @@ class EmbedderYamnet(BaseEmbedder):
     n_embeddings = 1024
     dtype_in = 'float32'
 
+
+
     def initialize(self):
         """Load the YAMNet model from TensorFlow Hub"""
         curdir = os.path.dirname(os.path.realpath(__file__))
         model_path = os.path.join(curdir, 'yamnet.keras')
         model = tf.keras.models.load_model(model_path, compile=False)
         model.layers[1].params.patch_hop_seconds = self.framehop_s
-        return model
+        self.model = model
 
-
+    @tf.function
     def embed(self, audio):
         """
         Generate embeddings for audio data
