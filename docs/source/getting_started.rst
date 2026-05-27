@@ -54,7 +54,7 @@ You can install your Conda environment wherever you wish, but these steps will i
 
 4. Confirm proper installation
 -------------------------------
-1. Activate the conda environment by running ``conda activate ./venv``.
+1. Activate the conda environment by running ``conda activate ./.venv``.
 2. Run ``conda list``; you should be able to see all of the specified dependencies (along with many other packages).
 
 5. Test an audio file

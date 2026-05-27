@@ -1,11 +1,12 @@
 import sys
 import os
+from datetime import datetime
 sys.path.insert(0, os.path.abspath('../..'))
 
 # -- Project information -----------------------------------------------------
 
 project = 'buzzdetect'
-copyright = '2025, OSU Bee Lab'
+copyright = f'{datetime.now().year}, OSU Bee Lab'
 author = 'OSU Bee Lab'
 
 # The short X.Y version
