@@ -55,10 +55,11 @@ class WorkerInferer:
         chunk_duration = a_chunk.chunk[1] - a_chunk.chunk[0]
 
         self.timer_analysis.stop()
-        analysis_rate = (chunk_duration / self.timer_analysis.get_total(5)).__round__(1)
+        analysis_rate = chunk_duration / self.timer_analysis.get_total(5)
 
-        msg = (f"analyzed {a_chunk.file.shortpath_audio}, chunk ({float(a_chunk.chunk[0])}, {float(a_chunk.chunk[1])}) "
-                 f"in {self.timer_analysis.get_total()}s (rate: {analysis_rate})")
+        digits_time = self.model.embedder.digits_time
+        msg = (f"analyzed {a_chunk.file.shortpath_audio}, chunk ({float(a_chunk.chunk[0]):.{digits_time}f}, {float(a_chunk.chunk[1]):.{digits_time}f}) "
+                 f"in {self.timer_analysis.get_total():.2f}s (rate: {analysis_rate:.1f})")
 
         self.log(msg, 'PROGRESS')
         self.timer_analysis.restart()

@@ -28,7 +28,7 @@ class AssignFile:
 
         self.extension_audio = os.path.splitext(self.path_audio)[1]
 
-        self.shortpath_audio = self.ident + '.' + self.extension_audio
+        self.shortpath_audio = self.ident + self.extension_audio
         self.shortpath_results_complete = self.ident + cfg.SUFFIX_RESULT_COMPLETE
 
 @dataclass

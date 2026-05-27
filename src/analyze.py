@@ -324,8 +324,9 @@ class Analyzer:
 
 
         self.timer_total.stop()
-        analysis_time = self.timer_total.get_total()
-        self.coordinator.q_log.put(AssignLog(message=f'\nAll files analyzed and cleaned.\nTotal analysis time: {analysis_time.__format__(',')}s', level_str='INFO', terminate=False))
+        if self.coordinator.end_reason == 'completed':
+            analysis_time = self.timer_total.get_total()
+            self.coordinator.q_log.put(AssignLog(message=f'\nAll files analyzed and cleaned.\nTotal analysis time: {analysis_time.__format__(",")}s', level_str='INFO', terminate=False))
 
         self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
         self.thread_logger.join()

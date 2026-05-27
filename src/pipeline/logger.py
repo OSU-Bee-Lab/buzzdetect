@@ -1,13 +1,23 @@
 import logging
+import time
 
 from src.pipeline.assignments import AssignLog
 from src.pipeline.coordination import Coordinator
 from src.pipeline.loglevels import loglevels
 
+logging.addLevelName(loglevels['PROGRESS'], 'PROGRESS')
+
+
+class PeriodFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        ct = self.converter(record.created)
+        t = time.strftime("%Y-%m-%d %H:%M:%S", ct)
+        return f"{t}.{int(record.msecs):03d}"
+
 
 class FilterDropProgress(logging.Filter):
     def filter(self, record):
-        return record.levelno != 'PROGRESS'
+        return record.levelno != loglevels['PROGRESS']
 
 
 class WorkerLogger:
@@ -25,7 +35,7 @@ class WorkerLogger:
         self.log = logging.getLogger('buzzdetect')
         self.log.setLevel('DEBUG')
 
-        self.format_file = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        self.format_file = PeriodFormatter("%(asctime)s [%(levelname)s] %(message)s")
         self.handle_file = logging.FileHandler(path_log)
         self.handle_file.setLevel(verbosity_log)
         if not log_progress:
@@ -35,6 +45,7 @@ class WorkerLogger:
 
         self.handle_console = logging.StreamHandler()
         self.handle_console.setLevel(self.verbosity_print_int)
+        self.handle_console.setFormatter(PeriodFormatter("%(asctime)s [%(levelname)s] %(message)s"))
         self.log.addHandler(self.handle_console)
 
     def __call__(self):
