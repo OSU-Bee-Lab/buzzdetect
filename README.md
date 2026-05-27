@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.15537954.svg)](https://doi.org/10.5281/zenodo.15537954)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15537954.svg)](https://doi.org/10.5281/zenodo.15537954)
 
 # buzzdetect
 <div align="center">
@@ -7,7 +7,7 @@
 
 buzzdetect is a tool for passive acoustic monitoring of pollinator activity. It uses machine learning to analyze audio recordings and identify the buzz of insect flight, enabling highly scalable, temporally rich observation. Read the peer-reviewed paper in the [Journal of Insect Science](https://doi.org/10.1093/jisesa/ieaf104). 
 
-Read [our full documentation](https://buzzdetect.readthedocs.io/en/latest/) on readthedocs.io. Documentation is still underway; please bear with us!
+Read [our full documentation](https://buzzdetect.readthedocs.io/en/latest/) on readthedocs.io. Documentation is still underway; please bear with us! Find walkthroughs, protocols, and other musings [here](https://lukehearon.com/buzzdetect/).
 
 ## Key Features
 
