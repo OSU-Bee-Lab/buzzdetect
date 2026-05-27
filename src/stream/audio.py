@@ -16,10 +16,10 @@ import re
 import soundfile as sf
 
 from src.config import TAG_EOF
-from src.pipeline.assignments import AssignLog
+from src.pipeline.assignments import AssignLog, AssignFile
 
 
-def get_duration(path_audio, q_log: multiprocessing.Queue = None):
+def get_duration(a_file: AssignFile, q_log: multiprocessing.Queue = None):
     """
     Get the duration of an audio file in seconds.
 
@@ -38,19 +38,21 @@ def get_duration(path_audio, q_log: multiprocessing.Queue = None):
     float
         The duration of the audio file in seconds.
     """
-    track = sf.SoundFile(path_audio)
-    paths_eof = enumerate_eof_files(path_audio)
+    if a_file.track is None:
+        a_file.track = sf.SoundFile(a_file.path_audio)
+
+    paths_eof = enumerate_eof_files(a_file.path_audio)
 
     if not paths_eof:
-        frame_final = track.frames
+        frame_final = a_file.track.frames
     elif len(paths_eof) == 1:
         frame_final = extract_eof_frame(paths_eof[0])
     else:
         if q_log is not None:
-            q_log.put(AssignLog(message=f"multiple EOF files found for {path_audio}; retaining earliest", level_str='WARNING'))
+            q_log.put(AssignLog(message=f"multiple EOF files found for {a_file.path_audio}; retaining earliest", level_str='WARNING'))
         frame_final = resolve_multiple_eof(paths_eof)
 
-    return frame_final / track.samplerate
+    return frame_final / a_file.track.samplerate
 
 def extract_eof_frame(path_eof):
     """

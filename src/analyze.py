@@ -1,19 +1,21 @@
 import multiprocessing
-import os
 import threading
 
-from src import config as cfg
 from src.inference.models import load_model
 from src.inference.worker import WorkerInferer
-from src.check.worker import WorkerChecker
-from src.pipeline.coordination import Coordinator
 from src.pipeline.logger import WorkerLogger
-from src.pipeline.assignments import AssignLog
 from src.stream.worker import WorkerStreamer
 from src.utils import Timer
 from src.write.thresholds import calculate_threshold
 from src.write.worker import WorkerWriter
+import os
 
+import soundfile as sf
+
+from src import config as cfg
+from src.pipeline.assignments import AssignFile, AssignLog
+from src.pipeline.coordination import Coordinator, ExitSignal
+from src.utils import search_dir
 
 def run_worker(workerclass, **kwargs):
     worker = workerclass(**kwargs)
@@ -75,6 +77,7 @@ class Analyzer:
             framehop_prop=framehop_prop,
             initialize=False
         )
+
         self.chunklength = self._setup_chunklength(chunklength)
         self.classes_out = self._setup_classes_out(classes_out)
         self.threshold = self._setup_threshold(precision)
@@ -181,7 +184,8 @@ class Analyzer:
                 kwargs={
                     'workerclass': WorkerStreamer,
                     'id_streamer': s,
-                    'resample_rate': self.model.embedder.samplerate,
+                    'model': self.model,
+                    'chunklength': self.chunklength,
                     'coordinator': self.coordinator,
                 }
             )
@@ -247,27 +251,66 @@ class Analyzer:
         for t in self.threads_analyzers:
             t.start()
 
+
+    def queue_assignments(self):
+        assignments = []
+        for p in search_dir(self.dir_audio, extensions=list(sf.available_formats().keys())):
+            a_file = AssignFile(path_audio=p, dir_audio=self.dir_audio, dir_results=self.dir_out)
+            assignments.append(a_file)
+
+        if not assignments:
+            self.coordinator.exit_analysis(
+                ExitSignal(
+                    message=(f"Exiting analysis: no compatible audio files found in raw directory {self.dir_audio}.\n"
+                            f"audio format must be one of: \n{', '.join(sf.available_formats().keys())}"),
+                    level='WARNING',
+                    end_reason='no files'
+                )
+            )
+
+            return False
+
+        # check for conflicting idents; i.e., two files have identical names but different extensions
+        # causes results to be written to the same file.
+        idents = [f.ident for f in assignments]
+
+        idents_conflicting = {ident for ident in idents if idents.count(ident) > 1}
+
+        for ident_conflicting in idents_conflicting:
+            paths_conflicting = [f.shortpath_audio for f in assignments if f.ident == ident_conflicting]
+            msg = (f'The following files have conflicting names and will be skipped:\n'
+                   f'{', '.join(paths_conflicting)}\n'
+                   f'These files must be renamed before they can be analyzed.')
+            self.coordinator.q_log.put(AssignLog(msg, 'WARNING'))
+
+        assignments = [f for f in assignments if f.ident not in idents_conflicting]
+        if not assignments:
+            self.coordinator.exit_analysis(
+                ExitSignal(
+                    message=f"All files in {self.dir_audio} are fully analyzed; exiting analysis",
+                    level='INFO',
+                    end_reason='fully analyzed'
+                )
+            )
+            return False
+
+        for a_file in assignments:
+            self.coordinator.q_stream.put(a_file)
+        return True
+
     def run(self):
         """Execute the complete analysis workflow."""
         self._log_startup()
         self._launch_logger()
 
 
-        checker = WorkerChecker(
-            dir_audio=self.dir_audio,
-            dir_results=self.dir_out,
-            framelength_s=self.model.embedder.framelength_s,
-            chunklength=self.chunklength,
-            coordinator=self.coordinator
-        )
-
-        checker.queue_assignments()
-
-        # checker can trigger an early exit based on the state of the files;
-        # if this happens, don't even launch
-        if self.coordinator.event_exitanalysis.is_set():
-            self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
+        if not self.queue_assignments():
+            self.thread_logger.join()
             return
+
+        # queue termination sentinels
+        for _ in range(self.coordinator.streamers_total):
+            self.coordinator.q_stream.put('exit')
 
         self._launch_writer()
         self._launch_streamers()
@@ -279,16 +322,13 @@ class Analyzer:
             thread_writer=self.thread_writer
         )
 
-        if self.coordinator.end_reason == 'completed':
-            checker.cleanup()
-            self.timer_total.stop()
-            analysis_time = self.timer_total.get_total()
 
-            self.coordinator.q_log.put(AssignLog(message=f'\nAll files analyzed and cleaned.\nTotal analysis time: {analysis_time.__format__(',')}s', level_str='INFO', terminate=False))
+        self.timer_total.stop()
+        analysis_time = self.timer_total.get_total()
+        self.coordinator.q_log.put(AssignLog(message=f'\nAll files analyzed and cleaned.\nTotal analysis time: {analysis_time.__format__(',')}s', level_str='INFO', terminate=False))
 
         self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
         self.thread_logger.join()
-
 
 
 def analyze(

@@ -1,5 +1,6 @@
 import os
-from _queue import Empty
+
+import pandas as pd
 
 from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
@@ -63,7 +64,7 @@ class WorkerWriter:
     def log(self, msg, level_str):
         self.coordinator.q_log.put(AssignLog(message=f'writer: {msg}', level_str=level_str))
 
-    def write_results(self, a_chunk: AssignChunk):
+    def write_results(self, a_chunk: AssignChunk, fully_analyzed: bool):
         output = self.format(
             results=a_chunk.results.numpy(),
             time_start=a_chunk.chunk[0]
@@ -79,17 +80,21 @@ class WorkerWriter:
         # Append to existing file or create new one with headers
         output.to_csv(path_results_partial, mode='a', header=not file_exists, index=False)
 
+        if fully_analyzed:
+            df = pd.read_csv(a_chunk.file.path_results_partial)
+            df.sort_values("start", inplace=True)
+            df.to_csv(a_chunk.file.path_results_complete, index=False)
+            os.remove(a_chunk.file.path_results_partial)
+
+
     def run(self):
         self.log('launching', 'INFO')
-        while not self.coordinator.event_exitanalysis.is_set():
-            try:
-                # we might poll the queue just before the analysisdone event is set,
-                # so use a timeout to re-check
-                self.write_results(self.coordinator.q_write.get(timeout=5))
-            except Empty:
-                if self.coordinator.analyzers_done.is_set():
-                    self.log('all analyzers done; terminating', 'DEBUG')
-                    return
-                pass
+        while True:
+            item = self.coordinator.get_write()
+            if item == 'exit':
+                break
 
-        self.log("exit event set, terminating", 'DEBUG')
+            a_chunk, fully_analyzed = item
+            self.write_results(a_chunk, fully_analyzed)
+
+        self.log("terminating", 'DEBUG')

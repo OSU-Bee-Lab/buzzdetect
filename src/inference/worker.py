@@ -1,5 +1,3 @@
-from _queue import Empty
-
 import tensorflow as tf
 
 from src.inference.models import load_model
@@ -71,8 +69,7 @@ class WorkerInferer:
 
     def process_chunk(self, a_chunk: AssignChunk):
         a_chunk.results = self.model.predict(a_chunk.samples)
-
-        self.coordinator.q_write.put(a_chunk)
+        self.coordinator.put_write(a_chunk)
         self.report_rate(a_chunk)
 
     def run(self):
@@ -80,21 +77,15 @@ class WorkerInferer:
         self.model.initialize()
 
         self.timer_bottleneck.restart()
-        while not self.coordinator.event_exitanalysis.is_set():
-            try:
-                a_chunk = self.coordinator.q_analyze.get(timeout=1)
-                self.timer_bottleneck.stop()
-                if self.timer_bottleneck.get_total() > 0.01:
-                    self.report_bottleneck()
-                self.process_chunk(a_chunk)
-                self.timer_bottleneck.restart()
-            except Empty:
-                # if the streamers are done, exit as usual
-                if self.coordinator.streamers_done.is_set():
-                    self.log('all streamers done; terminating', 'DEBUG')
-                    return
+        while True:
+            a_chunk = self.coordinator.get_analyze()
+            if a_chunk == 'exit':
+                break
 
-                # otherwise, try polling the queue again
-                pass
+            self.timer_bottleneck.stop()
+            if self.timer_bottleneck.get_total() > 0.01:
+                self.report_bottleneck()
+            self.process_chunk(a_chunk)
+            self.timer_bottleneck.restart()
 
-        self.log("exit event set, terminating", 'DEBUG')
+        self.log("terminating", 'DEBUG')
