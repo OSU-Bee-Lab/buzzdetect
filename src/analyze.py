@@ -283,8 +283,17 @@ class Analyzer:
                    f'These files must be renamed before they can be analyzed.')
             self.coordinator.q_log.put(AssignLog(msg, 'WARNING'))
 
-        assignments = [f for f in assignments if f.ident not in idents_conflicting]
-        if not assignments:
+        assignments_unfinished = []
+        for a in assignments:
+            # drop all conflicts
+            if a.ident in idents_conflicting:
+                continue
+
+            # drop already finished (cleaner/faster exit)
+            if not os.path.exists(a.path_results_complete):
+                assignments_unfinished.append(a)
+
+        if not assignments_unfinished:
             self.coordinator.exit_analysis(
                 ExitSignal(
                     message=f"All files in {self.dir_audio} are fully analyzed; exiting analysis",
@@ -294,7 +303,7 @@ class Analyzer:
             )
             return False
 
-        for a_file in assignments:
+        for a_file in assignments_unfinished:
             self.coordinator.q_stream.put(a_file)
         return True
 
@@ -305,6 +314,7 @@ class Analyzer:
 
 
         if not self.queue_assignments():
+            self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
             self.thread_logger.join()
             return
 

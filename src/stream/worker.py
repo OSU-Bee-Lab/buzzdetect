@@ -62,8 +62,6 @@ class WorkerStreamer:
         self.log(msg, level)
 
     def _chunk_file(self, a_file: AssignFile):
-        self.log(f'Building assignments for {a_file.shortpath_audio}', 'INFO')
-
         if os.path.exists(a_file.path_results_complete):
             self.log(f'Skipping {a_file.shortpath_audio}; already analyzed', 'DEBUG')
             a_file.chunklist = []
