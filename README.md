@@ -1,4 +1,10 @@
+<div align="center">
+
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15537954.svg)](https://doi.org/10.5281/zenodo.15537954)
+[![Documentation](https://img.shields.io/badge/docs-readthedocs-blue)](https://buzzdetect.readthedocs.io/en/latest/)
+[![Paper](https://img.shields.io/badge/paper-Journal%20of%20Insect%20Science-blue)](https://doi.org/10.1093/jisesa/ieaf104)
+
+</div>
 
 # buzzdetect
 <div align="center">
