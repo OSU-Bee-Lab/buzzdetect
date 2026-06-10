@@ -49,6 +49,8 @@ class AnalysisWindow(ctk.CTk):
         self.proc_analysis = multiprocessing.Process(target=lambda: None, name='gui_analysis_idle')
 
         self.new_analysis_requested = False
+        self.stop_requested = False
+        self.prev_state = "idle"
 
         window_width = 500
         window_height = 500
@@ -128,6 +130,7 @@ class AnalysisWindow(ctk.CTk):
             return
 
         self.event_analysisdone.clear()
+        self.stop_requested = False
         self.proc_analysis = multiprocessing.Process(
             target=run_analysis,
             args=(self.vars_analysis, self.q_gui, self.event_analysisdone, self.q_earlyexit),
@@ -146,6 +149,7 @@ class AnalysisWindow(ctk.CTk):
             return False
 
         self.q_earlyexit.put('Analysis stopped by user')
+        self.stop_requested = True
         self.configure_buttons()
         return True
 
@@ -197,6 +201,13 @@ class AnalysisWindow(ctk.CTk):
             self._trim_if_needed()
             if at_bottom:
                 self.textbox.see("end")
+
+        state = self.determine_state()
+        if state == "idle" and self.prev_state != "idle" and self.stop_requested:
+            self.textbox.insert("end", "Analysis stopped successfully.\n")
+            self.textbox.see("end")
+            self.stop_requested = False
+        self.prev_state = state
 
         self.configure_buttons()
         self.after(cfg_gui.poll_interval_ms, self.poll_queue)
