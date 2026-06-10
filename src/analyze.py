@@ -15,6 +15,7 @@ import soundfile as sf
 from src import config as cfg
 from src.pipeline.assignments import AssignFile, AssignLog
 from src.pipeline.coordination import Coordinator, ExitSignal
+from src.pipeline.manifest import build_manifest, check_or_write_manifest
 from src.utils import search_dir
 
 def run_worker(workerclass, **kwargs):
@@ -78,6 +79,7 @@ class Analyzer:
             initialize=False
         )
 
+        self.precision = precision
         self.chunklength = self._setup_chunklength(chunklength)
         self.classes_out = self._setup_classes_out(classes_out)
         self.threshold = self._setup_threshold(precision)
@@ -252,6 +254,23 @@ class Analyzer:
             t.start()
 
 
+    def _check_manifest(self):
+        """Guard against writing schema-incompatible results into an existing
+        output folder (e.g. resuming with a different neuron set). Returns False
+        if the run conflicts with the folder's existing manifest."""
+        manifest = build_manifest(
+            modelname=self.modelname,
+            framehop_prop=self.framehop_prop,
+            precision=self.precision,
+            classes_out=self.classes_out,
+        )
+        ok, msg = check_or_write_manifest(self.dir_out, manifest)
+        if not ok:
+            self.coordinator.exit_analysis(
+                ExitSignal(message=msg, level='ERROR', end_reason='manifest mismatch')
+            )
+        return ok
+
     def queue_assignments(self):
         assignments = []
         for p in search_dir(self.dir_audio, extensions=list(sf.available_formats().keys())):
@@ -312,6 +331,10 @@ class Analyzer:
         self._log_startup()
         self._launch_logger()
 
+        if not self._check_manifest():
+            self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
+            self.thread_logger.join()
+            return
 
         if not self.queue_assignments():
             self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))

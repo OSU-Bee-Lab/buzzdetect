@@ -1,5 +1,8 @@
 import argparse
+import json
 import multiprocessing
+import os
+import sys
 
 
 def str2bool(v):
@@ -11,6 +14,54 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def _resolve_dir_out(dir_out, modelname):
+    """Mirror Analyzer's default: model's output subdir when dir_out is unset."""
+    from src import config as cfg
+    if dir_out is not None:
+        return dir_out
+    return os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_OUTPUT)
+
+
+def _resolve_classes_out(modelname, classes_out):
+    """Expand the 'all' sentinel to the model's full class list (for manifest comparison)."""
+    if classes_out != 'all':
+        return classes_out
+    from src import config as cfg
+    config_path = os.path.join(cfg.DIR_MODELS, modelname, 'config_model.json')
+    with open(config_path) as f:
+        return json.load(f)['classes']
+
+
+def reconcile_with_manifest(modelname, dir_out, classes_out, precision, framehop_prop):
+    """If the output folder already holds results from different settings, show the
+    conflicts and offer to adopt the existing settings. Returns the (possibly
+    overridden) (modelname, classes_out, precision, framehop_prop). Exits on decline."""
+    from src.pipeline.manifest import build_manifest, read_manifest, diff_manifests
+
+    existing = read_manifest(_resolve_dir_out(dir_out, modelname))
+    if existing is None:
+        return modelname, classes_out, precision, framehop_prop
+
+    resolved_classes = _resolve_classes_out(modelname, classes_out) if precision is None else classes_out
+    candidate = build_manifest(modelname, framehop_prop, precision, resolved_classes)
+    conflicts = diff_manifests(existing, candidate)
+    if not conflicts:
+        return modelname, classes_out, precision, framehop_prop
+
+    print("The output folder already contains results from different settings:")
+    for c in conflicts:
+        print(f"  - {c}")
+
+    resp = input("\nAdopt the existing settings and continue? [y/N]: ").strip().lower()
+    if resp not in ('y', 'yes'):
+        print("Exiting without analyzing.")
+        sys.exit(0)
+
+    if existing['output_mode'] == 'detections':
+        return existing['modelname'], 'all', existing['precision'], existing['framehop_prop']
+    return existing['modelname'], existing['classes_out'], None, existing['framehop_prop']
 
 
 def main():
@@ -97,11 +148,19 @@ def main():
     elif isinstance(classes_out, str) and classes_out == 'all':
         classes_out = 'all'
 
-    analyze(
+    modelname, classes_out, precision, framehop_prop = reconcile_with_manifest(
         modelname=args.modelname,
+        dir_out=args.dir_out,
         classes_out=classes_out,
         precision=args.precision,
         framehop_prop=args.framehop_prop,
+    )
+
+    analyze(
+        modelname=modelname,
+        classes_out=classes_out,
+        precision=precision,
+        framehop_prop=framehop_prop,
         chunklength=args.chunklength,
         analyzers_cpu=args.analyzers_cpu,
         analyzers_gpu=args.analyzers_gpu,

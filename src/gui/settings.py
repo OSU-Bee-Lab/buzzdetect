@@ -6,6 +6,7 @@ import customtkinter as ctk
 import src.validation as val
 from src.analyze import analyze
 from src.pipeline.loglevels import loglevels
+from src.pipeline.manifest import read_manifest
 
 import src.config as cfg
 import src.gui.config as cfg_gui
@@ -33,6 +34,7 @@ class AnalysisSettings(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.run = False
+        self._locked_manifest = None
         self.vars_analysis = analysis_defaults()
 
         # drop q_gui and event_stopanalysis; handled by analaysis window
@@ -95,6 +97,10 @@ class AnalysisSettings(ctk.CTk):
         self.frame_output.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(self.frame_output, text="Output Format", font=cfg_gui.font_textheader).grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
+        # shown when the chosen output folder already has results: schema-defining
+        # controls are locked to match, so resumed runs stay compatible.
+        self.label_lock = ctk.CTkLabel(self.frame_output, text='', text_color='darkorange', wraplength=400, justify='left')
+
         self.tabview_format = ctk.CTkTabview(self.frame_output)
         self.tabview_format.add('Activations')
         self.tabview_format.add('Detections')
@@ -115,7 +121,8 @@ class AnalysisSettings(ctk.CTk):
 
         self.neuron_checkboxes = {}  # class -> BooleanVar
 
-        ctk.CTkButton(self.frame_neurons, text="Select All/None", command=lambda: self._toggle_neurons()).grid(row=1, column=0, padx=2, sticky="ew")
+        self.button_toggle_neurons = ctk.CTkButton(self.frame_neurons, text="Select All/None", command=lambda: self._toggle_neurons())
+        self.button_toggle_neurons.grid(row=1, column=0, padx=2, sticky="ew")
 
         self.entry_precision = ent.TextEntry(
             master=self.tabview_format.tab('Detections'), label='Precision', var=self.vars_tkinter['precision'],
@@ -199,6 +206,66 @@ class AnalysisSettings(ctk.CTk):
             self.vars_tkinter['modelname'].set(self.available_models[0])
         self._model_selected()
         self._load_neurons()
+
+        # lock schema-defining controls if the output folder already has results,
+        # and re-evaluate whenever the output folder changes
+        self.vars_tkinter['dir_out'].trace_add('write', self._apply_manifest_lock)
+        self._apply_manifest_lock()
+
+    def _apply_manifest_lock(self, *_):
+        """Read the manifest of the selected output folder (if any) and lock the
+        controls that determine result schema to match it, so a resumed run can't
+        write incompatible results into the folder."""
+        dir_out = self.vars_tkinter['dir_out'].get()
+        manifest = read_manifest(dir_out) if dir_out else None
+        self._locked_manifest = manifest
+
+        if manifest is None:
+            self._set_schema_locked(False)
+            self.label_lock.grid_forget()
+            return
+
+        self._apply_manifest_values(manifest)
+        self._set_schema_locked(True)
+        self.label_lock.configure(
+            text="Results have already been written to this output folder."
+                 "Model, output format, neurons, precision, and framehop are locked to match existing results."
+                 "Choose a different output folder if you would like to run an analysis with different settings."
+        )
+        self.label_lock.grid(row=2, column=0, padx=5, pady=(0, 5), sticky="w")
+
+    def _apply_manifest_values(self, manifest):
+        """Force the controls to the manifest's values (before disabling them)."""
+        model = manifest.get('modelname')
+        if model and model in self.available_models and self.vars_tkinter['modelname'].get() != model:
+            self.vars_tkinter['modelname'].set(model)
+            self._load_neurons()
+
+        if manifest.get('output_mode') == 'detections':
+            self.tabview_format.set('Detections')
+            precision = manifest.get('precision')
+            self.vars_tkinter['precision'].set('' if precision is None else precision)
+        else:
+            self.tabview_format.set('Activations')
+            locked_classes = set(manifest.get('classes_out') or [])
+            for cls, var in self.neuron_checkboxes.items():
+                var.set(cls in locked_classes)
+
+        framehop = manifest.get('framehop_prop')
+        if framehop is not None:
+            self.vars_tkinter['framehop_prop'].set(framehop)
+
+    def _set_schema_locked(self, locked: bool):
+        state = 'disabled' if locked else 'normal'
+        self.model_optionmenu.dropdown.configure(state=state)
+        # gray the checked-box fill when locked so it doesn't read as still-active
+        fg_color = 'gray50' if locked else ctk.ThemeManager.theme["CTkCheckBox"]["fg_color"]
+        for widget in self.frame_neuron_checkboxes.winfo_children():
+            widget.configure(state=state, fg_color=fg_color)
+        self.button_toggle_neurons.configure(state=state)
+        self.entry_precision.entry.configure(state=state)
+        # disable switching between Activations/Detections tabs
+        self.tabview_format._segmented_button.configure(state=state)
 
     def _open_advanced_settings_window(self):
         """Opens the Advanced Settings in a new window."""
@@ -365,6 +432,13 @@ class AdvancedSettings(ctk.CTkToplevel):
         )
         self.entry_framehop.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
 
+        # framehop defines result schema; lock it if the output folder is locked
+        if getattr(master, '_locked_manifest', None) is not None:
+            self.entry_framehop.entry.configure(state='disabled')
+            ctk.CTkLabel(
+                self, text="Framehop is locked to match that of the existing results. Choose a new output folder to change framehop.",
+                text_color='darkorange', wraplength=400, justify='left'
+            ).grid(row=1, column=0, padx=5, pady=(0, 5), sticky="w")
 
         # concurrent_streamers
         self.entry_n_streamers = ent.TextEntry(
@@ -372,7 +446,7 @@ class AdvancedSettings(ctk.CTkToplevel):
             tooltip='How many parallel audio streamers should be launched?\nIf you run into buffer bottlenecks, try increasing this number.\nLeave blank for automatic assignment.',
             validation_function=lambda v: val.validate_n_streamers(v if v != '' else None)  # ctk.StringVar can't hold None, coerces to ''
         )
-        self.entry_n_streamers.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        self.entry_n_streamers.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
 
         # stream_buffer_depth
         self.entry_stream_buffer_depth = ent.TextEntry(
@@ -380,26 +454,26 @@ class AdvancedSettings(ctk.CTkToplevel):
             tooltip='How many audio chunks should be buffered in memory?\nLeave blank for automatic assignment.',
             validation_function=lambda v: val.validate_stream_buffer_depth(v if v != '' else None) # ctk.StringVar can't hold None, coerces to ''
         )
-        self.entry_stream_buffer_depth.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        self.entry_stream_buffer_depth.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
 
         # console Verbosity
         ent.DropDownEntry(
             self, label='Console Verbosity', var=self.vars_tkinter['verbosity_print'],
             tooltip='How verbose should the console output be?', values=list(loglevels.keys())
-        ).grid(row=3, column=0, padx=5, pady=5, sticky="ew")
+        ).grid(row=4, column=0, padx=5, pady=5, sticky="ew")
 
         ent.DropDownEntry(
             self, label='Log File Verbosity', var=self.vars_tkinter['verbosity_log'],
             tooltip='How verbose should the log file output be?', values=list(loglevels.keys())
-        ).grid(row=4, column=0, padx=5, pady=5, sticky="ew")
+        ).grid(row=5, column=0, padx=5, pady=5, sticky="ew")
 
         ent.CheckBoxEntry(
             self, label='Log progress to file', var=self.vars_tkinter['log_progress'],
             tooltip='Should progress statements (e.g., reports from analyzers)\nbe written to the log file?\nCan produce very large log files.'
-        ).grid(row=5, column=0, padx=5, pady=5, sticky="ew")
+        ).grid(row=6, column=0, padx=5, pady=5, sticky="ew")
 
         # Close
-        ctk.CTkButton(self, text="Close", command=self._close).grid(row=6, column=0, columnspan=2, pady=10)
+        ctk.CTkButton(self, text="Close", command=self._close).grid(row=7, column=0, columnspan=2, pady=10)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
 
