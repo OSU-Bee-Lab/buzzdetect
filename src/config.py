@@ -6,9 +6,6 @@ DIR_AUDIO = 'audio_in'
 
 SUBDIR_OUTPUT = 'output'
 
-# Files
-TAG_EOF = '_finalframe'
-
 # Results
 SUFFIX_RESULT_COMPLETE = '_buzzdetect.csv'
 SUFFIX_RESULT_PARTIAL = '_buzzpart.csv'

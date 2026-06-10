@@ -5,7 +5,6 @@ import librosa
 import numpy as np
 
 from src.pipeline.assignments import AssignChunk
-from src.stream.audio import mark_eof
 import os
 
 import pandas as pd
@@ -45,8 +44,6 @@ class WorkerStreamer:
         # SoundFile does not handle this gracefully, so we catch it here.
 
         final_frame = a_file.track.tell()
-        mark_eof(path_audio=a_file.path_audio, final_frame=final_frame)
-
         final_second = final_frame/a_file.track.samplerate
 
         msg = f"Unreadable audio at {round(final_second, 1)}s out of {round(a_file.duration_audio, 1)}s for {a_file.shortpath_audio}."
@@ -109,7 +106,7 @@ class WorkerStreamer:
         a_file.chunklist = gaps_to_chunklist(gaps, self.chunklength)
         return
 
-    def queue_chunk(self, a_file, chunk: tuple[float, float]):
+    def queue_chunk(self, a_file, chunk: tuple[float, float], force_last: bool = False):
         sample_from = int(chunk[0] * a_file.track.samplerate)
         sample_to = int(chunk[1] * a_file.track.samplerate)
         read_size = sample_to - sample_from
@@ -131,7 +128,8 @@ class WorkerStreamer:
         samples = librosa.resample(y=samples, orig_sr=a_file.track.samplerate, target_sr=self.resample_rate)
         samples = tf.convert_to_tensor(samples, dtype=tf.float32)
 
-        a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, last_chunk=not continue_file)
+        last_chunk = force_last or not continue_file
+        a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, last_chunk=last_chunk)
         self.coordinator.put_analyze(a_chunk)
 
         return continue_file
@@ -139,12 +137,13 @@ class WorkerStreamer:
     def stream_to_queue(self, a_file: AssignFile):
         self._chunk_file(a_file)
 
-        for chunk in a_file.chunklist:
+        last_index = len(a_file.chunklist) - 1
+        for i, chunk in enumerate(a_file.chunklist):
             # reading and resampling can be very slow, so opportunistically bail mid-file
             # rather than committing to the next chunk's work
             if self.coordinator.event_exitanalysis.is_set():
                 return
-            continue_file = self.queue_chunk(a_file=a_file, chunk=chunk)
+            continue_file = self.queue_chunk(a_file=a_file, chunk=chunk, force_last=i == last_index)
             if not continue_file:
                 break
 

@@ -326,10 +326,30 @@ class Analyzer:
             self.coordinator.q_stream.put(a_file)
         return True
 
+    def _cleanup_finalframe_files(self):
+        # TEMPORARY (added 2026-06-10): buzzdetect used to write '_finalframe'
+        # marker files next to source audio to record true durations. It no
+        # longer does, but past runs littered users' audio folders. Sweep them.
+        # Safe to remove after 2026-07-10.
+        import glob
+        paths = glob.glob(os.path.join(self.dir_audio, '**', '*_finalframe_*'), recursive=True)
+        if not paths:
+            return
+        self.coordinator.q_log.put(AssignLog(
+            message='Removing _finalframe files from audio dir; these are no longer used by buzzdetect',
+            level_str='INFO'
+        ))
+        for p in paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
     def run(self):
         """Execute the complete analysis workflow."""
         self._log_startup()
         self._launch_logger()
+        self._cleanup_finalframe_files()
 
         if not self._check_manifest():
             self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
