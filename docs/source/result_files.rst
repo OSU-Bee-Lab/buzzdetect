@@ -55,6 +55,16 @@ Result files: _buzzdetect.csv
 rows
 ^^^^^
 Every row of a result file corresponds to a single frame.
+A frame is a span of audio that the model attempts to classify.
+For our YAMNet models, the frame length is 0.96s; the model takes in
+roughly a second of audio and evaluates it for the presence of
+insect buzzing (and all the other classes we train the model on).
+
+By default, analyses run with a frame hop of 1.0x, producing contiguous frames.
+So you'll see, for example, start values of 0, 0.96, 1.92, 2.88, ...
+There is an option to run analyses with variable framehops, so that frames are overlapping (framehop < 1)
+or have gaps between them (framehop > 1). This option is not well supported due to model architecture limitations,
+and we find that shorter framehops perform no better than a framehop of 1.
 
 columns
 ^^^^^^^^^
