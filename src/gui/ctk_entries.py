@@ -1,3 +1,4 @@
+import os
 import tkinter as tk
 from idlelib.tooltip import Hovertip
 from tkinter import filedialog as filedialog
@@ -71,11 +72,11 @@ class FilePathEntry(TextEntry):
         self.browse.grid(row=0, column=2, padx=5, pady=0, sticky="w")
 
     def _browse(self):
-        dir_selected = filedialog.askdirectory(initialdir=self.initialdir, title=self.browsetitle)
+        current = self.var.get()
+        initialdir = current if current and os.path.isdir(current) else self.initialdir
+        dir_selected = filedialog.askdirectory(initialdir=initialdir, title=self.browsetitle)
         if dir_selected == '':  # window was closed; do nothing
             return
-
-        self.initialdir = dir_selected  # keep "memory" of initial dir
         self.var.set(dir_selected)
 
 

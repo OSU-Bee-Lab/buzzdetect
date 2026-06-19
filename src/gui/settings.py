@@ -30,6 +30,11 @@ def analysis_defaults():
 
     return arguments
 
+
+def save_settings(vars_analysis):
+    with open(cfg_gui.path_settingscache, 'w') as f:
+        json.dump(vars_analysis, f, indent=2)
+
 class AnalysisSettings(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -37,9 +42,9 @@ class AnalysisSettings(ctk.CTk):
         self._locked_manifest = None
         self.vars_analysis = analysis_defaults()
 
-        # drop q_gui and event_stopanalysis; handled by analaysis window
-        self.vars_analysis.pop('q_gui')
-        self.vars_analysis.pop('event_stopanalysis')
+        # drop q_gui and event_stopanalysis; handled by analysis window
+        self.vars_analysis.pop('q_gui', None)
+        self.vars_analysis.pop('event_stopanalysis', None)
 
         self.vars_tkinter = {
             'modelname': ctk.StringVar(self, ''),  # will be loaded at end of init; ctk coerces None to '' so just set to ''
@@ -200,12 +205,24 @@ class AnalysisSettings(ctk.CTk):
         # ---- initializing values ----
         # Initial loading of models and classes
         self._load_available_models()
-        if cfg.DEFAULT_MODEL in self.available_models:
+        saved_model = self.vars_analysis.get('modelname')
+        if saved_model and saved_model in self.available_models:
+            self.vars_tkinter['modelname'].set(saved_model)
+        elif cfg.DEFAULT_MODEL in self.available_models:
             self.vars_tkinter['modelname'].set(cfg.DEFAULT_MODEL)
         else:
             self.vars_tkinter['modelname'].set(self.available_models[0])
         self._model_selected()
         self._load_neurons()
+
+        # restore saved output mode (manifest will override if applicable)
+        if self.vars_analysis.get('precision') is not None:
+            self.tabview_format.set('Detections')
+
+        # restore saved dir_out; _model_selected() overwrites it with the model default
+        saved_dir_out = self.vars_analysis.get('dir_out')
+        if saved_dir_out:
+            self.vars_tkinter['dir_out'].set(saved_dir_out)
 
         # lock schema-defining controls if the output folder already has results,
         # and re-evaluate whenever the output folder changes
@@ -292,8 +309,11 @@ class AnalysisSettings(ctk.CTk):
 
     def _load_neurons(self):
         """Loads classes from config_model.json for the selected model and updates checkboxes."""
-        # cache selected neurons
-        neurons_selected = [k for k, v in self.neuron_checkboxes.items() if v.get()]
+        # cache selected neurons; on first call (empty dict), fall back to saved settings
+        if self.neuron_checkboxes:
+            neurons_selected = [k for k, v in self.neuron_checkboxes.items() if v.get()]
+        else:
+            neurons_selected = self.vars_analysis.get('classes_out') or []
 
         # clear existing checkboxes
         for widget in self.frame_neuron_checkboxes.winfo_children():
@@ -406,6 +426,7 @@ class AnalysisSettings(ctk.CTk):
             self.update_idletasks()
         if self._validate():
             self._update_vars_analysis()
+            save_settings(self.vars_analysis)
             self.run = True
             self.destroy()
 
