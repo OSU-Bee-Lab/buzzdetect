@@ -146,7 +146,7 @@ def validate_stream_buffer_depth(stream_buffer_depth: int):
 
 def validate_dir_audio(dir_audio: str):
     if not os.path.exists(dir_audio):
-        return ArgValid(False, f'folder does not exist')
+        return ArgValid(False, f'folder does not exist: {dir_audio!r}')
     return ArgValid(True, None)
 
 def validate_dir_out(dir_out: str):

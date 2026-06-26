@@ -19,11 +19,7 @@ class AbstractEntry(ctk.CTkFrame):
         self.validation_function = validation_function
         self.label_invalid = ctk.CTkLabel(self.invalidateframe, font=cfg_gui.font_hint, height=2, justify='left')
         self.valid = True
-
-        if self.validation_function is None:
-            self.validate = None
-        else:
-            self.validate='focusout'
+        self.argvalid = ArgValid(True, None)
 
         if tooltip:
             self.label.configure(text=f"{label}  ?⃝")
@@ -56,9 +52,12 @@ class AbstractEntry(ctk.CTkFrame):
 class TextEntry(AbstractEntry):
     def __init__(self, master, label, var, tooltip=None, validation_function=None):
         super().__init__(master, label, var, tooltip, validation_function)
-        self.entry = ctk.CTkEntry(self, textvariable=self.var, validate=self.validate, validatecommand=self._validate_and_warn)
+        self.entry = ctk.CTkEntry(self, textvariable=self.var)
         self.entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
+        if self.validation_function is not None:
+            self.entry._entry.bind('<FocusOut>', lambda e: self._validate_and_warn(), add='+')
+            self.after(0, self._validate_and_warn)
 
 
 class FilePathEntry(TextEntry):
@@ -67,7 +66,6 @@ class FilePathEntry(TextEntry):
         self.var = var if var is not None else tk.StringVar()
         self.initialdir = initialdir
         self.browsetitle = browsetitle
-        self.entry.configure(validatecommand=self._validate_and_warn)
         self.browse = ctk.CTkButton(self, text="📁", command=self._browse, width=10, height=5)
         self.browse.grid(row=0, column=2, padx=5, pady=0, sticky="w")
 
@@ -78,6 +76,8 @@ class FilePathEntry(TextEntry):
         if dir_selected == '':  # window was closed; do nothing
             return
         self.var.set(dir_selected)
+        if self.validation_function is not None:
+            self._validate_and_warn()
 
 
 class DropDownEntry(AbstractEntry):
