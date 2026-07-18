@@ -8,7 +8,7 @@ from src.pipeline.assignments import AssignChunk
 import os
 
 import pandas as pd
-import soundfile as sf
+from src.stream.audio import build_track
 
 from src import config as cfg
 from src.stream.results_coverage import melt_coverage, get_gaps, smooth_gaps, gaps_to_chunklist
@@ -69,7 +69,7 @@ class WorkerStreamer:
             a_file.chunklist = []
             return
 
-        a_file.track = sf.SoundFile(a_file.path_audio)
+        a_file.track = build_track(a_file.path_audio)
         a_file.duration_audio = get_duration(a_file, q_log=self.coordinator.q_log)
 
         # if the file hasn't been started, chunk the whole file

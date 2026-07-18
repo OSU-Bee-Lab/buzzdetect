@@ -9,8 +9,7 @@ from src.utils import Timer
 from src.write.thresholds import calculate_threshold
 from src.write.worker import WorkerWriter
 import os
-
-import soundfile as sf
+from src.stream.audio import driver_map
 
 from src import config as cfg
 from src.pipeline.assignments import AssignFile, AssignLog
@@ -273,7 +272,7 @@ class Analyzer:
 
     def queue_assignments(self):
         assignments = []
-        for p in search_dir(self.dir_audio, extensions=list(sf.available_formats().keys())):
+        for p in search_dir(self.dir_audio, extensions=list(driver_map.keys())):
             a_file = AssignFile(path_audio=p, dir_audio=self.dir_audio, dir_results=self.dir_out)
             assignments.append(a_file)
 
@@ -281,7 +280,7 @@ class Analyzer:
             self.coordinator.exit_analysis(
                 ExitSignal(
                     message=(f"Exiting analysis: no compatible audio files found in raw directory {self.dir_audio}.\n"
-                            f"audio format must be one of: \n{', '.join(sf.available_formats().keys())}"),
+                            f"audio format must be one of: \n{', '.join(driver_map.keys())}"),
                     level='WARNING',
                     end_reason='no files'
                 )
