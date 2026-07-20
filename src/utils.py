@@ -2,6 +2,8 @@ import os
 import re
 from datetime import datetime
 
+def get_ext(path):
+    return os.path.splitext(path)[1].lower().lstrip('.')
 
 class Timer:
     def __init__(self):

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import tensorflow as tf
-import soundfile as sf
+from src.stream.driver import AudioDriver
 
 import src.config as cfg
 from src.pipeline.loglevels import loglevels
@@ -15,7 +15,7 @@ class AssignFile:
     path_audio: str
     dir_audio: str
     dir_results: str
-    track: sf.SoundFile | None = None
+    track: AudioDriver | None = None
     duration_audio: float | None = None
     chunklist: list[tuple[float, float]] | None = None
 
