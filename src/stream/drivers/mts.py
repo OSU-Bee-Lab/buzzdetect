@@ -134,6 +134,24 @@ class Driver:
         self._eof = False
         self._position = 0
 
+    def _discard_forward(self, target):
+        # Chunked rather than one _consume() call for the whole span:
+        # _ensure_buffer decodes the entire requested span into a single
+        # buffer before any of it is discarded, so an unchunked forward
+        # skip deep into a long file (e.g. resuming analysis partway
+        # through a file, or a backward seek target far into a long AC3
+        # stream that must be reopened-and-recounted from position 0)
+        # briefly materializes the whole skipped span as decoded float32
+        # PCM. This chunk size is unrelated to the caller's read/chunk
+        # length -- it only bounds how much discarded audio is buffered
+        # at once while skipping, not the size of the chunk ultimately
+        # returned by read().
+        chunk = self.samplerate * 30
+        remaining = target - self._position
+        while remaining > 0 and not self._eof:
+            self._consume(min(remaining, chunk))
+            remaining = target - self._position
+
     def seek(self, sample_index):
         if sample_index < 0:
             raise ValueError("seek target must be non-negative")
@@ -143,13 +161,13 @@ class Driver:
             # No container seek: decode-forward-and-discard from the live
             # decoder. Required fast path for sequential seek-per-chunk
             # access patterns (the common case) -- see _container_reopen_count.
-            self._consume(sample_index - self._position)
+            self._discard_forward(sample_index)
             return
         # Backward seek: no AC3 container seek is trustworthy (see class
         # docstring), so the only exact path is a fresh decode from true
         # start, counting forward to the target.
         self._reopen_fresh()
-        self._consume(sample_index)
+        self._discard_forward(sample_index)
 
     def read(self, n_samples, dtype="float32"):
         if n_samples < 0:

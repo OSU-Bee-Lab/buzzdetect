@@ -216,7 +216,21 @@ class Driver:
             # No container seek: decode-forward-and-discard from the live
             # decoder. Required fast path for sequential seek-per-chunk
             # access patterns (the common case) -- see _container_seek_count.
-            self._consume(sample_index - self._position)
+            # Chunked rather than one _consume() call for the whole gap:
+            # _ensure_buffer decodes the entire requested span into a single
+            # buffer before any of it is discarded, so an unchunked forward
+            # seek deep into a long file (e.g. resuming analysis partway
+            # through a file, straight from position 0 to a gap hours in)
+            # briefly materializes the whole skipped span as decoded float32
+            # PCM. This chunk size is unrelated to the caller's read/chunk
+            # length -- it only bounds how much discarded audio is buffered
+            # at once while skipping, not the size of the chunk ultimately
+            # returned by read().
+            remaining = sample_index - self._position
+            chunk = self.samplerate * 30
+            while remaining > 0 and not self._eof:
+                self._consume(min(remaining, chunk))
+                remaining = sample_index - self._position
             return
         self._seek_backward(sample_index)
 
