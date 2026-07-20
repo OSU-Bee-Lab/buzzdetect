@@ -135,17 +135,22 @@ class WorkerStreamer:
         return continue_file
 
     def stream_to_queue(self, a_file: AssignFile):
-        self._chunk_file(a_file)
+        try:
+            self._chunk_file(a_file)
 
-        last_index = len(a_file.chunklist) - 1
-        for i, chunk in enumerate(a_file.chunklist):
-            # reading and resampling can be very slow, so opportunistically bail mid-file
-            # rather than committing to the next chunk's work
-            if self.coordinator.event_exitanalysis.is_set():
-                return
-            continue_file = self.queue_chunk(a_file=a_file, chunk=chunk, force_last=i == last_index)
-            if not continue_file:
-                break
+            last_index = len(a_file.chunklist) - 1
+            for i, chunk in enumerate(a_file.chunklist):
+                # reading and resampling can be very slow, so opportunistically bail mid-file
+                # rather than committing to the next chunk's work
+                if self.coordinator.event_exitanalysis.is_set():
+                    return
+                continue_file = self.queue_chunk(a_file=a_file, chunk=chunk, force_last=i == last_index)
+                if not continue_file:
+                    break
+        finally:
+            if a_file.track is not None:
+                a_file.track.close()
+                a_file.track = None
 
     def run(self):
         self.log('launching', 'INFO')

@@ -18,3 +18,6 @@ class AudioDriver(ABC):
     def tell(self):
         pass
 
+    def close(self):
+        pass
+
