@@ -76,6 +76,13 @@ class Driver:
         self._position = 0
         self._decode_pos = 0
         self._buffer = np.empty((0, self.channels), dtype=np.float32)
+        # Newly decoded frames land here rather than being concatenated onto
+        # _buffer one at a time -- with 1024-sample AAC frames, a per-frame
+        # concatenate onto a chunk-sized buffer is O(frames^2) copying (a 50s
+        # chunk decodes ~2300 frames). Merged into _buffer once per _consume
+        # instead.
+        self._pending = []
+        self._pending_samples = 0
         self._eof = False
 
         self._container_seek_count = 0
@@ -96,8 +103,17 @@ class Driver:
 
     def _append_frame(self, frame):
         arr = np.ascontiguousarray(frame.to_ndarray().T).astype(np.float32, copy=False)
-        self._buffer = arr if self._buffer.size == 0 else np.concatenate([self._buffer, arr], axis=0)
+        self._pending.append(arr)
+        self._pending_samples += arr.shape[0]
         self._decode_pos += arr.shape[0]
+
+    def _merge_pending(self):
+        if not self._pending:
+            return
+        parts = self._pending if self._buffer.size == 0 else [self._buffer, *self._pending]
+        self._buffer = np.concatenate(parts, axis=0)
+        self._pending = []
+        self._pending_samples = 0
 
     def _flush_resampler(self):
         for out_frame in self._resampler.resample(None):
@@ -114,8 +130,9 @@ class Driver:
             self._append_frame(out_frame)
 
     def _ensure_buffer(self, n):
-        while self._buffer.shape[0] < n and not self._eof:
+        while self._buffer.shape[0] + self._pending_samples < n and not self._eof:
             self._decode_one_step()
+        self._merge_pending()
 
     def _consume(self, n):
         if n <= 0:
@@ -133,6 +150,8 @@ class Driver:
         self._decoder = self._container.decode(self._stream)
         self._resampler = self._new_resampler()
         self._buffer = np.empty((0, self.channels), dtype=np.float32)
+        self._pending = []
+        self._pending_samples = 0
         self._eof = False
 
     def _reopen_fresh(self):
@@ -147,6 +166,8 @@ class Driver:
         self._decoder = self._container.decode(self._stream)
         self._resampler = self._new_resampler()
         self._buffer = np.empty((0, self.channels), dtype=np.float32)
+        self._pending = []
+        self._pending_samples = 0
         self._eof = False
         self._decode_pos = 0
         self._position = 0
