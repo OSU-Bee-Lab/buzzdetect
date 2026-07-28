@@ -1,3 +1,5 @@
+import warnings
+
 import av
 import numpy as np
 
@@ -123,6 +125,15 @@ class Driver:
         try:
             raw_frame = next(self._decoder)
         except StopIteration:
+            self._flush_resampler()
+            self._eof = True
+            return
+        except av.FFmpegError as exc:
+            # Corrupted packets (e.g. truncated recordings from a dead
+            # battery) should end the stream early, not crash it -- the
+            # caller (stream/worker.py) already treats a short read as
+            # expected and warns/logs accordingly.
+            warnings.warn(f"Corrupt audio data in {self._path!r}, truncating stream: {exc}")
             self._flush_resampler()
             self._eof = True
             return
