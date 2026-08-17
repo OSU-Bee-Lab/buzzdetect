@@ -75,6 +75,7 @@ class WorkerInferer:
 
     def run(self):
         self.log('launching', 'INFO')
+        self._managememory()
         self.model.initialize()
 
         self.timer_bottleneck.restart()
