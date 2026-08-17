@@ -120,7 +120,7 @@ class WorkerStreamer:
 
         if n_samples < read_size:
             self.handle_bad_read(a_file)
-            chunk = (chunk[0], round(chunk[0] + (n_samples/a_file.track.samplerate), 1))
+            chunk = (chunk[0], round(chunk[0] + (n_samples/a_file.track.samplerate), self.model.embedder.digits_time))
             continue_file = False
         else:
             continue_file = True
