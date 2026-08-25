@@ -66,6 +66,7 @@ class WorkerInferer:
         emit_progress(
             'chunk_done',
             path=a_chunk.file.shortpath_audio,
+            chunk_start=float(a_chunk.chunk[0]),
             chunk_end=float(a_chunk.chunk[1]),
             done=a_chunk.last_chunk,
         )

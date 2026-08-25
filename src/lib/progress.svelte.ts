@@ -2,7 +2,8 @@
 // Rust forwards straight from the Python engine's BDPROGRESS lines (see
 // engine/src/pipeline/progress_json.py). Event types: manifest (one file
 // discovered), manifest_done (discovery walk finished), file_start,
-// file_skip, chunk_done.
+// file_skip, chunk_done (which carries chunk_start/chunk_end as absolute
+// offsets within the file, not a done-so-far position).
 
 export type FileStatus = 'pending' | 'running' | 'done' | 'skipped';
 
@@ -13,23 +14,26 @@ export interface FileProgress {
 	status: FileStatus;
 	duration: number; // full audio duration in seconds, once known
 	workSeconds: number; // seconds of audio actually needing analysis (duration minus any already-completed portion)
-	doneSeconds: number; // work completed so far, from chunk_end progress
+	doneSeconds: number; // work completed so far, summed over finished chunks
 }
 
 // A directory node in the audio tree, aggregated recursively from its
-// children. `finalized` means this subtree's totals are trustworthy: every
-// file under it has been visited (so its real work_seconds is known, not
-// just guessed) and, at the root, that discovery has finished finding new
-// files. Until then workSeconds/doneSeconds understate the true total, so a
-// percentage computed from them can only move up as more files are visited
-// — including dropping when a previously-unweighed file suddenly adds its
-// full duration to the denominator.
+// children. `finalized` means discovery has finished, so this subtree's file
+// list and counts are complete; until then new files can still appear under
+// it and the bar is drawn provisionally (striped).
+//
+// A file's real work_seconds is only known once a streamer reaches it, so
+// `workSeconds` covers visited files only. `estWorkSeconds` additionally
+// charges each not-yet-visited file the mean work of the files seen so far,
+// which keeps the percentage roughly stable across the run instead of having
+// it collapse every time a new file's duration lands in the denominator.
 export interface TreeDir {
 	path: string;
 	name: string;
 	dirs: TreeDir[];
 	files: FileProgress[];
 	workSeconds: number;
+	estWorkSeconds: number;
 	doneSeconds: number;
 	filesTotal: number;
 	filesDone: number;
@@ -62,6 +66,10 @@ class AnalysisRun {
 	logLines = $state<string[]>([]);
 	running = $state(false);
 	error = $state<string | null>(null);
+	// True once a run has stopped, whether cleanly finished, cancelled, or
+	// errored — drives the "Stopped" header without needing an error message
+	// (a user-initiated cancel has nothing to say in the error paragraph).
+	stopped = $state(false);
 	startedAt = $state<number | null>(null);
 	// True once the engine's directory walk has reported every file it's
 	// going to (manifest_done). Before that, the file list itself is
@@ -91,6 +99,7 @@ class AnalysisRun {
 		}
 
 		const discoveryDone = this.discoveryDone;
+		const meanWork = this.meanKnownWork;
 		const build = (node: MutableNode): TreeDir => {
 			const dirs = [...node.dirs.values()].map(build).sort((a, b) => a.name.localeCompare(b.name));
 			const files = [...node.files].sort(
@@ -98,23 +107,23 @@ class AnalysisRun {
 			);
 
 			let workSeconds = 0;
+			let estWorkSeconds = 0;
 			let doneSeconds = 0;
 			let filesTotal = 0;
 			let filesDone = 0;
-			let finalized = discoveryDone;
 			for (const d of dirs) {
 				workSeconds += d.workSeconds;
+				estWorkSeconds += d.estWorkSeconds;
 				doneSeconds += d.doneSeconds;
 				filesTotal += d.filesTotal;
 				filesDone += d.filesDone;
-				finalized = finalized && d.finalized;
 			}
 			for (const f of files) {
 				workSeconds += f.workSeconds;
+				estWorkSeconds += f.status === 'pending' ? meanWork : f.workSeconds;
 				doneSeconds += f.doneSeconds;
 				filesTotal += 1;
 				if (f.status === 'done' || f.status === 'skipped') filesDone += 1;
-				if (f.status === 'pending') finalized = false;
 			}
 
 			return {
@@ -123,14 +132,30 @@ class AnalysisRun {
 				dirs,
 				files,
 				workSeconds,
+				estWorkSeconds,
 				doneSeconds,
 				filesTotal,
 				filesDone,
-				finalized
+				finalized: discoveryDone
 			};
 		};
 
 		return build(root);
+	}
+
+	// Mean work_seconds over the files a streamer has already reached, used to
+	// charge not-yet-visited files a plausible weight. Skipped files are
+	// excluded: their zero work says nothing about the files still queued.
+	private get meanKnownWork(): number {
+		let total = 0;
+		let n = 0;
+		for (const f of this.files.values()) {
+			if (f.status === 'running' || f.status === 'done') {
+				total += f.workSeconds;
+				n += 1;
+			}
+		}
+		return n === 0 ? 0 : total / n;
 	}
 
 	get totals(): { workSeconds: number; doneSeconds: number; filesDone: number; filesTotal: number } {
@@ -147,13 +172,9 @@ class AnalysisRun {
 		return { workSeconds, doneSeconds, filesDone, filesTotal };
 	}
 
-	// Whether the overall totals above are trustworthy yet — see TreeDir.finalized.
+	// Whether the file list is complete — see TreeDir.finalized.
 	get denominatorFinal(): boolean {
-		if (!this.discoveryDone) return false;
-		for (const f of this.files.values()) {
-			if (f.status === 'pending') return false;
-		}
-		return true;
+		return this.discoveryDone;
 	}
 
 	// Realtime multiple over the trailing window, e.g. 12.4 means the engine
@@ -171,26 +192,16 @@ class AnalysisRun {
 		this.files = new Map();
 		this.logLines = [];
 		this.error = null;
+		this.stopped = false;
 		this.discoveryDone = false;
 		this.rateSamples = [];
 		this.startedAt = Date.now();
 		this.running = true;
 	}
 
-	// Like reset(), but for clearing a finished run's display without
-	// immediately starting a new one ("New Analysis").
-	clear() {
-		this.files = new Map();
-		this.logLines = [];
-		this.error = null;
-		this.discoveryDone = false;
-		this.rateSamples = [];
-		this.startedAt = null;
-		this.running = false;
-	}
-
 	stop(error?: string) {
 		this.running = false;
+		this.stopped = true;
 		if (error) this.error = error;
 	}
 
@@ -262,9 +273,18 @@ class AnalysisRun {
 				const files = new Map(this.files);
 				const existing = files.get(payload.path);
 				if (existing) {
+					// chunk_start/chunk_end are absolute offsets in the file, so
+					// they can't be used as a done-so-far position: a resumed file
+					// only re-analyzes the gaps its previous run left, and chunks
+					// can complete out of order across analyzers. Accumulate chunk
+					// lengths instead, which is what work_seconds counts.
+					const chunkWork = payload.chunk_end - (payload.chunk_start ?? payload.chunk_end);
+					const doneSeconds = payload.done
+						? existing.workSeconds
+						: Math.min(existing.workSeconds, existing.doneSeconds + chunkWork);
 					files.set(payload.path, {
 						...existing,
-						doneSeconds: payload.done ? existing.workSeconds : Math.max(existing.doneSeconds, payload.chunk_end),
+						doneSeconds,
 						status: payload.done ? 'done' : 'running'
 					});
 					this.files = files;

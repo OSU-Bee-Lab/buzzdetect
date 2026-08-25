@@ -3,7 +3,7 @@
 	import { listen } from '@tauri-apps/api/event';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { onMount } from 'svelte';
-	import { run } from '$lib/progress.svelte';
+	import { run, type TreeDir } from '$lib/progress.svelte';
 	import { settings, LOGLEVELS } from '$lib/settings.svelte';
 	import DirRow from '$lib/DirRow.svelte';
 
@@ -192,43 +192,66 @@
 		}
 	}
 
-	function newAnalysis() {
-		hasStarted = false;
-		run.clear();
-	}
-
 	async function cancel() {
 		await invoke('cancel_analysis');
-		run.stop('cancelled');
+		run.stop();
 	}
 
+	function allDirPaths(): string[] {
+		const all: string[] = [];
+		const walk = (d: TreeDir) => {
+			all.push(d.path);
+			d.dirs.forEach(walk);
+		};
+		tree.dirs.forEach(walk);
+		return all;
+	}
+
+	function toggleExpandAll() {
+		const all = allDirPaths();
+		const allOpen = all.length > 0 && all.every((p) => expanded.has(p));
+		expanded = allOpen ? new Set() : new Set(all);
+	}
+
+	const allExpanded = $derived.by(() => {
+		const all = allDirPaths();
+		return all.length > 0 && all.every((p) => expanded.has(p));
+	});
+
+	// Rounds down so a run only shows 100%/a checkmark once truly finished,
+	// never early from rounding (e.g. 99.98% should read 99%, not 100%).
 	function pct(done: number, total: number): number {
 		if (total <= 0) return 0;
-		return Math.min(100, Math.round((done / total) * 100));
+		return Math.min(100, Math.floor((done / total) * 100));
+	}
+
+	function resetDirOut() {
+		if (!settings.value.modelname) return;
+		settings.value.dirOutTouched = false;
+		settings.value.dirOut = `models/${settings.value.modelname}/output`;
+		checkManifest();
+		settings.save();
 	}
 
 	const tree = $derived(run.tree);
 	const missingDirs = $derived(!settings.value.dirAudio || !settings.value.dirOut);
 </script>
 
-<main class="app" style="grid-template-columns: {settingsWidth}px 6px 1fr">
+<main class="app">
+<div class="panels" style="grid-template-columns: {settingsWidth}px 6px 1fr">
 	<section class="settings">
 		<h2>Settings</h2>
+		<fieldset class="settings-fields" disabled={run.running}>
 
 		{#if modelMismatch}
 			<p class="error">
 				Results have already been written to this output folder with model "{manifest?.modelname}".
 				Select that model to continue, or choose a different output folder.
 			</p>
-		{:else if manifestLocked}
-			<p class="warning">
-				Results have already been written to this output folder. Output classes and framehop are
-				locked to match existing results. Choose a different output folder to use different settings.
-			</p>
 		{/if}
 
-		<label title="Select a model to use for analysis.">
-			Model
+		<label>
+			<span class="label-text">Model <span class="qmark" title="Select a model to use for analysis.">?</span></span>
 			<select
 				bind:value={settings.value.modelname}
 				onchange={() => {
@@ -247,8 +270,8 @@
 				{/each}
 			</select>
 		</label>
-		<label title="Input folder containing audio files to analyze.">
-			Audio directory
+		<label>
+			<span class="label-text">Audio directory <span class="qmark" title="Input folder containing audio files to analyze.">?</span></span>
 			<span class="path-row">
 				<input
 					bind:value={settings.value.dirAudio}
@@ -258,19 +281,44 @@
 				<button type="button" onclick={browseDirAudio}>Browse…</button>
 			</span>
 		</label>
-		<label title="Output folder for analysis results.">
-			Output directory
+		<label>
+			<span class="label-text">Output directory <span class="qmark" title="Output folder for analysis results.">?</span></span>
 			<span class="path-row">
 				<input bind:value={settings.value.dirOut} oninput={onDirOutInput} />
 				<button type="button" onclick={browseDirOut}>Browse…</button>
+				<button
+					type="button"
+					class="icon-btn"
+					title="Reset to the model's default output folder"
+					onclick={resetDirOut}
+					aria-label="Reset output directory"
+				>
+					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M3 11.5 12 4l9 7.5" stroke-linecap="round" stroke-linejoin="round" />
+						<path d="M5.5 10v9a1 1 0 0 0 1 1H9a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1h2.5a1 1 0 0 0 1-1v-9" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
+				</button>
 			</span>
+			{#if manifest && !modelMismatch}
+				<span class="found-hint">Existing results found</span>
+			{/if}
 		</label>
 
 		<details class="advanced">
 			<summary>Advanced settings</summary>
 
 			<fieldset>
-				<legend>Classes to output</legend>
+				<legend class:locked={manifestLocked}>
+					Classes to output
+					{#if manifestLocked}
+						<span class="lock-icon" title="Locked to match existing results in this output folder">
+							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+								<rect x="5" y="11" width="14" height="9" rx="1.5" />
+								<path d="M8 11V7a4 4 0 0 1 8 0v4" stroke-linecap="round" />
+							</svg>
+						</span>
+					{/if}
+				</legend>
 				<button
 					type="button"
 					class="toggle-all"
@@ -279,7 +327,7 @@
 				>
 				<div class="classes">
 					{#each availableClasses as cls}
-						<label class="checkbox">
+						<label class="checkbox" class:locked={manifestLocked}>
 							<input
 								type="checkbox"
 								disabled={manifestLocked}
@@ -292,29 +340,25 @@
 				</div>
 			</fieldset>
 
-			<label title="The length of each chunk in seconds.">
-				Chunk length (s)
-				<input type="number" min="1" bind:value={settings.value.chunklength} oninput={() => settings.save()} />
-			</label>
-			<label
-				title="The number of CPU-based workers to launch.
-Usually, 1 worker will efficiently use your system's resources, but try adding more."
-			>
-				CPU analyzers
-				<input type="number" min="0" bind:value={settings.value.analyzersCpu} oninput={() => settings.save()} />
-			</label>
-			<label
-				title="The number of GPU-based workers to launch.
-If you're using GPU, you probably don't want any CPU analyzers."
-			>
-				GPU analyzers
-				<input type="number" min="0" bind:value={settings.value.analyzersGpu} oninput={() => settings.save()} />
-			</label>
-			<label
-				title="The spacing between frames, expressed as a proportion of the frame length.
+			<label>
+				<span class="label-text" class:locked={manifestLocked}>
+					Framehop
+					{#if manifestLocked}
+						<span class="lock-icon" title="Locked to match existing results in this output folder">
+							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+								<rect x="5" y="11" width="14" height="9" rx="1.5" />
+								<path d="M8 11V7a4 4 0 0 1 8 0v4" stroke-linecap="round" />
+							</svg>
+						</span>
+					{/if}
+					<span
+						class="qmark"
+						title="The spacing between frames, expressed as a proportion of the frame length.
 E.g., a framehop of 1 produces contiguous frames, 0.50 produces frames with 50% overlap."
-			>
-				Framehop
+					>
+						?
+					</span>
+				</span>
 				<input
 					type="number"
 					step="0.05"
@@ -324,12 +368,49 @@ E.g., a framehop of 1 produces contiguous frames, 0.50 produces frames with 50% 
 					oninput={() => settings.save()}
 				/>
 			</label>
-			<label
-				title="How many parallel audio streamers should be launched?
+
+			<label>
+				<span class="label-text">Chunk length (s) <span class="qmark" title="The length of each chunk in seconds.">?</span></span>
+				<input type="number" min="1" bind:value={settings.value.chunklength} oninput={() => settings.save()} />
+			</label>
+			<label>
+				<span class="label-text">
+					CPU analyzers
+					<span
+						class="qmark"
+						title="The number of CPU-based workers to launch.
+Usually, 1 worker will efficiently use your system's resources, but try adding more."
+					>
+						?
+					</span>
+				</span>
+				<input type="number" min="0" bind:value={settings.value.analyzersCpu} oninput={() => settings.save()} />
+			</label>
+			<label>
+				<span class="label-text">
+					GPU analyzers
+					<span
+						class="qmark"
+						title="The number of GPU-based workers to launch.
+If you're using GPU, you probably don't want any CPU analyzers."
+					>
+						?
+					</span>
+				</span>
+				<input type="number" min="0" bind:value={settings.value.analyzersGpu} oninput={() => settings.save()} />
+			</label>
+			<label>
+				<span class="label-text">
+					Concurrent streamers
+					<span
+						class="qmark"
+						title="How many parallel audio streamers should be launched?
 If you run into buffer bottlenecks, try increasing this number.
 Leave blank for automatic assignment."
-			>
-				Concurrent streamers
+					>
+						?
+					</span>
+				</span>
 				<input
 					type="number"
 					min="1"
@@ -342,11 +423,17 @@ Leave blank for automatic assignment."
 					placeholder="auto"
 				/>
 			</label>
-			<label
-				title="How many audio chunks should be buffered in memory?
+			<label>
+				<span class="label-text">
+					Stream buffer depth
+					<span
+						class="qmark"
+						title="How many audio chunks should be buffered in memory?
 Leave blank for automatic assignment."
-			>
-				Stream buffer depth
+					>
+						?
+					</span>
+				</span>
 				<input
 					type="number"
 					min="1"
@@ -359,53 +446,53 @@ Leave blank for automatic assignment."
 					placeholder="auto"
 				/>
 			</label>
-			<label title="How verbose should the console output be?">
-				Console verbosity
+			<label>
+				<span class="label-text">Console verbosity <span class="qmark" title="How verbose should the console output be?">?</span></span>
 				<select bind:value={settings.value.verbosityPrint} onchange={() => settings.save()}>
 					{#each LOGLEVELS as lvl}
 						<option value={lvl}>{lvl}</option>
 					{/each}
 				</select>
 			</label>
-			<label title="How verbose should the log file output be?">
-				Log file verbosity
+			<label>
+				<span class="label-text">Log file verbosity <span class="qmark" title="How verbose should the log file output be?">?</span></span>
 				<select bind:value={settings.value.verbosityLog} onchange={() => settings.save()}>
 					{#each LOGLEVELS as lvl}
 						<option value={lvl}>{lvl}</option>
 					{/each}
 				</select>
 			</label>
-			<label
-				class="checkbox"
-				title="Should progress statements (e.g., reports from analyzers) be written to the log file?
-Can produce very large log files."
-			>
+			<label class="checkbox">
 				<input type="checkbox" bind:checked={settings.value.logProgress} onchange={() => settings.save()} />
 				Log progress statements to file
+				<span
+					class="qmark"
+					title="Should progress statements (e.g., reports from analyzers) be written to the log file?
+Can produce very large log files."
+				>
+					?
+				</span>
 			</label>
 		</details>
 
-		<div class="actions">
-			{#if !run.running}
-				{#if hasStarted}
-					<button onclick={start}>Restart</button>
-					<button onclick={newAnalysis}>New Analysis</button>
-				{:else}
-					<button
-						onclick={start}
-						disabled={!settings.value.dirAudio ||
-							!settings.value.modelname ||
-							settings.value.classesOut.length === 0 ||
-							modelMismatch}>Start Analysis</button
-					>
-				{/if}
-			{/if}
-		</div>
 		{#if settings.value.classesOut.length === 0}
 			<p class="error">Select at least one class to output.</p>
 		{/if}
 		{#if startError}
 			<p class="error">{startError}</p>
+		{/if}
+		</fieldset>
+
+		{#if !run.running}
+			<div class="settings-actions">
+				<button
+					onclick={start}
+					disabled={!settings.value.dirAudio ||
+						!settings.value.modelname ||
+						settings.value.classesOut.length === 0 ||
+						modelMismatch}>Launch Analysis</button
+				>
+			</div>
 		{/if}
 	</section>
 
@@ -420,12 +507,9 @@ Can produce very large log files."
 
 	<section class="run">
 		<div class="header">
-			<h2>{run.running ? 'Analyzing…' : run.error ? 'Stopped' : 'Ready'}</h2>
+			<h2>{run.running ? 'Analyzing…' : run.stopped ? 'Stopped' : 'Ready'}</h2>
 			{#if run.rate > 0}
 				<span class="rate">{run.rate.toFixed(1)}x realtime</span>
-			{/if}
-			{#if run.running}
-				<button class="danger" onclick={cancel}>Cancel</button>
 			{/if}
 		</div>
 		{#if !run.running && !hasStarted && missingDirs}
@@ -435,18 +519,41 @@ Can produce very large log files."
 			<p class="error">{run.error}</p>
 		{/if}
 		<div class="overall-bar" class:provisional={!run.denominatorFinal}>
-			<div class="fill" style="width: {pct(tree.doneSeconds, tree.workSeconds)}%"></div>
+			<div class="fill" style="width: {pct(tree.doneSeconds, tree.estWorkSeconds)}%"></div>
+		</div>
+
+		<div class="tree-toolbar">
+			<button
+				type="button"
+				class="icon-btn"
+				title={allExpanded ? 'Collapse All' : 'Expand All'}
+				aria-label={allExpanded ? 'Collapse All' : 'Expand All'}
+				onclick={toggleExpandAll}
+			>
+				{#if allExpanded}
+					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M6 10 12 5l6 5" stroke-linecap="round" stroke-linejoin="round" />
+						<path d="M6 17 12 12l6 5" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
+				{:else}
+					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M6 7 12 12l6-5" stroke-linecap="round" stroke-linejoin="round" />
+						<path d="M6 14 12 19l6-5" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
+				{/if}
+			</button>
 		</div>
 
 		<div class="tree">
 			{#each tree.files as f (f.path)}
 				{@const filePct = f.status === 'skipped' ? 100 : pct(f.doneSeconds, f.workSeconds || f.duration || 1)}
+				{@const fileDone = f.status === 'done' || f.status === 'skipped'}
 				<div class="tree-row">
-					<div class="row static" class:done={f.status === 'done' || f.status === 'skipped'}>
+					<div class="row static" class:done={fileDone}>
 						<span class="disclosure"></span>
 						<span class="name">{f.name}</span>
 						<span class="bar"><span class="fill" style="width: {filePct}%"></span></span>
-						<span class="count">{f.status === 'skipped' ? 'skipped' : `${filePct}%`}</span>
+						<span class="count">{fileDone ? '✓' : `${filePct}%`}</span>
 					</div>
 				</div>
 			{/each}
@@ -459,7 +566,14 @@ Can produce very large log files."
 			<summary>Log ({run.logLines.length})</summary>
 			<pre>{run.logLines.join('\n')}</pre>
 		</details>
+
+		{#if run.running}
+			<div class="run-actions">
+				<button class="danger" onclick={cancel}>Stop Analysis</button>
+			</div>
+		{/if}
 	</section>
+</div>
 </main>
 
 <style>
@@ -475,12 +589,20 @@ Can produce very large log files."
 	}
 
 	.app {
-		display: grid;
-		gap: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
 		padding: 1.5rem;
 		height: 100vh;
 		box-sizing: border-box;
 		overflow: hidden;
+	}
+
+	.panels {
+		display: grid;
+		gap: 0;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.settings {
@@ -491,6 +613,90 @@ Can produce very large log files."
 		overflow-x: hidden;
 		padding-right: 1rem;
 		min-width: 0;
+	}
+
+	.settings-fields {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		border: none;
+		padding: 0;
+		margin: 0;
+		min-width: 0;
+	}
+
+	.settings-fields:disabled {
+		opacity: 0.55;
+	}
+
+	.settings-actions {
+		display: flex;
+		justify-content: flex-end;
+		flex-shrink: 0;
+		margin-top: 0.5rem;
+	}
+
+	.run-actions {
+		display: flex;
+		justify-content: flex-end;
+		flex-shrink: 0;
+	}
+
+	.tree-toolbar {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.4rem;
+		line-height: 0;
+	}
+
+	.qmark {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.1em;
+		height: 1.1em;
+		border-radius: 50%;
+		border: 1px solid rgba(127, 127, 127, 0.6);
+		font-size: 0.7em;
+		line-height: 1;
+		opacity: 0.75;
+		cursor: help;
+		vertical-align: middle;
+	}
+
+	.lock-icon {
+		display: inline-flex;
+		align-items: center;
+		opacity: 0.7;
+		vertical-align: middle;
+	}
+
+	.label-text {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+
+	.label-text.locked,
+	legend.locked {
+		color: rgba(127, 127, 127, 0.9);
+	}
+
+	label.checkbox.locked {
+		color: rgba(127, 127, 127, 0.9);
+	}
+
+	.found-hint {
+		font-size: 0.75rem;
+		opacity: 0.6;
 	}
 
 	.resize-handle {
@@ -536,15 +742,6 @@ Can produce very large log files."
 		gap: 0.4rem;
 	}
 
-	.warning {
-		background: rgba(217, 119, 6, 0.15);
-		border: 1px solid rgba(217, 119, 6, 0.4);
-		border-radius: 6px;
-		padding: 0.5rem 0.75rem;
-		font-size: 0.8rem;
-		margin: 0;
-	}
-
 	.advanced {
 		border: 1px solid rgba(127, 127, 127, 0.3);
 		border-radius: 6px;
@@ -564,6 +761,12 @@ Can produce very large log files."
 		border: 1px solid rgba(127, 127, 127, 0.3);
 		border-radius: 6px;
 		margin-top: 0.6rem;
+	}
+
+	legend {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
 	}
 
 	.classes {

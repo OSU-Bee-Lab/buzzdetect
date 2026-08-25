@@ -16,7 +16,7 @@
 
 	const isOpen = $derived(expanded.has(node.path));
 	const isDone = $derived(node.finalized && node.filesTotal > 0 && node.filesDone === node.filesTotal);
-	const percent = $derived(pct(node.doneSeconds, node.workSeconds));
+	const percent = $derived(pct(node.doneSeconds, node.estWorkSeconds));
 
 	function toggle() {
 		if (isOpen) expanded.delete(node.path);
@@ -29,7 +29,7 @@
 		<span class="disclosure">{isOpen ? '▾' : '▸'}</span>
 		<span class="name">{node.name}</span>
 		<span class="bar"><span class="fill" style="width: {percent}%"></span></span>
-		<span class="count">{node.filesDone}/{node.filesTotal}</span>
+		<span class="count">{isDone ? '✓' : `${percent}%`}</span>
 	</button>
 </div>
 
@@ -39,12 +39,13 @@
 	{/each}
 	{#each node.files as f (f.path)}
 		{@const filePct = f.status === 'skipped' ? 100 : pct(f.doneSeconds, f.workSeconds || f.duration || 1)}
+		{@const fileDone = f.status === 'done' || f.status === 'skipped'}
 		<div class="tree-row" style="padding-left: {(depth + 1) * 1.25}rem">
-			<div class="row static" class:done={f.status === 'done' || f.status === 'skipped'}>
+			<div class="row static" class:done={fileDone}>
 				<span class="disclosure"></span>
 				<span class="name">{f.name}</span>
 				<span class="bar"><span class="fill" style="width: {filePct}%"></span></span>
-				<span class="count">{f.status === 'skipped' ? 'skipped' : `${filePct}%`}</span>
+				<span class="count">{fileDone ? '✓' : `${filePct}%`}</span>
 			</div>
 		</div>
 	{/each}
