@@ -15,6 +15,8 @@ Two codebases live side by side and only talk to each other through a subprocess
 
 Commit as you go — after each self-contained change, not batched at the end of a session.
 
+The user verifies all UI elements themselves (this sandbox has no headless browser/Playwright tooling and Tauri's webview needs a display that isn't available here). Don't claim to have visually verified UI changes — confirm via `npm run check` / `npm run build` and describe what to check manually instead.
+
 ## Commands
 
 Frontend (run from repo root):
@@ -33,42 +35,8 @@ uv venv --python 3.13 .venv && uv pip install -r requirements.txt   # one-time s
 ```
 There is no test suite in this repo currently.
 
-## Architecture
+## Gotchas / non-obvious behavior
 
-### Process boundary (src-tauri/src/lib.rs)
-
-- `resolve_engine_dir` picks the bundled `engine/` resource dir in a built app, or `../engine` next to the project root in dev. The Python interpreter is always `engine/.venv/bin/python3` — fixed, not user-configurable, since `engine/` ships its own venv.
-- `start_analysis` spawns `buzzdetect_cli.py` as a child process with piped stdio, translating the `AnalysisSettings` struct (from the frontend) into CLI flags. Only one analysis can run at a time (`AnalysisState` mutex).
-- The engine's stdout/stderr are read line-by-line in background threads (`spawn_line_reader`). Lines prefixed `BDPROGRESS ` (see `PROGRESS_MARKER`) are parsed as JSON and re-emitted as a Tauri `engine-progress` event; everything else becomes an `engine-log` event. A separate poller thread emits `engine-exit` once the child exits.
-- `cancel_analysis` kills the child process directly.
-- `read_manifest` / `list_models` / `get_model_classes` read straight from the filesystem under `engine/models/<modelname>/` — no engine process involved.
-
-### Manifest locking (schema safety)
-
-An output folder can accumulate results across multiple runs. `buzzdetect_manifest.json` in `dir_out` records the settings (model, output classes, framehop) that determine the result schema. Both sides enforce the same rule independently:
-- Python: `engine/src/pipeline/manifest.py` + `reconcile_with_manifest` in `buzzdetect_cli.py` (prompts y/N on stdin if settings conflict; `start_analysis` in Rust always answers `y` since there's no attached terminal).
-- Svelte: `checkManifest()` in `src/routes/+page.svelte` reads the manifest via the `read_manifest` command and locks the classes/framehop fields in the UI to match once the selected model matches the manifest's. A selected model that doesn't match the manifest's is surfaced as a blocking error (`modelMismatch`) rather than silently overridden, so the user can't pick settings that would fail engine-side reconciliation.
-
-Keep these two implementations in sync if the manifest schema changes.
-
-### Progress protocol
-
-`engine/src/pipeline/progress_json.py`'s `emit_progress(event, **fields)` is the single source of truth for the wire format; every progress event goes through it. Event kinds currently include `manifest` / `manifest_done` (file discovery), `file_skip`, and per-chunk progress used to drive the frontend's file tree and progress bars. `src/lib/progress.svelte.ts` (`run` store) is the frontend counterpart — it owns the running/error state, builds the nested directory tree from flat file paths, and computes aggregate seconds-done/seconds-total. If you add a new progress event kind, update both sides together.
-
-### Engine internals (engine/src/)
-
-Pipeline is producer/consumer across threads, coordinated by `pipeline/coordination.py::Coordinator`:
-- `stream/` — streamer workers read audio files in chunks (format-specific drivers in `stream/drivers/`) and enqueue them.
-- `inference/` — analyzer workers (CPU and/or GPU, count set by `analyzers_cpu`/`analyzers_gpu`) run the model (`inference/models.py::load_model`) over queued chunks.
-- `write/` — writer worker accumulates per-file results and writes CSVs (`_buzzpart.csv` while partial, renamed to `_buzzdetect.csv` — see `config.py` suffixes — once a file is fully covered).
-- `pipeline/logger.py` + `loglevels.py` — central logging thread; console and log-file verbosity are configured independently (`verbosity_print` vs `verbosity_log`).
-- `analyze.py::Analyzer` wires all of the above together and is the entry point used by both `buzzdetect_cli.py` and (historically) `src/gui/` — a legacy CustomTkinter GUI now superseded by the Tauri frontend in this repo.
-- Models live in `engine/models/<modelname>/`, each with `model.py`, `model.keras`, and `config_model.json` (holds the `classes` list read by `get_model_classes`). A directory only counts as a model if it has a `model.py` (see `list_models` in `src-tauri/src/lib.rs`).
-
-### Frontend structure (src/)
-
-- `src/routes/+page.svelte` — the entire UI: settings panel (model/dirs/advanced params) + run panel (progress tree + log). No routing beyond this single page.
-- `src/lib/settings.svelte.ts` — persisted user settings (Svelte 5 `$state` rune-based store).
-- `src/lib/progress.svelte.ts` — `run` store: ingests `engine-progress`/`engine-log`/`engine-exit` events into UI-ready state (file tree, rates, done/total seconds).
-- `src/lib/DirRow.svelte` — recursive directory row component for the progress tree.
-- Built with `@sveltejs/adapter-static`, since Tauri needs a static frontend bundle.
+- **Subprocess boundary, not a library call.** `src-tauri/src/lib.rs::start_analysis` spawns `buzzdetect_cli.py` as a child process (fixed interpreter at `engine/.venv/bin/python3`; `resolve_engine_dir` picks bundled-resource vs. `../engine` dev path). Only one analysis runs at a time (`AnalysisState` mutex). The engine's own stdout/stderr lines prefixed `BDPROGRESS ` (`PROGRESS_MARKER`) are JSON and get re-emitted as Tauri's `engine-progress` event; everything else becomes `engine-log`. `emit_progress()` in `engine/src/pipeline/progress_json.py` is the single source of truth for that wire format — if you add a new progress event kind, update both it and the frontend's `run` store (`src/lib/progress.svelte.ts`) together.
+- **Manifest locking is duplicated logic, not shared code.** An output folder records the settings (model, output classes, framehop) that fixed its result schema in `buzzdetect_manifest.json`, and both sides independently refuse to let a run drift from it: Python via `reconcile_with_manifest`/`pipeline/manifest.py` (prompts y/N on stdin — Rust's `start_analysis` always auto-answers `y` since there's no attached terminal), Svelte via `checkManifest()` in `+page.svelte` (locks classes/framehop in the UI, blocks on model mismatch). Changing the manifest schema means updating both.
+- `engine/` is a vendored fork of github.com/OSU-Bee-Lab/buzzdetect — runnable and testable standalone via `buzzdetect_cli.py`, independent of the Tauri app. `engine/src/gui/` is that upstream project's legacy CustomTkinter GUI, superseded here by the Tauri frontend; don't extend it.
