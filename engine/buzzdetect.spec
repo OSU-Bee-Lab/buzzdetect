@@ -78,7 +78,7 @@ a = Analysis(
     datas=[],
     hiddenimports=hidden,
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=['pyinstaller_rthook_nvidia.py'],
     # Belt and braces: these should be absent from the build venv anyway, and
     # if one sneaks back in as a transitive dependency it would add hundreds of
     # megabytes to every installer without anything asking for it.
