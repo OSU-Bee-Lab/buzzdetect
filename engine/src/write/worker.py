@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 import pandas as pd
 
 from src.pipeline.assignments import AssignChunk, AssignLog
@@ -65,8 +66,10 @@ class WorkerWriter:
         self.coordinator.q_log.put(AssignLog(message=f'writer: {msg}', level_str=level_str))
 
     def write_results(self, a_chunk: AssignChunk, fully_analyzed: bool):
+        # np.asarray, not .numpy(): results come back as a tf.Tensor from the
+        # tensorflow models and as a plain ndarray from the onnx ones.
         output = self.format(
-            results=a_chunk.results.numpy(),
+            results=np.asarray(a_chunk.results),
             time_start=a_chunk.chunk[0]
         )
 
