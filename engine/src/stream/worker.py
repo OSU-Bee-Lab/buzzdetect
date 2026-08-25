@@ -1,7 +1,6 @@
 from queue import Full
 
-import tensorflow as tf
-import librosa
+import soxr
 import numpy as np
 
 from src.pipeline.assignments import AssignChunk
@@ -135,8 +134,11 @@ class WorkerStreamer:
         else:
             continue_file = True
 
-        samples = librosa.resample(y=samples, orig_sr=a_file.track.samplerate, target_sr=self.resample_rate)
-        samples = tf.convert_to_tensor(samples, dtype=tf.float32)
+        # soxr directly rather than librosa.resample, which is a thin wrapper
+        # over this same call (res_type='soxr_hq') but drags numba/llvmlite/scipy
+        # in with it -- a few hundred MB of dependency for one function.
+        samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality='HQ')
+        samples = samples.astype(np.float32)
 
         last_chunk = force_last or not continue_file
         a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, last_chunk=last_chunk)

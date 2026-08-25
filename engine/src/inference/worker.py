@@ -1,5 +1,3 @@
-import tensorflow as tf
-
 from src.inference.models import load_model
 from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
@@ -31,6 +29,18 @@ class WorkerInferer:
         self.coordinator.q_log.put(AssignLog(message=f'analyzer {self.id_analyzer}: {msg}', level_str=level_str))
 
     def _managememory(self):
+        # tensorflow is imported here rather than at module scope so the ONNX
+        # models can run in an environment that has no tensorflow installed at
+        # all. Device placement for those is onnxruntime's business.
+        try:
+            import tensorflow as tf
+        except ImportError:
+            if self.processor == 'GPU':
+                self.log("GPU processing requires tensorflow; using CPU", 'WARNING')
+                self.processor = 'CPU'
+            self.log(f"processing on {self.processor}", 'INFO')
+            return
+
         if self.processor == 'CPU':
             tf.config.set_visible_devices([], 'GPU')
             visible_devices = tf.config.get_visible_devices()

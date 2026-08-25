@@ -2,7 +2,6 @@ import os
 from dataclasses import dataclass
 
 import numpy as np
-import tensorflow as tf
 from src.stream.driver import AudioDriver
 
 import src.config as cfg
@@ -36,8 +35,9 @@ class AssignChunk:
     file: 'AssignFile'
     chunk: tuple[float, float] | None = None
     last_chunk: bool = False
-    samples: np.ndarray | tf.Tensor = None
-    results: tf.Tensor = None
+    samples: np.ndarray = None
+    # ndarray from the onnx models, tf.Tensor from the tensorflow ones
+    results = None
 
 
 @dataclass
