@@ -1,26 +1,30 @@
 <script lang="ts">
 	import type { Weights } from './progress.svelte';
 
-	// Three segments left to right: work a previous run already finished
-	// (green), work this session finished (blue), and the gray remainder.
-	// `provisional` stripes the filled part to say the total can still grow,
-	// i.e. discovery hasn't finished walking the audio directory yet.
+	// Segments left to right: work a previous run finished (green), files this
+	// session finished (blue), work on files still open (blue while the run is
+	// live, red once it stops — that work was interrupted mid-file), then the
+	// gray remainder. `provisional` stripes the filled part to say the total
+	// can still grow, i.e. discovery is still walking the audio directory.
 	let {
 		weights,
 		provisional = false,
-		large = false
-	}: { weights: Weights; provisional?: boolean; large?: boolean } = $props();
+		large = false,
+		stopped = false
+	}: { weights: Weights; provisional?: boolean; large?: boolean; stopped?: boolean } = $props();
 
 	const share = $derived((v: number) =>
 		weights.totalSeconds > 0 ? Math.max(0, Math.min(100, (v / weights.totalSeconds) * 100)) : 0
 	);
 	const priorPct = $derived(share(weights.priorSeconds));
 	const donePct = $derived(Math.min(100 - priorPct, share(weights.doneSeconds)));
+	const activePct = $derived(Math.min(100 - priorPct - donePct, share(weights.activeSeconds)));
 </script>
 
 <span class="bar" class:provisional class:large>
 	<span class="seg prior" style="width: {priorPct}%"></span>
 	<span class="seg done" style="width: {donePct}%"></span>
+	<span class="seg active" class:stopped style="width: {activePct}%"></span>
 </span>
 
 <style>
@@ -47,8 +51,13 @@
 		background: #4caf50;
 	}
 
-	.seg.done {
+	.seg.done,
+	.seg.active {
 		background: #4c8dff;
+	}
+
+	.seg.active.stopped {
+		background: #e05a4f;
 	}
 
 	.bar.provisional .seg.prior {

@@ -519,7 +519,7 @@ Can produce very large log files."
 		{#if run.error}
 			<p class="error">{run.error}</p>
 		{/if}
-		<ProgressBar weights={tree} provisional={!run.denominatorFinal} large />
+		<ProgressBar weights={tree} provisional={!run.denominatorFinal} stopped={run.stopped} large />
 
 		<div class="tree-toolbar">
 			<button
@@ -546,14 +546,17 @@ Can produce very large log files."
 		<div class="tree">
 			{#each tree.files as f (f.path)}
 				{@const w = f.weights}
-				{@const filePct = pct(w.priorSeconds + w.doneSeconds, w.totalSeconds)}
-				{@const fileDone = f.status === 'done' || f.status === 'skipped'}
+				{@const filePct = pct(w.priorSeconds + w.doneSeconds + w.activeSeconds, w.totalSeconds)}
 				<div class="tree-row">
-					<div class="row static" class:done={fileDone}>
+					<div class="row static">
 						<span class="disclosure"></span>
 						<span class="name">{f.name}</span>
-						<ProgressBar weights={w} />
-						<span class="count">{fileDone ? '✓' : `${filePct}%`}</span>
+						<ProgressBar weights={w} stopped={run.stopped} />
+						{#if f.status === 'done' || f.status === 'skipped'}
+							<span class="count check" class:session={f.status === 'done'}>✓</span>
+						{:else}
+							<span class="count">{filePct}%</span>
+						{/if}
 					</div>
 				</div>
 			{/each}
@@ -871,9 +874,13 @@ Can produce very large log files."
 		min-width: 0;
 	}
 
-	.row.done {
-		background: rgba(76, 141, 255, 0.16);
-		border-radius: 6px;
+	.row .count.check {
+		opacity: 1;
+		color: #4caf50;
+	}
+
+	.row .count.check.session {
+		color: #4c8dff;
 	}
 
 	.row .count {

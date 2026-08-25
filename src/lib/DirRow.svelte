@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { TreeDir } from './progress.svelte';
+	import { run, type TreeDir } from './progress.svelte';
 	import Self from './DirRow.svelte';
 	import ProgressBar from './ProgressBar.svelte';
 
@@ -19,7 +19,12 @@
 	const isDone = $derived(node.finalized && node.filesTotal > 0 && node.filesDone === node.filesTotal);
 	// Counts everything analyzed, whether by this session or an earlier run,
 	// so the number agrees with how much of the bar is filled.
-	const percent = $derived(pct(node.priorSeconds + node.doneSeconds, node.totalSeconds));
+	const percent = $derived(
+		pct(node.priorSeconds + node.doneSeconds + node.activeSeconds, node.totalSeconds)
+	);
+	// Green check means nothing here needed analyzing this session; blue means
+	// this run did some of the work.
+	const bySession = $derived(node.doneSeconds + node.activeSeconds > 0);
 
 	function toggle() {
 		if (isOpen) expanded.delete(node.path);
@@ -28,11 +33,15 @@
 </script>
 
 <div class="tree-row" style="padding-left: {depth * 1.25}rem">
-	<button class="row" class:done={isDone} onclick={toggle}>
+	<button class="row" onclick={toggle}>
 		<span class="disclosure">{isOpen ? '▾' : '▸'}</span>
 		<span class="name">{node.name}</span>
-		<ProgressBar weights={node} provisional={!node.finalized} />
-		<span class="count">{isDone ? '✓' : `${percent}%`}</span>
+		<ProgressBar weights={node} provisional={!node.finalized} stopped={run.stopped} />
+		{#if isDone}
+			<span class="count check" class:session={bySession}>✓</span>
+		{:else}
+			<span class="count">{percent}%</span>
+		{/if}
 	</button>
 </div>
 
@@ -42,14 +51,17 @@
 	{/each}
 	{#each node.files as f (f.path)}
 		{@const w = f.weights}
-		{@const filePct = pct(w.priorSeconds + w.doneSeconds, w.totalSeconds)}
-		{@const fileDone = f.status === 'done' || f.status === 'skipped'}
+		{@const filePct = pct(w.priorSeconds + w.doneSeconds + w.activeSeconds, w.totalSeconds)}
 		<div class="tree-row" style="padding-left: {(depth + 1) * 1.25}rem">
-			<div class="row static" class:done={fileDone}>
+			<div class="row static">
 				<span class="disclosure"></span>
 				<span class="name">{f.name}</span>
-				<ProgressBar weights={w} />
-				<span class="count">{fileDone ? '✓' : `${filePct}%`}</span>
+				<ProgressBar weights={w} stopped={run.stopped} />
+				{#if f.status === 'done' || f.status === 'skipped'}
+					<span class="count check" class:session={f.status === 'done'}>✓</span>
+				{:else}
+					<span class="count">{filePct}%</span>
+				{/if}
 			</div>
 		</div>
 	{/each}
@@ -95,14 +107,18 @@
 		min-width: 0;
 	}
 
-	.row.done {
-		background: rgba(76, 141, 255, 0.16);
-		border-radius: 6px;
-	}
-
 	.count {
 		text-align: right;
 		font-variant-numeric: tabular-nums;
 		opacity: 0.7;
+	}
+
+	.count.check {
+		opacity: 1;
+		color: #4caf50;
+	}
+
+	.count.check.session {
+		color: #4c8dff;
 	}
 </style>

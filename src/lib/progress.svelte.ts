@@ -18,13 +18,25 @@ export interface FileProgress {
 	doneSeconds: number; // work completed so far, summed over finished chunks
 }
 
-// How one file (or a whole subtree) splits across the three bar segments:
-// green (analyzed by an earlier run), blue (analyzed this session), and the
-// gray remainder. total >= prior + done always.
+// How one file (or a whole subtree) splits across the bar's segments:
+// green (analyzed by an earlier run), blue (files this session carried to
+// completion), work on files still open, and the gray remainder.
+// total >= prior + done + active always.
+//
+// `active` is split out from `done` only so the bar can recolor it if the run
+// stops: it's work that was interrupted mid-file rather than work that
+// finished a file. Both count as analyzed either way.
 export interface Weights {
 	totalSeconds: number;
 	priorSeconds: number;
 	doneSeconds: number;
+	activeSeconds: number;
+}
+
+// A file as the tree hands it to the UI: its own progress plus the segment
+// weights the bar is drawn from, resolved once per tree build.
+export interface FileNode extends FileProgress {
+	weights: Weights;
 }
 
 // A directory node in the audio tree, aggregated recursively from its
@@ -38,12 +50,6 @@ export interface Weights {
 // (see estimateDuration). Every visited file contributes its real numbers,
 // so a dir's remaining seconds are exact except for the files nothing has
 // opened yet.
-// A file as the tree hands it to the UI: its own progress plus the segment
-// weights the bar is drawn from, resolved once per tree build.
-export interface FileNode extends FileProgress {
-	weights: Weights;
-}
-
 export interface TreeDir extends Weights {
 	path: string;
 	name: string;
@@ -102,14 +108,16 @@ function fileWeights(f: FileProgress, w: Weighting): Weights {
 		return {
 			totalSeconds,
 			priorSeconds: Math.max(0, totalSeconds - f.workSeconds),
-			doneSeconds: f.doneSeconds
+			doneSeconds: f.status === 'done' ? f.doneSeconds : 0,
+			activeSeconds: f.status === 'done' ? 0 : f.doneSeconds
 		};
 	}
 	const totalSeconds = f.duration > 0 ? f.duration : estimateDuration(f, w);
 	return {
 		totalSeconds,
 		priorSeconds: f.status === 'skipped' ? totalSeconds : 0,
-		doneSeconds: 0
+		doneSeconds: 0,
+		activeSeconds: 0
 	};
 }
 
@@ -169,6 +177,7 @@ class AnalysisRun {
 			let totalSeconds = 0;
 			let priorSeconds = 0;
 			let doneSeconds = 0;
+			let activeSeconds = 0;
 			let filesTotal = 0;
 			let filesDone = 0;
 			for (const d of dirs) {
@@ -176,6 +185,7 @@ class AnalysisRun {
 				totalSeconds += d.totalSeconds;
 				priorSeconds += d.priorSeconds;
 				doneSeconds += d.doneSeconds;
+				activeSeconds += d.activeSeconds;
 				filesTotal += d.filesTotal;
 				filesDone += d.filesDone;
 			}
@@ -184,6 +194,7 @@ class AnalysisRun {
 				totalSeconds += f.weights.totalSeconds;
 				priorSeconds += f.weights.priorSeconds;
 				doneSeconds += f.weights.doneSeconds;
+				activeSeconds += f.weights.activeSeconds;
 				filesTotal += 1;
 				if (f.status === 'done' || f.status === 'skipped') filesDone += 1;
 			}
@@ -197,6 +208,7 @@ class AnalysisRun {
 				totalSeconds,
 				priorSeconds,
 				doneSeconds,
+				activeSeconds,
 				filesTotal,
 				filesDone,
 				finalized: discoveryDone
