@@ -16,6 +16,20 @@ const ETA_WINDOW_MS = 300_000;
 const TICK_MS = 2_000;
 const SAMPLE_MS = 1_000;
 
+export interface Stats {
+	priorSeconds: number;
+	remainingSeconds: number;
+	rate: number;
+	etaSeconds: number | null;
+}
+
+const ZERO_STATS: Stats = {
+	priorSeconds: 0,
+	remainingSeconds: 0,
+	rate: 0,
+	etaSeconds: null
+};
+
 const UNITS: { label: string; seconds: number }[] = [
 	{ label: 'day', seconds: 86400 },
 	{ label: 'hour', seconds: 3600 },
@@ -179,13 +193,14 @@ class AnalysisRun {
 	discoveryDone = $state(false);
 	// Rolling audio-seconds-processed samples, used to compute a live
 	// realtime-multiple rate instead of an average since the run started
-	// (which would understate current speed after a slow startup). $state so
-	// the rate getter re-runs in the UI as samples arrive.
-	private rateSamples = $state<{ t: number; doneSeconds: number }[]>([]);
-	// Wall clock, ticked while a run is live so rate/ETA keep updating (and
-	// decay) between engine events rather than freezing at the last one.
-	private now = $state(Date.now());
+	// (which would understate current speed after a slow startup). Not $state:
+	// nothing renders from it directly, only from the tick's snapshot.
+	private rateSamples: { t: number; doneSeconds: number }[] = [];
+	// Wall clock, advanced on the tick so rate/ETA keep updating (and decay)
+	// between engine events rather than freezing at the last one.
+	private now = Date.now();
 	private ticker: ReturnType<typeof setInterval> | null = null;
+	private statsSnapshot = $state<Stats>(ZERO_STATS);
 
 	get tree(): TreeDir {
 		const root: MutableNode = { path: '', name: '', dirs: new Map(), files: [] };
@@ -335,12 +350,15 @@ class AnalysisRun {
 	// this session's work, so the ETA never counts audio an earlier run
 	// already analyzed. Remaining is partly estimated — files nothing has
 	// opened are charged a duration extrapolated from their size.
-	get stats(): {
-		priorSeconds: number;
-		remainingSeconds: number;
-		rate: number;
-		etaSeconds: number | null;
-	} {
+	//
+	// Published as a snapshot refreshed on the tick rather than a live getter:
+	// every chunk_done mutates `files` and the samples, so a getter would
+	// recompute — and redraw these numbers — many times a second.
+	get stats(): Stats {
+		return this.statsSnapshot;
+	}
+
+	private computeStats(): Stats {
 		const t = this.tree;
 		const analyzed = t.doneSeconds + t.activeSeconds;
 		const remainingSeconds = Math.max(0, t.totalSeconds - t.priorSeconds - analyzed);
@@ -367,15 +385,23 @@ class AnalysisRun {
 		this.rateSamples = [{ t: now, doneSeconds: 0 }];
 		this.startedAt = now;
 		this.running = true;
+		this.statsSnapshot = ZERO_STATS;
 		if (this.ticker === null && typeof setInterval === 'function') {
-			this.ticker = setInterval(() => (this.now = Date.now()), TICK_MS);
+			this.ticker = setInterval(() => this.tick(), TICK_MS);
 		}
+	}
+
+	private tick() {
+		this.now = Date.now();
+		this.statsSnapshot = this.computeStats();
 	}
 
 	stop(error?: string) {
 		this.running = false;
 		this.stopped = true;
 		if (error) this.error = error;
+		this.now = Date.now();
+		this.statsSnapshot = this.computeStats();
 		if (this.ticker !== null) {
 			clearInterval(this.ticker);
 			this.ticker = null;
@@ -384,9 +410,8 @@ class AnalysisRun {
 
 	private touchRate() {
 		const now = Date.now();
-		this.now = now;
 		const sample = { t: now, doneSeconds: this.totals.doneSeconds };
-		const samples = [...this.rateSamples];
+		const samples = this.rateSamples;
 		// Chunks can land many times a second; collapse those into one sample
 		// per SAMPLE_MS so the buffer stays small over the ETA window.
 		const last = samples[samples.length - 1];
@@ -396,7 +421,6 @@ class AnalysisRun {
 		// one baseline before it so the rate covers the whole window.
 		const cutoff = now - ETA_WINDOW_MS;
 		while (samples.length > 2 && samples[1].t <= cutoff) samples.shift();
-		this.rateSamples = samples;
 	}
 
 	handleEvent(payload: any) {
