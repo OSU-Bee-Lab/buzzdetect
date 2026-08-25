@@ -3,7 +3,7 @@
 	import { listen } from '@tauri-apps/api/event';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { onMount } from 'svelte';
-	import { run, type TreeDir } from '$lib/progress.svelte';
+	import { run, formatDuration, type TreeDir } from '$lib/progress.svelte';
 	import { settings, LOGLEVELS } from '$lib/settings.svelte';
 	import DirRow from '$lib/DirRow.svelte';
 	import ProgressBar from '$lib/ProgressBar.svelte';
@@ -509,10 +509,22 @@ Can produce very large log files."
 	<section class="run">
 		<div class="header">
 			<h2>{run.running ? 'Analyzing…' : run.stopped ? 'Stopped' : 'Ready'}</h2>
-			{#if run.rate > 0}
-				<span class="rate">{run.rate.toFixed(1)}x realtime</span>
-			{/if}
 		</div>
+		{#if hasStarted}
+			{@const s = run.stats}
+			<dl class="stats">
+				{#if s.rate > 0}
+					<div><dt>Rate:</dt> <dd>{s.rate.toFixed(1)}x realtime</dd></div>
+				{/if}
+				<div><dt>Audio remaining:</dt> <dd>{formatDuration(s.remainingSeconds)}</dd></div>
+				{#if run.running && s.etaSeconds !== null}
+					<div><dt>ETA:</dt> <dd>{formatDuration(s.etaSeconds)}</dd></div>
+				{/if}
+				{#if s.priorSeconds > 0}
+					<div><dt>Previously analyzed:</dt> <dd>{formatDuration(s.priorSeconds)}</dd></div>
+				{/if}
+			</dl>
+		{/if}
 		{#if !run.running && !hasStarted && missingDirs}
 			<p class="hint">Set audio and output directories to begin.</p>
 		{/if}
@@ -826,9 +838,23 @@ Can produce very large log files."
 		gap: 0.75rem;
 	}
 
-	.rate {
+	.stats {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem 1.25rem;
+		margin: -0.5rem 0 0;
+		font-size: 0.85rem;
 		opacity: 0.7;
 		font-variant-numeric: tabular-nums;
+	}
+
+	.stats div {
+		display: flex;
+		gap: 0.35rem;
+	}
+
+	.stats dd {
+		margin: 0;
 	}
 
 	.tree {

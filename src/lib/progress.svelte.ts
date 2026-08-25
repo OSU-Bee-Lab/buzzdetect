@@ -7,6 +7,35 @@
 
 export type FileStatus = 'pending' | 'running' | 'done' | 'skipped';
 
+// Trailing window the realtime rate (and therefore the ETA) averages over.
+const RATE_WINDOW_MS = 30_000;
+
+const UNITS: { label: string; seconds: number }[] = [
+	{ label: 'day', seconds: 86400 },
+	{ label: 'hour', seconds: 3600 },
+	{ label: 'minute', seconds: 60 },
+	{ label: 'second', seconds: 1 }
+];
+
+// Human duration at two units of precision: "20 days, 5 hours", "6 minutes,
+// 12 seconds", "45 seconds". Smaller units are dropped rather than rounded
+// into the larger one, which is fine at this precision.
+export function formatDuration(seconds: number): string {
+	if (!isFinite(seconds) || seconds < 1) return '0 seconds';
+	const total = Math.floor(seconds);
+	const top = UNITS.findIndex((u) => total >= u.seconds);
+	const parts: string[] = [];
+	let rest = total;
+	// The top unit and the one below it, so precision stays at two adjacent
+	// units ("1 day, 3 hours", never "1 day, 5 minutes").
+	for (const u of UNITS.slice(top, top + 2)) {
+		const n = Math.floor(rest / u.seconds);
+		rest -= n * u.seconds;
+		if (n > 0) parts.push(`${n} ${u.label}${n === 1 ? '' : 's'}`);
+	}
+	return parts.join(', ');
+}
+
 export interface FileProgress {
 	path: string; // path relative to dir_audio, e.g. "siteA/2024-06-01.wav"
 	dir: string; // parent dir of path ("" for files at the audio dir's root)
@@ -144,8 +173,13 @@ class AnalysisRun {
 	discoveryDone = $state(false);
 	// Rolling audio-seconds-processed samples, used to compute a live
 	// realtime-multiple rate instead of an average since the run started
-	// (which would understate current speed after a slow startup).
-	private rateSamples: { t: number; doneSeconds: number }[] = [];
+	// (which would understate current speed after a slow startup). $state so
+	// the rate getter re-runs in the UI as samples arrive.
+	private rateSamples = $state<{ t: number; doneSeconds: number }[]>([]);
+	// Wall clock, ticked while a run is live so rate/ETA keep updating (and
+	// decay) between engine events rather than freezing at the last one.
+	private now = $state(Date.now());
+	private ticker: ReturnType<typeof setInterval> | null = null;
 
 	get tree(): TreeDir {
 		const root: MutableNode = { path: '', name: '', dirs: new Map(), files: [] };
@@ -265,15 +299,48 @@ class AnalysisRun {
 		return this.discoveryDone;
 	}
 
-	// Realtime multiple over the trailing window, e.g. 12.4 means the engine
-	// is processing 12.4 seconds of audio per wall-clock second.
+	// Realtime multiple over the trailing window: audio seconds analyzed per
+	// wall-clock second, computed here rather than taken from the engine (the
+	// analyzers report their own throughput, not this end-to-end rate). The
+	// window ends at `now`, not at the last event, so a stall decays the rate
+	// instead of freezing it at the last burst.
 	get rate(): number {
 		if (this.rateSamples.length < 2) return 0;
-		const first = this.rateSamples[0];
+		const now = Math.max(this.now, this.rateSamples[this.rateSamples.length - 1].t);
+		const cutoff = now - RATE_WINDOW_MS;
+		// Baseline: the newest sample at or before the window start, so the
+		// window covers the full RATE_WINDOW_MS even when events are sparse.
+		let first = this.rateSamples[0];
+		for (const s of this.rateSamples) {
+			if (s.t > cutoff) break;
+			first = s;
+		}
 		const last = this.rateSamples[this.rateSamples.length - 1];
-		const dt = (last.t - first.t) / 1000;
+		const dt = (now - first.t) / 1000;
 		if (dt <= 0) return 0;
-		return (last.doneSeconds - first.doneSeconds) / dt;
+		return Math.max(0, (last.doneSeconds - first.doneSeconds) / dt);
+	}
+
+	// Headline numbers for the run: everything but `priorSeconds` covers only
+	// this session's work, so the ETA never counts audio an earlier run
+	// already analyzed. Remaining is partly estimated — files nothing has
+	// opened are charged a duration extrapolated from their size.
+	get stats(): {
+		priorSeconds: number;
+		remainingSeconds: number;
+		rate: number;
+		etaSeconds: number | null;
+	} {
+		const t = this.tree;
+		const analyzed = t.doneSeconds + t.activeSeconds;
+		const remainingSeconds = Math.max(0, t.totalSeconds - t.priorSeconds - analyzed);
+		const rate = this.rate;
+		return {
+			priorSeconds: t.priorSeconds,
+			remainingSeconds,
+			rate,
+			etaSeconds: rate > 0 ? remainingSeconds / rate : null
+		};
 	}
 
 	reset() {
@@ -282,26 +349,35 @@ class AnalysisRun {
 		this.error = null;
 		this.stopped = false;
 		this.discoveryDone = false;
-		this.rateSamples = [];
-		this.startedAt = Date.now();
+		const now = Date.now();
+		this.now = now;
+		this.rateSamples = [{ t: now, doneSeconds: 0 }];
+		this.startedAt = now;
 		this.running = true;
+		if (this.ticker === null && typeof setInterval === 'function') {
+			this.ticker = setInterval(() => (this.now = Date.now()), 1000);
+		}
 	}
 
 	stop(error?: string) {
 		this.running = false;
 		this.stopped = true;
 		if (error) this.error = error;
+		if (this.ticker !== null) {
+			clearInterval(this.ticker);
+			this.ticker = null;
+		}
 	}
 
 	private touchRate() {
 		const now = Date.now();
-		this.rateSamples.push({ t: now, doneSeconds: this.totals.doneSeconds });
-		// Keep ~30s of samples so the rate reflects recent speed, not the
-		// whole run (long-idle-then-burst wouldn't average sensibly otherwise).
-		const cutoff = now - 30_000;
-		while (this.rateSamples.length > 2 && this.rateSamples[0].t < cutoff) {
-			this.rateSamples.shift();
-		}
+		this.now = now;
+		const samples = [...this.rateSamples, { t: now, doneSeconds: this.totals.doneSeconds }];
+		// Drop samples that fall entirely out of the trailing window, keeping
+		// one baseline before it so the rate covers the whole window.
+		const cutoff = now - RATE_WINDOW_MS;
+		while (samples.length > 2 && samples[1].t <= cutoff) samples.shift();
+		this.rateSamples = samples;
 	}
 
 	handleEvent(payload: any) {
