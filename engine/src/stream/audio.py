@@ -21,9 +21,10 @@ module_drivers = cfg.DIR_DRIVERS.replace('/', '.')
 
 driver_map = {}
 
-for k in sf.available_formats().keys():
-    driver_map[k.lower()] = sf.SoundFile
-
+# our own drivers take precedence: a format is handed to soundfile only when we
+# have not written a driver for it. soundfile claims formats it cannot actually
+# read to the end (see drivers/mp3.py), so its support is the fallback, not the
+# default.
 if os.path.exists(cfg.DIR_DRIVERS):
     for d in os.listdir(cfg.DIR_DRIVERS):
         if not d.endswith('.py'):
@@ -31,7 +32,10 @@ if os.path.exists(cfg.DIR_DRIVERS):
 
         ext = os.path.splitext(d)[0].lower()
         driver = importlib.import_module(f'{module_drivers}.{ext}').Driver
-        driver_map.update({ext: driver})
+        driver_map[ext] = driver
+
+for k in sf.available_formats().keys():
+    driver_map.setdefault(k.lower(), sf.SoundFile)
 
 class UnsupportedFormat(Exception):
     pass

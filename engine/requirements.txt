@@ -1,0 +1,7 @@
+tensorflow>=2.16
+librosa
+soundfile
+pandas
+numpy
+matplotlib
+av

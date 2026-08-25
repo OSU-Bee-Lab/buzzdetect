@@ -15,7 +15,15 @@ from src import config as cfg
 from src.pipeline.assignments import AssignFile, AssignLog
 from src.pipeline.coordination import Coordinator, ExitSignal
 from src.pipeline.manifest import build_manifest, check_or_write_manifest
+from src.pipeline.progress_json import emit_progress
 from src.utils import search_dir
+
+def _file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
 
 def run_worker(workerclass, **kwargs):
     worker = workerclass(**kwargs)
@@ -272,9 +280,22 @@ class Analyzer:
 
     def queue_assignments(self):
         assignments = []
+        # search_dir is a generator: each match is reported as soon as it's
+        # found, so a UI watching for 'manifest' events can populate its file
+        # list while the walk is still going, rather than waiting for the
+        # entire (possibly large, possibly network-mounted) tree to finish
+        # being walked before showing anything.
         for p in search_dir(self.dir_audio, extensions=list(driver_map.keys())):
             a_file = AssignFile(path_audio=p, dir_audio=self.dir_audio, dir_results=self.dir_out)
             assignments.append(a_file)
+            # Byte size lets a UI weight files it has no duration for yet
+            # (still queued, or skipped without ever being opened). One stat
+            # per file is cheap; actually opening each file to read a real
+            # duration would delay the start of analysis by minutes on a large
+            # network-mounted tree, and wouldn't be reliable for mp3 anyway.
+            emit_progress('manifest', paths=[a_file.shortpath_audio], bytes=[_file_size(p)])
+
+        emit_progress('manifest_done', count=len(assignments))
 
         if not assignments:
             self.coordinator.exit_analysis(
@@ -305,10 +326,13 @@ class Analyzer:
         for a in assignments:
             # drop all conflicts
             if a.ident in idents_conflicting:
+                emit_progress('file_skip', path=a.shortpath_audio, reason='name_conflict')
                 continue
 
             # drop already finished (cleaner/faster exit)
-            if not os.path.exists(a.path_results_complete):
+            if os.path.exists(a.path_results_complete):
+                emit_progress('file_skip', path=a.shortpath_audio, reason='already_analyzed')
+            else:
                 assignments_unfinished.append(a)
 
         if not assignments_unfinished:

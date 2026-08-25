@@ -3,6 +3,7 @@ import tensorflow as tf
 from src.inference.models import load_model
 from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
+from src.pipeline.progress_json import emit_progress
 from src.utils import Timer
 
 
@@ -62,6 +63,13 @@ class WorkerInferer:
                  f"in {self.timer_analysis.get_total():.2f}s (rate: {analysis_rate:.1f})")
 
         self.log(msg, 'PROGRESS')
+        emit_progress(
+            'chunk_done',
+            path=a_chunk.file.shortpath_audio,
+            chunk_start=float(a_chunk.chunk[0]),
+            chunk_end=float(a_chunk.chunk[1]),
+            done=a_chunk.last_chunk,
+        )
         self.timer_analysis.restart()
 
     def report_bottleneck(self):
