@@ -24,15 +24,32 @@ jobs:
           - platform: macos-14
             args: --bundles dmg,app
             triple: aarch64-apple-darwin
+            engine_flags: ''
           - platform: macos-13
             args: --bundles dmg,app
             triple: x86_64-apple-darwin
+            engine_flags: ''
           - platform: ubuntu-22.04
             args: --bundles appimage,deb
             triple: x86_64-unknown-linux-gnu
+            engine_flags: ''
           - platform: windows-latest
             args: --bundles nsis
             triple: x86_64-pc-windows-msvc
+            engine_flags: ''
+          # CUDA variants. Separate installers rather than fattening the
+          # default ones: they bundle onnxruntime-gpu plus the NVIDIA runtime,
+          # which is ~1GB that only an NVIDIA user can execute. The config
+          # overlay renames the product so both can be published to the same
+          # release (and installed side by side) without colliding.
+          - platform: ubuntu-22.04
+            args: --bundles appimage,deb --config src-tauri/tauri.cuda.conf.json
+            triple: x86_64-unknown-linux-gnu
+            engine_flags: '--cuda'
+          - platform: windows-latest
+            args: --bundles nsis --config src-tauri/tauri.cuda.conf.json
+            triple: x86_64-pc-windows-msvc
+            engine_flags: '--cuda'
 
     runs-on: ${{ matrix.platform }}
 
@@ -80,7 +97,7 @@ jobs:
       # engine payload that tauri.conf.json's externalBin/resources point at,
       # and the bundle step fails outright if they're missing.
       - name: Build the engine sidecar
-        run: node scripts/build-engine.mjs
+        run: node scripts/build-engine.mjs ${{ matrix.engine_flags }}
         env:
           ENGINE_TARGET_TRIPLE: ${{ matrix.triple }}
 
@@ -145,3 +162,7 @@ jobs:
           copy_asset "buzzdetect2_${VERSION}_amd64.AppImage" "buzzdetect2-Linux.AppImage"
           copy_asset "buzzdetect2_${VERSION}_amd64.deb"      "buzzdetect2-Linux.deb"
           copy_asset "buzzdetect2_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows.exe"
+
+          copy_asset "buzzdetect2-cuda_${VERSION}_amd64.AppImage" "buzzdetect2-Linux-CUDA.AppImage"
+          copy_asset "buzzdetect2-cuda_${VERSION}_amd64.deb"      "buzzdetect2-Linux-CUDA.deb"
+          copy_asset "buzzdetect2-cuda_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows-CUDA.exe"

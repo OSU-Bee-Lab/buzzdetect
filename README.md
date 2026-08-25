@@ -28,6 +28,14 @@ sudo apt install ./buzzdetect2-Linux.deb
 
 On other distros, grab the [AppImage](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux.AppImage) instead.
 
+### NVIDIA GPU builds
+
+If you have an NVIDIA card, there are separate CUDA installers that run inference on the GPU — [Linux .deb](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux-CUDA.deb), [Linux AppImage](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux-CUDA.AppImage), [Windows](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Windows-CUDA.exe). They bundle the CUDA runtime, so you need a recent NVIDIA driver but no system CUDA install. Turing (GTX 16-series, RTX 20-series) and newer are supported.
+
+They're about a gigabyte, which is why they're separate rather than the default. Set GPU analyzers to 1 and CPU analyzers to 0 in Advanced settings to use the card. If a CUDA build can't reach your GPU it says so in the log and falls back to the CPU rather than pretending.
+
+The CUDA builds install alongside the regular ones rather than replacing them.
+
 ## Overview
 
 Three settings get you running: a **model**, an **audio directory** to read, and an **output directory** to write into. Everything else has a working default and lives behind Advanced.

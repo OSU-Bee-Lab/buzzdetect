@@ -3,7 +3,11 @@
  * Freeze the Python engine into a sidecar binary the desktop app can spawn,
  * plus the data payload that has to sit beside it.
  *
- *   node scripts/build-engine.mjs
+ *   node scripts/build-engine.mjs            # CPU build (onnxruntime)
+ *   node scripts/build-engine.mjs --cuda     # CUDA build (onnxruntime-gpu)
+ *
+ * The CUDA build bundles the NVIDIA runtime, so it needs no system CUDA -- but
+ * it is roughly a gigabyte larger and is only produced for Linux and Windows.
  *
  * Outputs, both gitignored and both consumed by tauri.conf.json:
  *
@@ -27,7 +31,13 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENGINE = join(ROOT, 'engine');
-const VENV = join(ENGINE, '.venv-build');
+
+const CUDA = process.argv.includes('--cuda');
+const REQUIREMENTS = join(ENGINE, CUDA ? 'requirements-onnx-cuda.txt' : 'requirements-onnx.txt');
+// Separate venvs: onnxruntime and onnxruntime-gpu install the same module and
+// cannot coexist, so sharing one would silently freeze whichever was installed
+// last.
+const VENV = join(ENGINE, CUDA ? '.venv-build-cuda' : '.venv-build');
 const IS_WINDOWS = process.platform === 'win32';
 const VENV_BIN = join(VENV, IS_WINDOWS ? 'Scripts' : 'bin');
 const PYTHON = join(VENV_BIN, IS_WINDOWS ? 'python.exe' : 'python3');
@@ -53,22 +63,15 @@ function setupVenv() {
 	if (!existsSync(PYTHON)) {
 		run('uv', ['venv', '--python', '3.13', VENV], { cwd: ENGINE });
 	}
-	run('uv', [
-		'pip',
-		'install',
-		'--python',
-		PYTHON,
-		'-r',
-		join(ENGINE, 'requirements-onnx.txt'),
-		'pyinstaller'
-	]);
+	run('uv', ['pip', 'install', '--python', PYTHON, '-r', REQUIREMENTS, 'pyinstaller']);
 }
 
 function freeze() {
 	rmSync(join(ENGINE, 'build'), { recursive: true, force: true });
 	rmSync(join(ENGINE, 'dist'), { recursive: true, force: true });
 	run(PYTHON, ['-m', 'PyInstaller', '--noconfirm', '--clean', 'buzzdetect.spec'], {
-		cwd: ENGINE
+		cwd: ENGINE,
+		env: { ...process.env, BUZZDETECT_CUDA: CUDA ? '1' : '0' }
 	});
 
 	const built = join(ENGINE, 'dist', IS_WINDOWS ? 'buzzdetect.exe' : 'buzzdetect');
@@ -126,6 +129,7 @@ function assemblePayload() {
 	console.log(`  models: ${shipped.join(', ')}`);
 }
 
+console.log(`building the ${CUDA ? 'CUDA' : 'CPU'} engine`);
 setupVenv();
 freeze();
 assemblePayload();

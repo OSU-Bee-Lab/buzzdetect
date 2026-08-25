@@ -16,7 +16,39 @@ Two things this build deliberately does NOT contain:
   directory instead, and the app runs the binary with that as its cwd.
 """
 
+import glob
+import os
+import site
+
 from PyInstaller.utils.hooks import collect_submodules
+
+# Set by scripts/build-engine.mjs --cuda. The CUDA build installs
+# onnxruntime-gpu plus the NVIDIA runtime as wheels (requirements-onnx-cuda.txt)
+# so the app doesn't need a system CUDA install.
+CUDA = os.environ.get('BUZZDETECT_CUDA') == '1'
+
+
+def nvidia_libraries():
+    """Shared libraries from the nvidia-* wheels, flattened to the bundle root.
+
+    PyInstaller's onefile bootloader puts _MEIPASS on the library search path
+    but not its subdirectories, and onnxruntime's CUDA provider dlopen()s these
+    by soname (libcudnn.so.9 and friends). Keeping the nvidia/<component>/lib
+    layout would leave them unfindable, so they're flattened; the sonames are
+    distinct, so nothing collides.
+    """
+    found = []
+    for site_packages in site.getsitepackages():
+        root = os.path.join(site_packages, 'nvidia')
+        if not os.path.isdir(root):
+            continue
+        for pattern in ('*/lib/*.so*', '*/lib/x64/*.lib', '*/bin/*.dll'):
+            for path in glob.glob(os.path.join(root, pattern)):
+                if os.path.isfile(path):
+                    found.append((path, '.'))
+    return found
+
+
 
 # src/stream/audio.py builds its driver map by listing src/stream/drivers and
 # importing each module by name, which no static analysis can see.
@@ -31,10 +63,12 @@ hidden += [
     'embedders.yamnet_onnx.params',
 ]
 
+binaries = nvidia_libraries() if CUDA else []
+
 a = Analysis(
     ['buzzdetect_cli.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=binaries,
     datas=[],
     hiddenimports=hidden,
     hookspath=[],

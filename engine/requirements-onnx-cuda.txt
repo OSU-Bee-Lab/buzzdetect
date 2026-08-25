@@ -1,0 +1,15 @@
+# Runtime dependencies for the CUDA build of the desktop app. Same as
+# requirements-onnx.txt, but onnxruntime-gpu in place of onnxruntime, with the
+# NVIDIA runtime pulled in as wheels so the installer is self-contained: users
+# need a recent enough driver, not a system CUDA install.
+#
+# Pinned to the 1.26 line deliberately. onnxruntime-gpu 1.27+ is built against
+# CUDA 13, which requires a ~580+ driver; 1.26 is CUDA 12 and works from ~525
+# up, covering far more machines. Both support Turing (GTX 16xx/20xx) and
+# newer. Move this pin up only alongside a driver requirement you've checked.
+numpy
+pandas
+soundfile
+av
+soxr
+onnxruntime-gpu[cuda,cudnn]==1.26.0
