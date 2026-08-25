@@ -47,7 +47,10 @@
 			run.handleLog(e.payload.line)
 		);
 		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) => {
-			run.stop(e.payload.code !== 0 ? `engine exited with code ${e.payload.code}` : undefined);
+			// A cancelled engine is killed, so it exits by signal (null code) or
+			// non-zero -- expected, not an error worth showing.
+			const cancelled = run.stopping;
+			run.stop(!cancelled && e.payload.code !== 0 ? `engine exited with code ${e.payload.code}` : undefined);
 		});
 
 		invoke<string[]>('list_models').then((list) => {
@@ -200,8 +203,15 @@
 	}
 
 	async function cancel() {
-		await invoke('cancel_analysis');
-		run.stop();
+		// Only marks the run as stopping. run.stop() is left to the engine-exit
+		// listener, so the UI stays locked until the engine has actually gone
+		// rather than while it's still analysing in the background.
+		run.beginStop();
+		try {
+			await invoke('cancel_analysis');
+		} catch (e) {
+			run.stop(String(e));
+		}
 	}
 
 	function allDirPaths(): string[] {
@@ -248,7 +258,7 @@
 <div class="panels" style="grid-template-columns: {settingsWidth}px 6px 1fr">
 	<section class="settings">
 		<h2>Settings</h2>
-		<fieldset class="settings-fields" disabled={run.running}>
+		<fieldset class="settings-fields" disabled={run.running || run.stopping}>
 
 		{#if modelMismatch}
 			<p class="error">
@@ -461,7 +471,7 @@ Can produce very large log files."
 		{/if}
 		</fieldset>
 
-		{#if !run.running}
+		{#if !run.running && !run.stopping}
 			<div class="settings-actions">
 				<button
 					onclick={start}
@@ -485,7 +495,7 @@ Can produce very large log files."
 
 	<section class="run">
 		<div class="header">
-			<h2>{run.running ? 'Analyzing…' : run.stopped ? 'Stopped' : 'Ready'}</h2>
+			<h2>{run.stopping ? 'Stopping…' : run.running ? 'Analyzing…' : run.stopped ? 'Stopped' : 'Ready'}</h2>
 		</div>
 		{#if hasStarted}
 			{@const s = run.stats}
@@ -570,7 +580,9 @@ Can produce very large log files."
 
 		{#if run.running}
 			<div class="run-actions">
-				<button class="danger" onclick={cancel}>Stop Analysis</button>
+				<button class="danger" onclick={cancel} disabled={run.stopping}>
+					{run.stopping ? 'Stopping…' : 'Stop Analysis'}
+				</button>
 			</div>
 		{/if}
 	</section>

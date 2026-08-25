@@ -379,6 +379,7 @@ class AnalysisRun {
 		this.logLines = [];
 		this.error = null;
 		this.stopped = false;
+		this.stopping = false;
 		this.discoveryDone = false;
 		const now = Date.now();
 		this.now = now;
@@ -396,8 +397,19 @@ class AnalysisRun {
 		this.statsSnapshot = this.computeStats();
 	}
 
+	// Cancel has been requested but the engine hasn't exited yet. The run stays
+	// locked while this is true: the engine is still analysing, still writing
+	// results, and still sending progress, so releasing the UI here would let
+	// the user start a second run on top of the first.
+	stopping = $state(false);
+
+	beginStop() {
+		this.stopping = true;
+	}
+
 	stop(error?: string) {
 		this.running = false;
+		this.stopping = false;
 		this.stopped = true;
 		if (error) this.error = error;
 		this.now = Date.now();

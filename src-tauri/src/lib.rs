@@ -256,6 +256,17 @@ fn start_analysis(
         cmd.arg("--stream_buffer_depth").arg(n.to_string());
     }
 
+    // Its own process group, so cancel_analysis can signal the whole tree.
+    // PyInstaller's onefile bootloader forks the real engine as a child of
+    // itself, so the pid we get back here is a wrapper: killing just that pid
+    // leaves the analysis running, still writing results and still emitting
+    // progress on the stdout pipe we're reading.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
     let mut child = cmd.spawn().map_err(|e| format!("failed to launch engine: {e}"))?;
 
     // reconcile_with_manifest (buzzdetect_cli.py) can prompt y/N on stdin if
@@ -329,12 +340,65 @@ fn spawn_line_reader<R: std::io::Read + Send + 'static>(app: AppHandle, reader: 
     });
 }
 
-#[tauri::command]
-fn cancel_analysis(state: State<AnalysisState>) -> Result<(), String> {
-    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(mut child) = guard.take() {
-        child.kill().map_err(|e| e.to_string())?;
+// How long a cancelled engine gets to wind down before it's killed outright.
+const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[cfg(unix)]
+fn signal_engine(pid: u32, signal: i32) {
+    // Negative pid = the whole process group, which is the point: see the
+    // process_group call in start_analysis.
+    unsafe {
+        libc::kill(-(pid as i32), signal);
     }
+}
+
+#[cfg(windows)]
+fn signal_engine(pid: u32, _signal: i32) {
+    // No process groups to signal; /T walks the child tree instead, which is
+    // what actually gets PyInstaller's forked worker.
+    let _ = Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .status();
+}
+
+#[tauri::command]
+fn cancel_analysis(app: AppHandle, state: State<AnalysisState>) -> Result<(), String> {
+    let pid = {
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        match guard.as_ref() {
+            Some(child) => child.id(),
+            None => return Ok(()),
+        }
+    };
+
+    // Deliberately does NOT clear AnalysisState. The waiter thread spawned by
+    // start_analysis is what reaps the child and emits engine-exit, and the
+    // frontend keeps the run locked until that lands -- so taking the child
+    // out here would strand the UI in a stopping state forever.
+    #[cfg(unix)]
+    signal_engine(pid, libc::SIGTERM);
+    #[cfg(windows)]
+    signal_engine(pid, 0);
+
+    // Escalate if it hasn't gone by itself. Results are written per chunk, so
+    // the worst a hard kill costs is the chunk in flight, which the next run
+    // picks up again.
+    std::thread::spawn(move || {
+        std::thread::sleep(CANCEL_GRACE);
+        let state = app.state::<AnalysisState>();
+        let still_running = state
+            .0
+            .lock()
+            .map(|guard| guard.as_ref().map(|child| child.id()) == Some(pid))
+            .unwrap_or(false);
+        if still_running {
+            #[cfg(unix)]
+            signal_engine(pid, libc::SIGKILL);
+            #[cfg(windows)]
+            signal_engine(pid, 0);
+        }
+    });
+
     Ok(())
 }
 

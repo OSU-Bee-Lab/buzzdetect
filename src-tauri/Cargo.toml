@@ -24,3 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2.7.2"
 
+# Cancelling an analysis has to signal a whole process group, not one pid --
+# see cancel_analysis in src/lib.rs.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
