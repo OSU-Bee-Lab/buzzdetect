@@ -16,3 +16,10 @@ vite.config.ts.timestamp-*
 # .gitignore files (engine/.gitignore, engine/models/.gitignore,
 # engine/embedders/.gitignore), which already cover __pycache__, .venv, and
 # untracked model/embedder directories. Don't duplicate those rules here.
+
+# Frozen engine build outputs (node scripts/build-engine.mjs)
+/src-tauri/binaries
+/src-tauri/engine-payload
+/engine/.venv-build
+/engine/build
+/engine/dist

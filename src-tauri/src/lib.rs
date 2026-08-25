@@ -13,33 +13,75 @@ const PROGRESS_MARKER: &str = "BDPROGRESS ";
 #[derive(Default)]
 struct AnalysisState(Mutex<Option<Child>>);
 
-// engine/ is bundled with buzzdetect2 and ships its own venv (see
-// engine/requirements.txt, set up with `uv venv` / `uv pip install`), so the
-// interpreter path is fixed rather than a user setting.
-fn resolve_engine_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let bundled = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())?
-        .join("engine");
-    if bundled.join("buzzdetect_cli.py").exists() {
-        return Ok(bundled);
-    }
-    // Dev mode: nothing's bundled yet, engine/ lives next to the project root.
-    std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or_else(|| "could not resolve project root".to_string())
-        .map(|p| p.join("engine"))
+// How to invoke the Python engine. Two shapes, because the app has to work
+// both as a shipped bundle and out of a checkout:
+//
+// - Bundled: a PyInstaller sidecar (see engine/buzzdetect.spec) sits next to
+//   the app executable, and the parts buzzdetect loads off disk at runtime --
+//   models, the ONNX embedder, the stream drivers -- ship as the
+//   engine-payload resource directory. Nothing on the user's machine is
+//   needed: no Python, no venv.
+// - Dev: no sidecar has been built, so run engine/buzzdetect_cli.py out of
+//   engine/.venv the way `buzzdetect_cli.py` is run by hand.
+//
+// Either way the process runs with a working directory containing models/,
+// embedders/ and src/stream/drivers/, which is what makes the relative paths
+// in engine/src/config.py resolve.
+struct Engine {
+    program: PathBuf,
+    // Dev only: the CLI script to hand the interpreter. Empty when the
+    // sidecar, which is the CLI, is what's being run.
+    prefix_args: Vec<PathBuf>,
+    workdir: PathBuf,
 }
 
-fn resolve_python_bin(engine_dir: &PathBuf) -> PathBuf {
-    engine_dir.join(".venv").join("bin").join("python3")
+#[cfg(target_os = "windows")]
+const SIDECAR_NAME: &str = "buzzdetect.exe";
+#[cfg(not(target_os = "windows"))]
+const SIDECAR_NAME: &str = "buzzdetect";
+
+fn resolve_engine(app: &AppHandle) -> Result<Engine, String> {
+    // Tauri strips the target triple when it copies an externalBin into the
+    // bundle, so the sidecar lands beside the app executable under its plain
+    // name.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let sidecar = exe_dir.join(SIDECAR_NAME);
+            if sidecar.exists() {
+                if let Ok(resources) = app.path().resource_dir() {
+                    let payload = resources.join("engine-payload");
+                    if payload.join("models").exists() {
+                        return Ok(Engine {
+                            program: sidecar,
+                            prefix_args: vec![],
+                            workdir: payload,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let engine_dir = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or_else(|| "could not resolve project root".to_string())?
+        .join("engine");
+    let venv_bin = if cfg!(target_os = "windows") {
+        engine_dir.join(".venv").join("Scripts").join("python.exe")
+    } else {
+        engine_dir.join(".venv").join("bin").join("python3")
+    };
+    Ok(Engine {
+        program: venv_bin,
+        prefix_args: vec![engine_dir.join("buzzdetect_cli.py")],
+        workdir: engine_dir,
+    })
 }
 
 #[tauri::command]
 fn list_models(app: AppHandle) -> Result<Vec<String>, String> {
-    let models_dir = resolve_engine_dir(&app)?.join("models");
+    let models_dir = resolve_engine(&app)?.workdir.join("models");
     let mut out = vec![];
     if let Ok(entries) = std::fs::read_dir(&models_dir) {
         for entry in entries.flatten() {
@@ -57,7 +99,8 @@ fn list_models(app: AppHandle) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, String> {
-    let config_path = resolve_engine_dir(&app)?
+    let config_path = resolve_engine(&app)?
+        .workdir
         .join("models")
         .join(&modelname)
         .join("config_model.json");
@@ -168,18 +211,17 @@ fn start_analysis(
         return Err("An analysis is already running".into());
     }
 
-    let engine_dir = resolve_engine_dir(&app)?;
-    let python_bin = resolve_python_bin(&engine_dir);
-    if !python_bin.exists() {
+    let engine = resolve_engine(&app)?;
+    if !engine.program.exists() {
         return Err(format!(
-            "Engine's Python environment not found at {}. Run `uv venv --python 3.13 .venv && uv pip install -r requirements.txt` in engine/.",
-            python_bin.display()
+            "Engine not found at {}. In a checkout, build the sidecar with `node scripts/build-engine.mjs`, or set up engine/.venv with `uv venv --python 3.13 .venv && uv pip install -r requirements.txt`.",
+            engine.program.display()
         ));
     }
 
-    let mut cmd = Command::new(&python_bin);
-    cmd.current_dir(&engine_dir)
-        .arg("buzzdetect_cli.py")
+    let mut cmd = Command::new(&engine.program);
+    cmd.current_dir(&engine.workdir)
+        .args(&engine.prefix_args)
         .arg("--modelname")
         .arg(&settings.modelname)
         .arg("--dir_audio")
