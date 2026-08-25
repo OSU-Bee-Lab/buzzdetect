@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Tauri 2 + SvelteKit desktop GUI wrapped around `engine/`, a forked-in copy of the [buzzdetect](https://github.com/OSU-Bee-Lab/buzzdetect) bioacoustics pipeline. The GUI lets a user pick a model, an input audio folder, and an output folder, then runs the Python engine as a subprocess and renders its live progress as a file tree with progress bars.
+A Tauri 2 + SvelteKit desktop GUI wrapped around `engine/`, a **git subtree** of the [buzzdetect](https://github.com/OSU-Bee-Lab/buzzdetect) bioacoustics pipeline. The GUI lets a user pick a model, an input audio folder, and an output folder, then runs the Python engine as a subprocess and renders its live progress as a file tree with progress bars.
 
 Two codebases live side by side and only talk to each other through a subprocess boundary (Rust spawns Python, Python prints structured JSON lines on stdout):
 
 - **Frontend**: `src/` (SvelteKit, Svelte 5 runes) + `src-tauri/` (Rust/Tauri commands)
-- **Engine**: `engine/` — a standalone Python package with its own venv, CLI, and models. Treat it as a vendored/forked dependency: it can be run and tested completely independently of the Tauri app via `buzzdetect_cli.py`.
+- **Engine**: `engine/` — a standalone Python package with its own venv, CLI, and models, tracked as a git subtree of upstream buzzdetect. It can be run and tested completely independently of the Tauri app via `buzzdetect_cli.py`.
 
 ## Workflow
 
@@ -39,4 +39,5 @@ There is no test suite in this repo currently.
 
 - **Subprocess boundary, not a library call.** `src-tauri/src/lib.rs::start_analysis` spawns `buzzdetect_cli.py` as a child process (fixed interpreter at `engine/.venv/bin/python3`; `resolve_engine_dir` picks bundled-resource vs. `../engine` dev path). Only one analysis runs at a time (`AnalysisState` mutex). The engine's own stdout/stderr lines prefixed `BDPROGRESS ` (`PROGRESS_MARKER`) are JSON and get re-emitted as Tauri's `engine-progress` event; everything else becomes `engine-log`. `emit_progress()` in `engine/src/pipeline/progress_json.py` is the single source of truth for that wire format — if you add a new progress event kind, update both it and the frontend's `run` store (`src/lib/progress.svelte.ts`) together.
 - **Manifest locking is duplicated logic, not shared code.** An output folder records the settings (model, output classes, framehop) that fixed its result schema in `buzzdetect_manifest.json`, and both sides independently refuse to let a run drift from it: Python via `reconcile_with_manifest`/`pipeline/manifest.py` (prompts y/N on stdin — Rust's `start_analysis` always auto-answers `y` since there's no attached terminal), Svelte via `checkManifest()` in `+page.svelte` (locks classes/framehop in the UI, blocks on model mismatch). Changing the manifest schema means updating both.
-- `engine/` is a vendored fork of github.com/OSU-Bee-Lab/buzzdetect — runnable and testable standalone via `buzzdetect_cli.py`, independent of the Tauri app. `engine/src/gui/` is that upstream project's legacy CustomTkinter GUI, superseded here by the Tauri frontend; don't extend it.
+- **`engine/` is a git subtree, not a copy.** It tracks `upstream` = github.com/OSU-Bee-Lab/buzzdetect. Pull upstream work with `git subtree pull --prefix=engine upstream main --squash`; push work the other way with `git subtree push --prefix=engine upstream <branch>`. Keep the fork delta small — anything that isn't GUI-specific (new stream drivers, streaming fixes, format support) belongs upstream, where it comes back for free on the next pull. The current delta is `src/pipeline/progress_json.py` and its `emit_progress()` call sites, `search_dir` in `src/utils.py` being a generator, driver precedence in `src/stream/audio.py`, and `requirements.txt`. `engine/` carries its own `.gitignore` files — don't re-add engine rules to the root one.
+- `engine/src/gui/` is upstream's legacy CustomTkinter GUI, superseded here by the Tauri frontend; don't extend it. Same for `engine/docs/`, `engine/audio_in/`, and `engine/buzzdetect_gui.py` — they arrive with the subtree and are excluded at bundle time rather than deleted, since deleting them would conflict on every pull.

@@ -12,10 +12,7 @@ vite.config.ts.timestamp-*
 # Rust
 /src-tauri/target
 
-# Python engine
-engine/**/__pycache__
-engine/**/*.pyc
-engine/.venv
-# Trained model weights are large, user-managed data, not engine code.
-engine/models/*
-!engine/models/.gitkeep
+# engine/ is a git subtree of OSU-Bee-Lab/buzzdetect and brings its own
+# .gitignore files (engine/.gitignore, engine/models/.gitignore,
+# engine/embedders/.gitignore), which already cover __pycache__, .venv, and
+# untracked model/embedder directories. Don't duplicate those rules here.
