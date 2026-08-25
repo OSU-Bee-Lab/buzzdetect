@@ -63,7 +63,20 @@ hidden += [
     'embedders.yamnet_onnx.params',
 ]
 
-binaries = nvidia_libraries() if CUDA else []
+if CUDA:
+    binaries = nvidia_libraries()
+    # Fail here rather than ship a CUDA installer with no CUDA in it. Without
+    # this the build succeeds, the app runs, and the only symptom is a GPU
+    # analyzer quietly falling back to the CPU on the user's machine.
+    if not binaries:
+        raise SystemExit(
+            'CUDA build requested but no nvidia-* shared libraries were found. '
+            'Check that requirements-onnx-cuda.txt installed the cuda/cudnn '
+            'extras into this venv.'
+        )
+    print(f'buzzdetect.spec: bundling {len(binaries)} NVIDIA runtime libraries')
+else:
+    binaries = []
 
 a = Analysis(
     ['buzzdetect_cli.py'],
