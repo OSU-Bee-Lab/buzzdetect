@@ -11,7 +11,6 @@
 	interface Manifest {
 		modelname: string;
 		classes_out: string[] | null;
-		framehop_prop: number | null;
 	}
 
 	let models = $state<string[]>([]);
@@ -76,7 +75,7 @@
 		}
 	});
 
-	// buzzdetect locks schema-defining settings (output classes, framehop) to
+	// buzzdetect locks schema-defining settings (output classes) to
 	// match an output folder's existing manifest, so a resumed run can't
 	// silently write incompatible results into it — see buzzdetect_gui.py's
 	// _apply_manifest_lock, which this mirrors. The model itself is never
@@ -94,7 +93,6 @@
 		}
 		if (!manifest || manifest.modelname !== settings.value.modelname) return;
 		if (manifest.classes_out) settings.value.classesOut = manifest.classes_out;
-		if (manifest.framehop_prop !== null) settings.value.framehopProp = manifest.framehop_prop;
 		settings.save();
 	}
 
@@ -179,7 +177,6 @@
 					chunklength: settings.value.chunklength,
 					analyzers_cpu: settings.value.analyzersCpu,
 					analyzers_gpu: settings.value.analyzersGpu,
-					framehop_prop: settings.value.framehopProp,
 					n_streamers: settings.value.nStreamers,
 					stream_buffer_depth: settings.value.streamBufferDepth,
 					verbosity_print: settings.value.verbosityPrint,
@@ -340,35 +337,6 @@
 					{/each}
 				</div>
 			</fieldset>
-
-			<label>
-				<span class="label-text" class:locked={manifestLocked}>
-					Framehop
-					{#if manifestLocked}
-						<span class="lock-icon" title="Locked to match existing results in this output folder">
-							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-								<rect x="5" y="11" width="14" height="9" rx="1.5" />
-								<path d="M8 11V7a4 4 0 0 1 8 0v4" stroke-linecap="round" />
-							</svg>
-						</span>
-					{/if}
-					<span
-						class="qmark"
-						title="The spacing between frames, expressed as a proportion of the frame length.
-E.g., a framehop of 1 produces contiguous frames, 0.50 produces frames with 50% overlap."
-					>
-						?
-					</span>
-				</span>
-				<input
-					type="number"
-					step="0.05"
-					min="0"
-					disabled={manifestLocked}
-					bind:value={settings.value.framehopProp}
-					oninput={() => settings.save()}
-				/>
-			</label>
 
 			<label>
 				<span class="label-text">Chunk length (s) <span class="qmark" title="The length of each chunk in seconds.">?</span></span>
@@ -709,7 +677,6 @@ Can produce very large log files."
 		gap: 0.3rem;
 	}
 
-	.label-text.locked,
 	legend.locked {
 		color: rgba(127, 127, 127, 0.9);
 	}

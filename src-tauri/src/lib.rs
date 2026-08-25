@@ -79,7 +79,6 @@ fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, S
 struct Manifest {
     modelname: String,
     classes_out: Option<Vec<String>>,
-    framehop_prop: Option<f64>,
 }
 
 // buzzdetect writes this into dir_out to record the settings that determine
@@ -104,11 +103,9 @@ fn read_manifest(dir_out: String) -> Result<Option<Manifest>, String> {
             .filter_map(|c| c.as_str().map(|s| s.to_string()))
             .collect()
     });
-    let framehop_prop = value.get("framehop_prop").and_then(|v| v.as_f64());
     Ok(Some(Manifest {
         modelname,
         classes_out,
-        framehop_prop,
     }))
 }
 
@@ -126,8 +123,6 @@ pub struct AnalysisSettings {
     analyzers_cpu: u32,
     #[serde(default)]
     analyzers_gpu: u32,
-    #[serde(default = "default_framehop_prop")]
-    framehop_prop: f64,
     #[serde(default)]
     n_streamers: Option<u32>,
     #[serde(default)]
@@ -145,9 +140,6 @@ fn default_chunklength() -> f64 {
 }
 fn default_analyzers_cpu() -> u32 {
     2
-}
-fn default_framehop_prop() -> f64 {
-    1.0
 }
 fn default_verbosity_print() -> String {
     "PROGRESS".into()
@@ -200,8 +192,6 @@ fn start_analysis(
         .arg(settings.analyzers_cpu.to_string())
         .arg("--analyzers_gpu")
         .arg(settings.analyzers_gpu.to_string())
-        .arg("--framehop_prop")
-        .arg(settings.framehop_prop.to_string())
         .arg("--verbosity_print")
         .arg(&settings.verbosity_print)
         .arg("--verbosity_log")
