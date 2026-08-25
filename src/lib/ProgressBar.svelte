@@ -64,7 +64,10 @@
 		background: repeating-linear-gradient(45deg, #3f8a43, #3f8a43 6px, #5fbf64 6px, #5fbf64 12px);
 	}
 
-	.bar.provisional .seg.done {
+	/* Interrupted work keeps its solid red — that state is worth reading at a
+	   glance even if discovery never finished. */
+	.bar.provisional .seg.done,
+	.bar.provisional .seg.active:not(.stopped) {
 		background: repeating-linear-gradient(45deg, #c99b3f, #c99b3f 6px, #dcb35f 6px, #dcb35f 12px);
 	}
 </style>
