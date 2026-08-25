@@ -32,7 +32,9 @@ On other distros, grab the [AppImage](https://github.com/LukeHearon/buzzdetect-2
 
 If you have an NVIDIA card, there are separate CUDA installers that run inference on the GPU — [Linux .deb](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux-CUDA.deb), [Linux AppImage](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux-CUDA.AppImage), [Windows](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Windows-CUDA.exe). They bundle the CUDA runtime, so you need a recent NVIDIA driver but no system CUDA install. Turing (GTX 16-series, RTX 20-series) and newer are supported.
 
-They're about a gigabyte, which is why they're separate rather than the default. Set GPU analyzers to 1 and CPU analyzers to 0 in Advanced settings to use the card. If a CUDA build can't reach your GPU it says so in the log and falls back to the CPU rather than pretending.
+They're about a gigabyte, which is why they're separate rather than the default. Set GPU analyzers to 1 and CPU analyzers to 0 in Advanced settings to use the card. The GPU analyzers setting only appears in builds whose engine can actually use one, and if a CUDA build can't reach your card it says so in the log and falls back to the CPU rather than pretending.
+
+On Apple Silicon the regular macOS build already has a GPU option — it runs the model on the GPU through CoreML, at full float32 precision, for a bit over 2x end to end. Nothing extra to install.
 
 The CUDA builds install alongside the regular ones rather than replacing them.
 

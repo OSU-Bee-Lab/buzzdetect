@@ -23,6 +23,8 @@
 	let hasAutoExpanded = false;
 	let hasStarted = $state(false);
 	let manifest = $state<Manifest | null>(null);
+	// Whether this build's engine has a GPU execution provider at all.
+	let gpuAvailable = $state(false);
 
 	const modelMismatch = $derived(
 		manifest !== null && manifest.modelname !== settings.value.modelname
@@ -52,6 +54,16 @@
 			const cancelled = run.stopping;
 			run.stop(!cancelled && e.payload.code !== 0 ? `engine exited with code ${e.payload.code}` : undefined);
 		});
+
+		invoke<boolean>('gpu_available')
+			.then((ok) => {
+				gpuAvailable = ok;
+				if (!ok && settings.value.analyzersGpu !== 0) {
+					settings.value.analyzersGpu = 0;
+					settings.save();
+				}
+			})
+			.catch(() => (gpuAvailable = false));
 
 		invoke<string[]>('list_models').then((list) => {
 			models = list;
@@ -374,6 +386,7 @@ Usually, 1 worker will efficiently use your system's resources, but try adding m
 				</span>
 				<input type="number" min="0" bind:value={settings.value.analyzersCpu} oninput={() => settings.save()} />
 			</label>
+			{#if gpuAvailable}
 			<label>
 				<span class="label-text">
 					GPU analyzers
@@ -387,6 +400,7 @@ If you're using GPU, you probably don't want any CPU analyzers."
 				</span>
 				<input type="number" min="0" bind:value={settings.value.analyzersGpu} oninput={() => settings.save()} />
 			</label>
+			{/if}
 			<label>
 				<span class="label-text">
 					Concurrent streamers

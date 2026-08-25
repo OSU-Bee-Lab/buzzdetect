@@ -118,6 +118,28 @@ fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, S
     Ok(out)
 }
 
+// Whether this build's engine can run a worker on a GPU. Written into the
+// payload at build time by scripts/build-engine.mjs, which asks the frozen
+// runtime itself -- the CPU installers carry a CPU-only onnxruntime, the CUDA
+// ones carry onnxruntime-gpu, and macOS gets CoreML either way. The frontend
+// uses it to hide the GPU analyzer control rather than offer a setting that
+// would quietly run on the CPU.
+#[tauri::command]
+fn gpu_available(app: AppHandle) -> Result<bool, String> {
+    let path = resolve_engine(&app)?.workdir.join("gpu-providers.json");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        // No payload means a checkout, where whatever is in engine/.venv
+        // decides. Offer the option and let the engine's own warning speak.
+        return Ok(true);
+    };
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(value
+        .get("gpu_providers")
+        .and_then(|p| p.as_array())
+        .map(|providers| !providers.is_empty())
+        .unwrap_or(false))
+}
+
 #[derive(Serialize, Clone)]
 struct Manifest {
     modelname: String,
@@ -413,6 +435,7 @@ pub fn run() {
             cancel_analysis,
             list_models,
             get_model_classes,
+            gpu_available,
             read_manifest
         ])
         .run(tauri::generate_context!())

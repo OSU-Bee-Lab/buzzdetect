@@ -25,7 +25,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, chmodSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, chmodSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -125,7 +125,24 @@ function assemblePayload() {
 		filter: (src) => !src.includes('__pycache__')
 	});
 
+	// What this build can actually accelerate on. The app reads it to decide
+	// whether to offer a GPU analyzer at all, rather than letting someone pick
+	// one that silently runs on the CPU. Asked of the venv that was just
+	// frozen, so it can't drift from what shipped.
+	const gpuProviders = JSON.parse(
+		execFileSync(
+			PYTHON,
+			['-c', 'import json,sys; sys.path.insert(0, "."); from src.inference.onnx import gpu_providers_available; print(json.dumps(gpu_providers_available()))'],
+			{ cwd: ENGINE, encoding: 'utf8' }
+		).trim()
+	);
+	writeFileSync(
+		join(OUT_PAYLOAD, 'gpu-providers.json'),
+		JSON.stringify({ gpu_providers: gpuProviders }, null, 2) + '\n'
+	);
+
 	console.log(`payload -> ${OUT_PAYLOAD}`);
+	console.log(`  gpu providers: ${gpuProviders.length ? gpuProviders.join(', ') : 'none (CPU only)'}`);
 	console.log(`  models: ${shipped.join(', ')}`);
 }
 

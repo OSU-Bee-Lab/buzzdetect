@@ -12,19 +12,34 @@ import sys
 
 import onnxruntime as ort
 
-# GPU providers worth trying, best first. onnxruntime falls back along the list
-# per-operator, so CPU is always appended as the backstop.
+# GPU providers worth trying, best first, with the options each needs.
+# onnxruntime falls back along the list per-operator, so CPU is always
+# appended as the backstop.
 #
-# CoreMLExecutionProvider is deliberately absent even though the macOS wheels
-# offer it: it can run the graph in fp16 on the Neural Engine, which would make
-# results depend on which machine and which worker type produced them. The
-# whole point of exporting these models was that they agree with the
-# TensorFlow originals to within float32 rounding, so a provider that quietly
-# changes precision isn't a trade worth making.
+# CoreML is pinned to ModelFormat=MLProgram deliberately. Measured on this
+# model (YAMNet trunk, 209 patches, Apple silicon):
+#
+#   CPU                                213 ms   reference
+#   CoreML, default NeuralNetwork       14 ms   embeddings off by 2.9e-2
+#   CoreML, MLProgram + CPUAndGPU       50 ms   embeddings off by 5.6e-6
+#
+# The default format is quicker still because it runs fp16 on the Neural
+# Engine, but 2.9e-2 is three hundred times our float32 parity budget -- results
+# would depend on which machine analysed them. MLProgram keeps fp32, runs on
+# the GPU via Metal, and stays within the same tolerance as the CPU-versus-
+# TensorFlow comparison the models were validated against, for a 4.3x win.
 GPU_PROVIDERS = (
-    'CUDAExecutionProvider',
-    'ROCMExecutionProvider',
+    ('CUDAExecutionProvider', {}),
+    ('ROCMExecutionProvider', {}),
+    ('CoreMLExecutionProvider', {'ModelFormat': 'MLProgram', 'MLComputeUnits': 'CPUAndGPU'}),
 )
+
+
+def gpu_providers_available():
+    """GPU execution providers this onnxruntime installation actually offers."""
+    available = ort.get_available_providers()
+    return [name for name, _ in GPU_PROVIDERS if name in available]
+
 
 _warned = False
 
@@ -41,27 +56,27 @@ def _warn_once(message):
 
 
 def providers_for(processor):
-    """Provider list to request for a worker running on `processor`."""
+    """(providers, options) to request for a worker running on `processor`."""
     if processor != 'GPU':
-        return ['CPUExecutionProvider']
+        return ['CPUExecutionProvider'], [{}]
 
     available = ort.get_available_providers()
-    for name in GPU_PROVIDERS:
+    for name, options in GPU_PROVIDERS:
         if name in available:
-            return [name, 'CPUExecutionProvider']
+            return [name, 'CPUExecutionProvider'], [dict(options), {}]
 
     _warn_once(
         'GPU processing was requested, but this onnxruntime installation has no '
         f'GPU execution provider (it offers: {", ".join(available)}). Install '
         'onnxruntime-gpu for CUDA. Running on CPU instead.'
     )
-    return ['CPUExecutionProvider']
+    return ['CPUExecutionProvider'], [{}]
 
 
 def make_session(path_onnx, processor):
     """Build an InferenceSession, and complain if it didn't get the GPU it asked for."""
-    requested = providers_for(processor)
-    session = ort.InferenceSession(path_onnx, providers=requested)
+    requested, options = providers_for(processor)
+    session = ort.InferenceSession(path_onnx, providers=requested, provider_options=options)
 
     if processor == 'GPU' and requested[0] != 'CPUExecutionProvider':
         got = session.get_providers()
