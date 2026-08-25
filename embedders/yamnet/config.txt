@@ -1,0 +1,1 @@
+{"embeddername": "yamnet", "framelength": 0.96, "samplerate": 16000, "n_embeddings": 1024}
