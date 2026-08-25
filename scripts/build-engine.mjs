@@ -85,20 +85,20 @@ function freeze() {
 function assemblePayload() {
 	rmSync(OUT_PAYLOAD, { recursive: true, force: true });
 
-	// Only the ONNX models: a tensorflow model directory would be dead weight
-	// in a bundle whose engine has no tensorflow to run it with. dereference
-	// because models/ is commonly a tree of symlinks during development.
-	const modelsSrc = join(ENGINE, 'models');
+	// The repo's own models/, not engine/models: the latter is whatever the
+	// developer happens to have locally -- often symlinks, often TensorFlow
+	// models this engine has no TensorFlow to run -- while models/ is the
+	// deliberate list of what ships. See models/README.md.
+	const modelsSrc = join(ROOT, 'models');
 	const modelsOut = join(OUT_PAYLOAD, 'models');
 	mkdirSync(modelsOut, { recursive: true });
-	const shipped = readdirSync(modelsSrc).filter((name) => {
-		if (!name.endsWith('_onnx')) return false;
-		return existsSync(join(modelsSrc, name, 'model.onnx'));
-	});
+	const shipped = readdirSync(modelsSrc).filter((name) =>
+		existsSync(join(modelsSrc, name, 'model.onnx'))
+	);
 	if (shipped.length === 0) {
 		throw new Error(
-			`no ONNX models found in ${modelsSrc}. Run ` +
-				`.venv/bin/python3 tools/onnxify_model.py <modelname> in engine/ first.`
+			`no ONNX models found in ${modelsSrc}. Convert one with ` +
+				`engine/tools/onnxify_model.py and copy it there; see models/README.md.`
 		);
 	}
 	for (const name of shipped) {
