@@ -20,12 +20,15 @@ jobs:
         include:
           # No universal macOS build: onnxruntime publishes no universal2
           # wheel, so PyInstaller can only freeze the engine for the arch it
-          # runs on. macos-14 is Apple silicon, macos-13 is Intel.
+          # runs on. macos-14 is Apple silicon, macos-15-intel is Intel --
+          # don't move that one back to macos-13, which GitHub has retired:
+          # the job doesn't fail, it queues forever, stranding rename-assets
+          # behind it.
           - platform: macos-14
             args: --bundles dmg,app
             triple: aarch64-apple-darwin
             engine_flags: ''
-          - platform: macos-13
+          - platform: macos-15-intel
             args: --bundles dmg,app
             triple: x86_64-apple-darwin
             engine_flags: ''
@@ -57,6 +60,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+
+      # A stock ubuntu runner has ~14GB free and a CUDA build wants more than
+      # that: the build venv unpacks ~5GB of nvidia wheels, PyInstaller stages
+      # a copy of everything it freezes, and cargo and the AppImage each want a
+      # few GB of their own. The v0.3.0 run died linking the Rust lib with
+      # ENOSPC. None of the toolchains removed here are used by this job.
+      - name: Free up disk space
+        if: startsWith(matrix.platform, 'ubuntu') && matrix.engine_flags != ''
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/local/lib/node_modules \
+            /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune --all --force || true
+          df -h /
 
       - name: Install Linux system dependencies
         if: startsWith(matrix.platform, 'ubuntu')

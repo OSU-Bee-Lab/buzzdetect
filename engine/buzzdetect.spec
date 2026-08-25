@@ -7,47 +7,55 @@ sidecar, so users don't need Python or a venv. Build it through
 pyinstaller directly -- that script creates the TF-free venv this expects and
 assembles the data payload that has to sit next to the binary.
 
-Two things this build deliberately does NOT contain:
+Three things this build deliberately does NOT contain:
 
 - TensorFlow. Only the ONNX models ship; see requirements-onnx.txt.
 - models/ and embedders/. buzzdetect loads those by reading .py files off disk
   at runtime (importlib.util.spec_from_file_location in src/inference), so
   freezing them in would be pointless -- they're shipped as a Tauri resource
   directory instead, and the app runs the binary with that as its cwd.
+- The NVIDIA runtime, on the CUDA build. See strip_nvidia() below.
 """
 
-import glob
 import os
-import site
 
 from PyInstaller.utils.hooks import collect_submodules
 
-# Set by scripts/build-engine.mjs --cuda. The CUDA build installs
-# onnxruntime-gpu plus the NVIDIA runtime as wheels (requirements-onnx-cuda.txt)
-# so the app doesn't need a system CUDA install.
-CUDA = os.environ.get('BUZZDETECT_CUDA') == '1'
 
+def is_nvidia(entry):
+    """Whether a PyInstaller TOC entry is a library from an nvidia-* wheel.
 
-def nvidia_libraries():
-    """Shared libraries from the nvidia-* wheels, flattened to the bundle root.
-
-    PyInstaller's onefile bootloader puts _MEIPASS on the library search path
-    but not its subdirectories, and onnxruntime's CUDA provider dlopen()s these
-    by soname (libcudnn.so.9 and friends). Keeping the nvidia/<component>/lib
-    layout would leave them unfindable, so they're flattened; the sonames are
-    distinct, so nothing collides.
+    Matched on the source path -- every one of them lives under
+    site-packages/nvidia/<component>/ -- rather than on the library name, so a
+    component we've never seen before is caught too.
     """
-    found = []
-    for site_packages in site.getsitepackages():
-        root = os.path.join(site_packages, 'nvidia')
-        if not os.path.isdir(root):
-            continue
-        for pattern in ('*/lib/*.so*', '*/lib/x64/*.lib', '*/bin/*.dll'):
-            for path in glob.glob(os.path.join(root, pattern)):
-                if os.path.isfile(path):
-                    found.append((path, '.'))
-    return found
+    source = entry[1]
+    if not source:
+        return False
+    parts = os.path.normpath(source).split(os.sep)
+    return 'nvidia' in parts and 'site-packages' in parts
 
+
+def strip_nvidia(binaries):
+    """Drop the CUDA runtime from the frozen executable.
+
+    The CUDA build installs onnxruntime-gpu plus the NVIDIA runtime as wheels
+    (requirements-onnx-cuda.txt) so the app needs no system CUDA -- but that is
+    ~2.5GB of shared libraries, and freezing them into a onefile executable
+    produces a single file no installer will take: makensis mmaps each input
+    whole and is 32-bit, so it aborts outright.
+
+    So they ship as loose files in the Tauri resource payload instead
+    (scripts/build-engine.mjs copies them to engine-payload/nvidia), and
+    src-tauri/src/lib.rs points the sidecar's loader at that directory when it
+    spawns it. Nothing here has to find them: onnxruntime dlopen()s them by
+    soname, which is what the loader search path is for.
+    """
+    kept = [entry for entry in binaries if not is_nvidia(entry)]
+    dropped = len(binaries) - len(kept)
+    print(f'buzzdetect.spec: excluded {dropped} NVIDIA runtime libraries '
+          f'(they ship in the payload, not the executable)')
+    return kept
 
 
 # src/stream/audio.py builds its driver map by listing src/stream/drivers and
@@ -63,25 +71,10 @@ hidden += [
     'embedders.yamnet_onnx.params',
 ]
 
-if CUDA:
-    binaries = nvidia_libraries()
-    # Fail here rather than ship a CUDA installer with no CUDA in it. Without
-    # this the build succeeds, the app runs, and the only symptom is a GPU
-    # analyzer quietly falling back to the CPU on the user's machine.
-    if not binaries:
-        raise SystemExit(
-            'CUDA build requested but no nvidia-* shared libraries were found. '
-            'Check that requirements-onnx-cuda.txt installed the cuda/cudnn '
-            'extras into this venv.'
-        )
-    print(f'buzzdetect.spec: bundling {len(binaries)} NVIDIA runtime libraries')
-else:
-    binaries = []
-
 a = Analysis(
     ['buzzdetect_cli.py'],
     pathex=['.'],
-    binaries=binaries,
+    binaries=[],
     datas=[],
     hiddenimports=hidden,
     hookspath=[],
@@ -103,6 +96,11 @@ a = Analysis(
     ],
     noarchive=False,
 )
+
+# PyInstaller pulls these in on its own by following onnxruntime_providers_*'s
+# NEEDED/import-table entries, so this runs unconditionally -- on the CPU build
+# there is simply nothing to drop.
+a.binaries = strip_nvidia(a.binaries)
 
 pyz = PYZ(a.pure)
 

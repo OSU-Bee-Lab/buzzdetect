@@ -25,8 +25,18 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, chmodSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	renameSync,
+	rmSync,
+	chmodSync,
+	statSync,
+	writeFileSync
+} from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -70,8 +80,7 @@ function freeze() {
 	rmSync(join(ENGINE, 'build'), { recursive: true, force: true });
 	rmSync(join(ENGINE, 'dist'), { recursive: true, force: true });
 	run(PYTHON, ['-m', 'PyInstaller', '--noconfirm', '--clean', 'buzzdetect.spec'], {
-		cwd: ENGINE,
-		env: { ...process.env, BUZZDETECT_CUDA: CUDA ? '1' : '0' }
+		cwd: ENGINE
 	});
 
 	const built = join(ENGINE, 'dist', IS_WINDOWS ? 'buzzdetect.exe' : 'buzzdetect');
@@ -79,10 +88,69 @@ function freeze() {
 
 	mkdirSync(OUT_BIN_DIR, { recursive: true });
 	const dest = join(OUT_BIN_DIR, `buzzdetect-${targetTriple()}${IS_WINDOWS ? '.exe' : ''}`);
-	cpSync(built, dest);
+	// Moved rather than copied, and PyInstaller's staging directory deleted
+	// right after: between them they were most of a CUDA build's disk
+	// footprint, and the Linux CI runner has under 14GB for the whole job.
+	rmSync(dest, { force: true });
+	renameSync(built, dest);
+	rmSync(join(ENGINE, 'build'), { recursive: true, force: true });
+	rmSync(join(ENGINE, 'dist'), { recursive: true, force: true });
 	if (!IS_WINDOWS) chmodSync(dest, 0o755);
-	console.log(`\nsidecar -> ${dest}`);
+	console.log(`\nsidecar -> ${dest} (${humanSize(dest)})`);
 	return dest;
+}
+
+/** Size of a file, for the build log. */
+function humanSize(path) {
+	const mb = statSync(path).size / 1024 / 1024;
+	return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
+}
+
+/**
+ * Copy the NVIDIA runtime out of the build venv and into the payload.
+ *
+ * buzzdetect.spec deliberately keeps these out of the frozen executable -- see
+ * strip_nvidia() there for why -- so they travel as loose files in the Tauri
+ * resource directory instead, and src-tauri/src/lib.rs puts that directory on
+ * the sidecar's library search path when it spawns it.
+ *
+ * Flattened into one directory: onnxruntime dlopen()s them by bare soname, so
+ * keeping the nvidia/<component>/lib layout would mean a search path entry per
+ * component. The sonames are distinct, so nothing collides.
+ */
+function copyNvidiaRuntime() {
+	const scan = [
+		'import glob, json, os, site',
+		'found = []',
+		'for sp in site.getsitepackages():',
+		"    root = os.path.join(sp, 'nvidia')",
+		'    if not os.path.isdir(root): continue',
+		"    for pattern in ('*/lib/*.so*', '*/bin/*.dll'):",
+		'        found += [p for p in glob.glob(os.path.join(root, pattern)) if os.path.isfile(p)]',
+		'print(json.dumps(found))'
+	].join('\n');
+	const libraries = JSON.parse(execFileSync(PYTHON, ['-c', scan], { encoding: 'utf8' }).trim());
+
+	// Fail here rather than ship a CUDA installer with no CUDA in it. Without
+	// this the build succeeds, the app runs, and the only symptom is a GPU
+	// analyzer quietly falling back to the CPU on the user's machine.
+	if (libraries.length === 0) {
+		throw new Error(
+			`CUDA build requested but no nvidia-* shared libraries were found in ${VENV}. ` +
+				'Check that requirements-onnx-cuda.txt installed the cuda/cudnn extras ' +
+				'into this venv.'
+		);
+	}
+
+	const out = join(OUT_PAYLOAD, 'nvidia');
+	mkdirSync(out, { recursive: true });
+	let bytes = 0;
+	for (const lib of libraries) {
+		cpSync(lib, join(out, basename(lib)), { dereference: true });
+		bytes += statSync(lib).size;
+	}
+	const gb = (bytes / 1024 / 1024 / 1024).toFixed(2);
+	console.log(`  nvidia runtime: ${libraries.length} libraries, ${gb} GB`);
 }
 
 function assemblePayload() {
@@ -124,6 +192,8 @@ function assemblePayload() {
 		dereference: true,
 		filter: (src) => !src.includes('__pycache__')
 	});
+
+	if (CUDA) copyNvidiaRuntime();
 
 	// What this build can actually accelerate on. The app reads it to decide
 	// whether to offer a GPU analyzer at all, rather than letting someone pick

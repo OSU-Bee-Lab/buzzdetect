@@ -284,6 +284,29 @@ fn start_analysis(
         cmd.arg("--stream_buffer_depth").arg(n.to_string());
     }
 
+    // The CUDA build's NVIDIA runtime ships as loose libraries in the payload
+    // rather than frozen into the sidecar -- 2.5GB in one file is more than
+    // makensis will bundle (see engine/buzzdetect.spec's strip_nvidia).
+    // onnxruntime dlopen()s them by bare soname, so the child needs that
+    // directory on its loader search path, and it has to be set here, in the
+    // environment the child is spawned with: both loaders read the variable
+    // once, at process start. Absent on the CPU builds, where there's no such
+    // directory to find.
+    let nvidia = engine.workdir.join("nvidia");
+    if nvidia.is_dir() {
+        let var_name = if cfg!(target_os = "windows") {
+            "PATH"
+        } else {
+            "LD_LIBRARY_PATH"
+        };
+        let inherited = std::env::var_os(var_name).unwrap_or_default();
+        let mut search = vec![nvidia];
+        search.extend(std::env::split_paths(&inherited));
+        if let Ok(joined) = std::env::join_paths(search) {
+            cmd.env(var_name, joined);
+        }
+    }
+
     // Its own process group, so cancel_analysis can signal the whole tree.
     // PyInstaller's onefile bootloader forks the real engine as a child of
     // itself, so the pid we get back here is a wrapper: killing just that pid
