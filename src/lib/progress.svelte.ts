@@ -12,9 +12,19 @@ export interface FileProgress {
 	dir: string; // parent dir of path ("" for files at the audio dir's root)
 	name: string;
 	status: FileStatus;
+	bytes: number; // file size from the discovery walk; 0 if unknown
 	duration: number; // full audio duration in seconds, once known
 	workSeconds: number; // seconds of audio actually needing analysis (duration minus any already-completed portion)
 	doneSeconds: number; // work completed so far, summed over finished chunks
+}
+
+// How one file (or a whole subtree) splits across the three bar segments:
+// green (analyzed by an earlier run), blue (analyzed this session), and the
+// gray remainder. total >= prior + done always.
+export interface Weights {
+	totalSeconds: number;
+	priorSeconds: number;
+	doneSeconds: number;
 }
 
 // A directory node in the audio tree, aggregated recursively from its
@@ -22,19 +32,24 @@ export interface FileProgress {
 // list and counts are complete; until then new files can still appear under
 // it and the bar is drawn provisionally (striped).
 //
-// A file's real work_seconds is only known once a streamer reaches it, so
-// `workSeconds` covers visited files only. `estWorkSeconds` additionally
-// charges each not-yet-visited file the mean work of the files seen so far,
-// which keeps the percentage roughly stable across the run instead of having
-// it collapse every time a new file's duration lands in the denominator.
-export interface TreeDir {
+// The weights are partly estimated: a file's duration is only known once a
+// streamer opens it, so files still queued — and files skipped without ever
+// being opened — are charged a duration extrapolated from their byte size
+// (see estimateDuration). Every visited file contributes its real numbers,
+// so a dir's remaining seconds are exact except for the files nothing has
+// opened yet.
+// A file as the tree hands it to the UI: its own progress plus the segment
+// weights the bar is drawn from, resolved once per tree build.
+export interface FileNode extends FileProgress {
+	weights: Weights;
+}
+
+export interface TreeDir extends Weights {
 	path: string;
 	name: string;
 	dirs: TreeDir[];
-	files: FileProgress[];
+	files: FileNode[];
 	workSeconds: number;
-	estWorkSeconds: number;
-	doneSeconds: number;
 	filesTotal: number;
 	filesDone: number;
 	finalized: boolean;
@@ -52,6 +67,50 @@ function nameOf(path: string): string {
 
 function statusRank(s: FileStatus): number {
 	return s === 'running' ? 0 : s === 'pending' ? 1 : 2;
+}
+
+function extOf(path: string): string {
+	const idx = path.lastIndexOf('.');
+	return idx === -1 ? '' : path.slice(idx + 1).toLowerCase();
+}
+
+// Seconds of audio per byte, pooled over the files already opened this run,
+// keyed by extension (a fixed-bitrate codec makes this near-exact; the '' key
+// pools every extension as a fallback for a codec nothing has opened yet).
+interface Weighting {
+	scale: Map<string, { seconds: number; bytes: number }>;
+	meanDuration: number; // over opened files; 0 before any file is opened
+}
+
+function estimateDuration(f: FileProgress, w: Weighting): number {
+	const pooled = w.scale.get(extOf(f.path)) ?? w.scale.get('');
+	if (f.bytes > 0 && pooled && pooled.bytes > 0) {
+		return (f.bytes * pooled.seconds) / pooled.bytes;
+	}
+	// No size for this file, or nothing opened yet to calibrate against: fall
+	// back to the mean duration so far, then to weighting files equally.
+	return w.meanDuration > 0 ? w.meanDuration : 1;
+}
+
+// Splits one file across the bar's segments. A visited file reports its own
+// exact numbers; anything else is estimated from size. A skipped file counts
+// as entirely analyzed-already: the engine only skips files whose results are
+// complete (or that it can't analyze at all, which won't progress either way).
+function fileWeights(f: FileProgress, w: Weighting): Weights {
+	if (f.status === 'running' || f.status === 'done') {
+		const totalSeconds = f.duration > 0 ? f.duration : f.workSeconds;
+		return {
+			totalSeconds,
+			priorSeconds: Math.max(0, totalSeconds - f.workSeconds),
+			doneSeconds: f.doneSeconds
+		};
+	}
+	const totalSeconds = f.duration > 0 ? f.duration : estimateDuration(f, w);
+	return {
+		totalSeconds,
+		priorSeconds: f.status === 'skipped' ? totalSeconds : 0,
+		doneSeconds: 0
+	};
 }
 
 interface MutableNode {
@@ -99,29 +158,32 @@ class AnalysisRun {
 		}
 
 		const discoveryDone = this.discoveryDone;
-		const meanWork = this.meanKnownWork;
+		const weighting = this.weighting;
 		const build = (node: MutableNode): TreeDir => {
 			const dirs = [...node.dirs.values()].map(build).sort((a, b) => a.name.localeCompare(b.name));
-			const files = [...node.files].sort(
-				(a, b) => statusRank(a.status) - statusRank(b.status) || a.name.localeCompare(b.name)
-			);
+			const files: FileNode[] = [...node.files]
+				.sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.name.localeCompare(b.name))
+				.map((f) => ({ ...f, weights: fileWeights(f, weighting) }));
 
 			let workSeconds = 0;
-			let estWorkSeconds = 0;
+			let totalSeconds = 0;
+			let priorSeconds = 0;
 			let doneSeconds = 0;
 			let filesTotal = 0;
 			let filesDone = 0;
 			for (const d of dirs) {
 				workSeconds += d.workSeconds;
-				estWorkSeconds += d.estWorkSeconds;
+				totalSeconds += d.totalSeconds;
+				priorSeconds += d.priorSeconds;
 				doneSeconds += d.doneSeconds;
 				filesTotal += d.filesTotal;
 				filesDone += d.filesDone;
 			}
 			for (const f of files) {
 				workSeconds += f.workSeconds;
-				estWorkSeconds += f.status === 'pending' ? meanWork : f.workSeconds;
-				doneSeconds += f.doneSeconds;
+				totalSeconds += f.weights.totalSeconds;
+				priorSeconds += f.weights.priorSeconds;
+				doneSeconds += f.weights.doneSeconds;
 				filesTotal += 1;
 				if (f.status === 'done' || f.status === 'skipped') filesDone += 1;
 			}
@@ -132,7 +194,8 @@ class AnalysisRun {
 				dirs,
 				files,
 				workSeconds,
-				estWorkSeconds,
+				totalSeconds,
+				priorSeconds,
 				doneSeconds,
 				filesTotal,
 				filesDone,
@@ -143,19 +206,32 @@ class AnalysisRun {
 		return build(root);
 	}
 
-	// Mean work_seconds over the files a streamer has already reached, used to
-	// charge not-yet-visited files a plausible weight. Skipped files are
-	// excluded: their zero work says nothing about the files still queued.
-	private get meanKnownWork(): number {
-		let total = 0;
+	// Calibrates size -> duration from the files already opened this run, so
+	// files nothing has opened can be weighted by their byte size.
+	private get weighting(): Weighting {
+		const scale: Weighting['scale'] = new Map();
+		let durations = 0;
 		let n = 0;
+		const add = (key: string, seconds: number, bytes: number) => {
+			const pooled = scale.get(key);
+			if (pooled) {
+				pooled.seconds += seconds;
+				pooled.bytes += bytes;
+			} else {
+				scale.set(key, { seconds, bytes });
+			}
+		};
 		for (const f of this.files.values()) {
-			if (f.status === 'running' || f.status === 'done') {
-				total += f.workSeconds;
-				n += 1;
+			if (f.status !== 'running' && f.status !== 'done') continue;
+			if (f.duration <= 0) continue;
+			durations += f.duration;
+			n += 1;
+			if (f.bytes > 0) {
+				add(extOf(f.path), f.duration, f.bytes);
+				add('', f.duration, f.bytes);
 			}
 		}
-		return n === 0 ? 0 : total / n;
+		return { scale, meanDuration: n === 0 ? 0 : durations / n };
 	}
 
 	get totals(): { workSeconds: number; doneSeconds: number; filesDone: number; filesTotal: number } {
@@ -220,19 +296,21 @@ class AnalysisRun {
 		switch (payload.event) {
 			case 'manifest': {
 				const files = new Map(this.files);
-				for (const path of payload.paths as string[]) {
+				const sizes = (payload.bytes ?? []) as number[];
+				(payload.paths as string[]).forEach((path, i) => {
 					if (!files.has(path)) {
 						files.set(path, {
 							path,
 							dir: dirOf(path),
 							name: nameOf(path),
 							status: 'pending',
+							bytes: sizes[i] ?? 0,
 							duration: 0,
 							workSeconds: 0,
 							doneSeconds: 0
 						});
 					}
-				}
+				});
 				this.files = files;
 				break;
 			}
@@ -248,6 +326,7 @@ class AnalysisRun {
 					dir: dirOf(payload.path),
 					name: nameOf(payload.path),
 					status: 'skipped',
+					bytes: existing?.bytes ?? 0,
 					duration: existing?.duration ?? 0,
 					workSeconds: 0,
 					doneSeconds: 0
@@ -262,6 +341,7 @@ class AnalysisRun {
 					dir: dirOf(payload.path),
 					name: nameOf(payload.path),
 					status: 'running',
+					bytes: files.get(payload.path)?.bytes ?? 0,
 					duration: payload.duration,
 					workSeconds: payload.work_seconds,
 					doneSeconds: 0

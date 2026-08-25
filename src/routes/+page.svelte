@@ -6,6 +6,7 @@
 	import { run, type TreeDir } from '$lib/progress.svelte';
 	import { settings, LOGLEVELS } from '$lib/settings.svelte';
 	import DirRow from '$lib/DirRow.svelte';
+	import ProgressBar from '$lib/ProgressBar.svelte';
 
 	interface Manifest {
 		modelname: string;
@@ -518,9 +519,7 @@ Can produce very large log files."
 		{#if run.error}
 			<p class="error">{run.error}</p>
 		{/if}
-		<div class="overall-bar" class:provisional={!run.denominatorFinal}>
-			<div class="fill" style="width: {pct(tree.doneSeconds, tree.estWorkSeconds)}%"></div>
-		</div>
+		<ProgressBar weights={tree} provisional={!run.denominatorFinal} large />
 
 		<div class="tree-toolbar">
 			<button
@@ -546,13 +545,14 @@ Can produce very large log files."
 
 		<div class="tree">
 			{#each tree.files as f (f.path)}
-				{@const filePct = f.status === 'skipped' ? 100 : pct(f.doneSeconds, f.workSeconds || f.duration || 1)}
+				{@const w = f.weights}
+				{@const filePct = pct(w.priorSeconds + w.doneSeconds, w.totalSeconds)}
 				{@const fileDone = f.status === 'done' || f.status === 'skipped'}
 				<div class="tree-row">
 					<div class="row static" class:done={fileDone}>
 						<span class="disclosure"></span>
 						<span class="name">{f.name}</span>
-						<span class="bar"><span class="fill" style="width: {filePct}%"></span></span>
+						<ProgressBar weights={w} />
 						<span class="count">{fileDone ? '✓' : `${filePct}%`}</span>
 					</div>
 				</div>
@@ -828,27 +828,6 @@ Can produce very large log files."
 		font-variant-numeric: tabular-nums;
 	}
 
-	.overall-bar {
-		position: relative;
-		height: 1rem;
-		border-radius: 6px;
-		background: rgba(127, 127, 127, 0.2);
-		overflow: hidden;
-		flex-shrink: 0;
-	}
-
-	.overall-bar .fill {
-		position: absolute;
-		inset: 0;
-		width: 0;
-		background: #4c8dff;
-		transition: width 0.2s ease;
-	}
-
-	.overall-bar.provisional .fill {
-		background: repeating-linear-gradient(45deg, #c99b3f, #c99b3f 6px, #dcb35f 6px, #dcb35f 12px);
-	}
-
 	.tree {
 		flex: 1;
 		min-height: 0;
@@ -892,28 +871,9 @@ Can produce very large log files."
 		min-width: 0;
 	}
 
-	.row .bar {
-		position: relative;
-		height: 0.5rem;
-		border-radius: 4px;
-		background: rgba(127, 127, 127, 0.25);
-		overflow: hidden;
-	}
-
-	.row .bar .fill {
-		position: absolute;
-		inset: 0;
-		width: 0;
-		background: #4c8dff;
-	}
-
 	.row.done {
 		background: rgba(76, 141, 255, 0.16);
 		border-radius: 6px;
-	}
-
-	.row.done .bar .fill {
-		background: #4caf50;
 	}
 
 	.row .count {
