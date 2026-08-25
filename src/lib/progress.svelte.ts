@@ -7,8 +7,14 @@
 
 export type FileStatus = 'pending' | 'running' | 'done' | 'skipped';
 
-// Trailing window the realtime rate (and therefore the ETA) averages over.
+// Trailing window the displayed realtime rate averages over, and the longer
+// one the ETA uses so it doesn't chase every fluctuation in throughput.
 const RATE_WINDOW_MS = 30_000;
+const ETA_WINDOW_MS = 300_000;
+// How often the clock driving rate/ETA advances, and the minimum spacing
+// between retained samples (bounding the buffer over the ETA window).
+const TICK_MS = 2_000;
+const SAMPLE_MS = 1_000;
 
 const UNITS: { label: string; seconds: number }[] = [
 	{ label: 'day', seconds: 86400 },
@@ -305,11 +311,15 @@ class AnalysisRun {
 	// window ends at `now`, not at the last event, so a stall decays the rate
 	// instead of freezing it at the last burst.
 	get rate(): number {
+		return this.rateOver(RATE_WINDOW_MS);
+	}
+
+	private rateOver(windowMs: number): number {
 		if (this.rateSamples.length < 2) return 0;
 		const now = Math.max(this.now, this.rateSamples[this.rateSamples.length - 1].t);
-		const cutoff = now - RATE_WINDOW_MS;
+		const cutoff = now - windowMs;
 		// Baseline: the newest sample at or before the window start, so the
-		// window covers the full RATE_WINDOW_MS even when events are sparse.
+		// window covers the full span even when events are sparse.
 		let first = this.rateSamples[0];
 		for (const s of this.rateSamples) {
 			if (s.t > cutoff) break;
@@ -334,12 +344,15 @@ class AnalysisRun {
 		const t = this.tree;
 		const analyzed = t.doneSeconds + t.activeSeconds;
 		const remainingSeconds = Math.max(0, t.totalSeconds - t.priorSeconds - analyzed);
-		const rate = this.rate;
+		// The ETA runs off a much longer window than the displayed rate: it's a
+		// projection over the whole remaining run, so a momentary spike or dip
+		// in throughput shouldn't swing it.
+		const etaRate = this.rateOver(ETA_WINDOW_MS);
 		return {
 			priorSeconds: t.priorSeconds,
 			remainingSeconds,
-			rate,
-			etaSeconds: rate > 0 ? remainingSeconds / rate : null
+			rate: this.rate,
+			etaSeconds: etaRate > 0 ? remainingSeconds / etaRate : null
 		};
 	}
 
@@ -355,7 +368,7 @@ class AnalysisRun {
 		this.startedAt = now;
 		this.running = true;
 		if (this.ticker === null && typeof setInterval === 'function') {
-			this.ticker = setInterval(() => (this.now = Date.now()), 1000);
+			this.ticker = setInterval(() => (this.now = Date.now()), TICK_MS);
 		}
 	}
 
@@ -372,10 +385,16 @@ class AnalysisRun {
 	private touchRate() {
 		const now = Date.now();
 		this.now = now;
-		const samples = [...this.rateSamples, { t: now, doneSeconds: this.totals.doneSeconds }];
+		const sample = { t: now, doneSeconds: this.totals.doneSeconds };
+		const samples = [...this.rateSamples];
+		// Chunks can land many times a second; collapse those into one sample
+		// per SAMPLE_MS so the buffer stays small over the ETA window.
+		const last = samples[samples.length - 1];
+		if (last && now - last.t < SAMPLE_MS && samples.length > 1) samples[samples.length - 1] = sample;
+		else samples.push(sample);
 		// Drop samples that fall entirely out of the trailing window, keeping
 		// one baseline before it so the rate covers the whole window.
-		const cutoff = now - RATE_WINDOW_MS;
+		const cutoff = now - ETA_WINDOW_MS;
 		while (samples.length > 2 && samples[1].t <= cutoff) samples.shift();
 		this.rateSamples = samples;
 	}

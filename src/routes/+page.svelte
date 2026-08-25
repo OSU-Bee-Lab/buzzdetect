@@ -512,16 +512,22 @@ Can produce very large log files."
 		</div>
 		{#if hasStarted}
 			{@const s = run.stats}
+			<!-- Stacked rows with a fixed-width label column: values change
+			     length constantly, so nothing may share a line with them. -->
 			<dl class="stats">
-				{#if s.rate > 0}
-					<div><dt>Rate:</dt> <dd>{s.rate.toFixed(1)}x realtime</dd></div>
+				{#if run.running}
+					<!-- Kept in place with a placeholder until the first samples
+					     land, so the rows below don't jump once they do. -->
+					<dt>Rate:</dt>
+					<dd>{s.rate > 0 ? `${s.rate.toFixed(1)}x realtime` : '—'}</dd>
+					<dt>ETA:</dt>
+					<dd>{s.etaSeconds === null ? '—' : formatDuration(s.etaSeconds)}</dd>
 				{/if}
-				<div><dt>Audio remaining:</dt> <dd>{formatDuration(s.remainingSeconds)}</dd></div>
-				{#if run.running && s.etaSeconds !== null}
-					<div><dt>ETA:</dt> <dd>{formatDuration(s.etaSeconds)}</dd></div>
-				{/if}
+				<dt>Audio remaining:</dt>
+				<dd>{formatDuration(s.remainingSeconds)}</dd>
 				{#if s.priorSeconds > 0}
-					<div><dt>Previously analyzed:</dt> <dd>{formatDuration(s.priorSeconds)}</dd></div>
+					<dt>Previously analyzed:</dt>
+					<dd>{formatDuration(s.priorSeconds)}</dd>
 				{/if}
 			</dl>
 		{/if}
@@ -839,18 +845,15 @@ Can produce very large log files."
 	}
 
 	.stats {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem 1.25rem;
+		display: grid;
+		/* Fixed label column: "Previously analyzed:" is the longest label, so
+		   rows keep their positions whether or not it is shown. */
+		grid-template-columns: 11em minmax(0, 1fr);
+		gap: 0.15rem 0.5rem;
 		margin: -0.5rem 0 0;
 		font-size: 0.85rem;
 		opacity: 0.7;
 		font-variant-numeric: tabular-nums;
-	}
-
-	.stats div {
-		display: flex;
-		gap: 0.35rem;
 	}
 
 	.stats dd {
