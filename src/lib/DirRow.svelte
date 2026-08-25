@@ -36,7 +36,7 @@
 	<button class="row" onclick={toggle}>
 		<span class="disclosure">{isOpen ? '▾' : '▸'}</span>
 		<span class="name">{node.name}</span>
-		<ProgressBar weights={node} provisional={!node.finalized} stopped={run.stopped} />
+		<ProgressBar weights={node} provisional={!node.finalized} />
 		{#if isDone}
 			<span class="count check" class:session={bySession}>✓</span>
 		{:else}
@@ -56,11 +56,14 @@
 			<div class="row static">
 				<span class="disclosure"></span>
 				<span class="name">{f.name}</span>
-				<ProgressBar weights={w} stopped={run.stopped} />
+				<ProgressBar weights={w} />
 				{#if f.status === 'done' || f.status === 'skipped'}
 					<span class="count check" class:session={f.status === 'done'}>✓</span>
 				{:else}
-					<span class="count">{filePct}%</span>
+					<!-- Red marks a file the run left part-analyzed. -->
+					<span class="count" class:interrupted={run.stopped && f.status === 'running'}
+						>{filePct}%</span
+					>
 				{/if}
 			</div>
 		</div>
@@ -120,5 +123,10 @@
 
 	.count.check.session {
 		color: #4c8dff;
+	}
+
+	.count.interrupted {
+		opacity: 1;
+		color: #e05a4f;
 	}
 </style>

@@ -537,7 +537,7 @@ Can produce very large log files."
 		{#if run.error}
 			<p class="error">{run.error}</p>
 		{/if}
-		<ProgressBar weights={tree} provisional={!run.denominatorFinal} stopped={run.stopped} large />
+		<ProgressBar weights={tree} provisional={!run.denominatorFinal} large />
 
 		<div class="tree-toolbar">
 			<button
@@ -569,11 +569,14 @@ Can produce very large log files."
 					<div class="row static">
 						<span class="disclosure"></span>
 						<span class="name">{f.name}</span>
-						<ProgressBar weights={w} stopped={run.stopped} />
+						<ProgressBar weights={w} />
 						{#if f.status === 'done' || f.status === 'skipped'}
 							<span class="count check" class:session={f.status === 'done'}>✓</span>
 						{:else}
-							<span class="count">{filePct}%</span>
+							<!-- Red marks a file the run left part-analyzed. -->
+							<span class="count" class:interrupted={run.stopped && f.status === 'running'}
+								>{filePct}%</span
+							>
 						{/if}
 					</div>
 				</div>
@@ -910,6 +913,11 @@ Can produce very large log files."
 
 	.row .count.check.session {
 		color: #4c8dff;
+	}
+
+	.row .count.interrupted {
+		opacity: 1;
+		color: #e05a4f;
 	}
 
 	.row .count {
