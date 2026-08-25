@@ -201,6 +201,7 @@
 					chunklength: settings.value.chunklength,
 					analyzers_cpu: settings.value.analyzersCpu,
 					analyzers_gpu: settings.value.analyzersGpu,
+					gpu_fp16: settings.value.gpuFp16,
 					n_streamers: settings.value.nStreamers,
 					stream_buffer_depth: settings.value.streamBufferDepth,
 					verbosity_print: settings.value.verbosityPrint,
@@ -400,6 +401,30 @@ If you're using GPU, you probably don't want any CPU analyzers."
 				</span>
 				<input type="number" min="0" bind:value={settings.value.analyzersGpu} oninput={() => settings.save()} />
 			</label>
+
+			<label class="checkbox-setting">
+				<input
+					type="checkbox"
+					bind:checked={settings.value.gpuFp16}
+					onchange={() => settings.save()}
+				/>
+				<span class="label-text">
+					Reduced precision (fp16)
+					<span
+						class="qmark"
+						title="Runs the model at half precision on the GPU, which is faster but shifts activations by roughly 0.03 against a full-precision run.
+Results from a reduced-precision run are not directly comparable with full-precision ones near a detection threshold. Currently affects Apple GPUs only."
+					>
+						?
+					</span>
+				</span>
+			</label>
+			{#if settings.value.gpuFp16}
+				<p class="hint warn">
+					Half precision shifts activations by about 0.03. Fine for scores that sit well clear
+					of your threshold, but don't mix these results with full-precision ones.
+				</p>
+			{/if}
 			{/if}
 			<label>
 				<span class="label-text">
@@ -833,6 +858,22 @@ Can produce very large log files."
 	.hint {
 		opacity: 0.6;
 		font-size: 0.85rem;
+	}
+
+	.hint.warn {
+		opacity: 0.9;
+		color: #c98a2b;
+		margin: -0.25rem 0 0.25rem;
+	}
+
+	.checkbox-setting {
+		flex-direction: row;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.checkbox-setting input {
+		width: auto;
 	}
 
 	.run {

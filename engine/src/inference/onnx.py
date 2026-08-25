@@ -8,6 +8,7 @@ nothing in the logs to say the GPU worker never touched the GPU. This module
 exists so that failure is loud instead.
 """
 
+import os
 import sys
 
 import onnxruntime as ort
@@ -33,6 +34,30 @@ GPU_PROVIDERS = (
     ('ROCMExecutionProvider', {}),
     ('CoreMLExecutionProvider', {'ModelFormat': 'MLProgram', 'MLComputeUnits': 'CPUAndGPU'}),
 )
+
+# Set to '1' to let a GPU provider drop to reduced precision. Deliberately an
+# environment variable rather than an analysis parameter: it changes nothing
+# about the result schema, so it doesn't belong in the manifest, and the
+# desktop app sets it per run from a checkbox.
+ENV_ALLOW_FP16 = 'BUZZDETECT_GPU_FP16'
+
+# Options that let CoreML use the Neural Engine, which is fp16-only. Roughly
+# 3.5x quicker than the fp32 MLProgram path on the same hardware.
+COREML_FP16 = {'MLComputeUnits': 'ALL'}
+
+
+def allow_fp16():
+    return os.environ.get(ENV_ALLOW_FP16) == '1'
+
+
+def fp16_supported(provider):
+    """Whether reduced precision does anything for this provider.
+
+    Only CoreML, for now. The CUDA and ROCm providers take precision from the
+    model's own dtype, so running them in fp16 would mean shipping an fp16
+    export rather than flipping a runtime switch.
+    """
+    return provider == 'CoreMLExecutionProvider'
 
 
 def gpu_providers_available():
@@ -62,8 +87,19 @@ def providers_for(processor):
 
     available = ort.get_available_providers()
     for name, options in GPU_PROVIDERS:
-        if name in available:
-            return [name, 'CPUExecutionProvider'], [dict(options), {}]
+        if name not in available:
+            continue
+        options = dict(options)
+        if allow_fp16() and fp16_supported(name):
+            # Drops ModelFormat too: the fp32 guarantee lives in MLProgram, and
+            # the default NeuralNetwork format is what reaches the ANE.
+            options = dict(COREML_FP16)
+            _warn_once(
+                f'{name} is running in reduced precision (fp16) by request. '
+                'Activations shift by ~3e-2 against the fp32 reference, so '
+                'results are not comparable with fp32 output at the margins.'
+            )
+        return [name, 'CPUExecutionProvider'], [options, {}]
 
     _warn_once(
         'GPU processing was requested, but this onnxruntime installation has no '

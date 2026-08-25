@@ -189,6 +189,8 @@ pub struct AnalysisSettings {
     #[serde(default)]
     analyzers_gpu: u32,
     #[serde(default)]
+    gpu_fp16: bool,
+    #[serde(default)]
     n_streamers: Option<u32>,
     #[serde(default)]
     stream_buffer_depth: Option<u32>,
@@ -267,6 +269,10 @@ fn start_analysis(
         // Unbuffer Python's stdout so BDPROGRESS lines arrive as they're
         // printed rather than sitting in a pipe buffer until it fills.
         .env("PYTHONUNBUFFERED", "1")
+        // Reduced precision is a runtime property of the GPU session, not part
+        // of the result schema, so it travels as an environment variable rather
+        // than a CLI argument (see engine/src/inference/onnx.py).
+        .env("BUZZDETECT_GPU_FP16", if settings.gpu_fp16 { "1" } else { "0" })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

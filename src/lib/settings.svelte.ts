@@ -16,6 +16,7 @@ export interface Settings {
 	chunklength: number;
 	analyzersCpu: number;
 	analyzersGpu: number;
+	gpuFp16: boolean;
 	nStreamers: number | null;
 	streamBufferDepth: number | null;
 	verbosityPrint: string;
@@ -35,6 +36,7 @@ function defaults(): Settings {
 		chunklength: 200,
 		analyzersCpu: 2,
 		analyzersGpu: 0,
+		gpuFp16: false,
 		nStreamers: null,
 		streamBufferDepth: null,
 		verbosityPrint: 'PROGRESS',
