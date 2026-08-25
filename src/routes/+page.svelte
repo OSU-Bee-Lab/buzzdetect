@@ -23,7 +23,10 @@
 	let hasStarted = $state(false);
 	let manifest = $state<Manifest | null>(null);
 
-	const manifestLocked = $derived(manifest !== null);
+	const modelMismatch = $derived(
+		manifest !== null && manifest.modelname !== settings.value.modelname
+	);
+	const manifestLocked = $derived(manifest !== null && !modelMismatch);
 
 	function startResize(e: PointerEvent) {
 		resizing = true;
@@ -72,10 +75,12 @@
 		}
 	});
 
-	// buzzdetect locks schema-defining settings (model, output classes,
-	// framehop) to match an output folder's existing manifest, so a resumed
-	// run can't silently write incompatible results into it — see
-	// buzzdetect_gui.py's _apply_manifest_lock, which this mirrors.
+	// buzzdetect locks schema-defining settings (output classes, framehop) to
+	// match an output folder's existing manifest, so a resumed run can't
+	// silently write incompatible results into it — see buzzdetect_gui.py's
+	// _apply_manifest_lock, which this mirrors. The model itself is never
+	// forced to match; a mismatch is surfaced as an error instead (see
+	// modelMismatch), since forcing it out from under the user is surprising.
 	async function checkManifest() {
 		if (!settings.value.dirOut) {
 			manifest = null;
@@ -86,11 +91,7 @@
 		} catch {
 			manifest = null;
 		}
-		if (!manifest) return;
-		if (models.includes(manifest.modelname) && settings.value.modelname !== manifest.modelname) {
-			settings.value.modelname = manifest.modelname;
-			await onModelChange();
-		}
+		if (!manifest || manifest.modelname !== settings.value.modelname) return;
 		if (manifest.classes_out) settings.value.classesOut = manifest.classes_out;
 		if (manifest.framehop_prop !== null) settings.value.framehopProp = manifest.framehop_prop;
 		settings.save();
@@ -214,11 +215,15 @@
 	<section class="settings">
 		<h2>Settings</h2>
 
-		{#if manifestLocked}
+		{#if modelMismatch}
+			<p class="error">
+				Results have already been written to this output folder with model "{manifest?.modelname}".
+				Select that model to continue, or choose a different output folder.
+			</p>
+		{:else if manifestLocked}
 			<p class="warning">
-				Results have already been written to this output folder. Model, output classes, and framehop
-				are locked to match existing results. Choose a different output folder to use different
-				settings.
+				Results have already been written to this output folder. Output classes and framehop are
+				locked to match existing results. Choose a different output folder to use different settings.
 			</p>
 		{/if}
 
@@ -226,8 +231,13 @@
 			Model
 			<select
 				bind:value={settings.value.modelname}
-				disabled={manifestLocked}
 				onchange={() => {
+					if (manifest) {
+						// Changing model away from a results folder's existing
+						// manifest can't be reconciled in place, so fall back to
+						// the new model's default output dir instead.
+						settings.value.dirOutTouched = false;
+					}
 					onModelChange();
 					settings.save();
 				}}
@@ -385,7 +395,8 @@ Can produce very large log files."
 						onclick={start}
 						disabled={!settings.value.dirAudio ||
 							!settings.value.modelname ||
-							settings.value.classesOut.length === 0}>Start Analysis</button
+							settings.value.classesOut.length === 0 ||
+							modelMismatch}>Start Analysis</button
 					>
 				{/if}
 			{/if}
