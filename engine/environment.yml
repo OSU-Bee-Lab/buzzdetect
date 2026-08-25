@@ -1,0 +1,15 @@
+name: buzzdetect
+channels:
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+    - tensorflow>=2.16
+    - librosa
+    - soundfile
+    - pandas
+    - numpy
+    - matplotlib
+    - customtkinter
+    - av

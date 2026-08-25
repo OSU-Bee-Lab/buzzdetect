@@ -1,0 +1,1 @@
+{"framehop_prop": 0.096, "event_overlap_prop": 0.2}

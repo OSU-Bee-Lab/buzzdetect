@@ -1,0 +1,7 @@
+This project includes code derived from YAMNet (https://github.com/tensorflow/models/tree/master/research/audioset/yamnet),
+licensed under the Apache License, Version 2.0.
+
+Modifications:
+The YAMNet model weights and analysis code were used to build YAMNet, remove the final, classification layer, and save this embedding version to embedders/yamnet
+
+The original license is included in LICENSES/YAMNet-LICENSE.
