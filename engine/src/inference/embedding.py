@@ -25,6 +25,9 @@ class BaseEmbedder(ABC):
         self.framehop_prop = framehop_prop
         self.framehop_s = self.framelength_s * framehop_prop
         self.model = None
+        # Set by the model before initialize(); 'CPU' or 'GPU'. Embedders that
+        # can act on it (the onnx ones) use it to pick an execution provider.
+        self.processor = 'CPU'
 
     @abstractmethod
     def initialize(self):

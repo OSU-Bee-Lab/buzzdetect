@@ -35,9 +35,11 @@ class WorkerInferer:
         try:
             import tensorflow as tf
         except ImportError:
-            if self.processor == 'GPU':
-                self.log("GPU processing requires tensorflow; using CPU", 'WARNING')
-                self.processor = 'CPU'
+            # Nothing to manage: without tensorflow the model is an ONNX one,
+            # and onnxruntime does its own device placement. Deliberately does
+            # not downgrade GPU to CPU -- that decision belongs to
+            # src/inference/onnx.py, which can tell whether a GPU execution
+            # provider is actually available and says so if it isn't.
             self.log(f"processing on {self.processor}", 'INFO')
             return
 
@@ -94,6 +96,8 @@ class WorkerInferer:
     def run(self):
         self.log('launching', 'INFO')
         self._managememory()
+        # After _managememory, which may have downgraded GPU to CPU.
+        self.model.processor = self.processor
         self.model.initialize()
 
         self.timer_bottleneck.restart()

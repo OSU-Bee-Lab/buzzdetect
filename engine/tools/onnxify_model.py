@@ -31,10 +31,10 @@ TOL = 1e-4
 TEMPLATE_MODEL_PY = '''import os
 
 import numpy as np
-import onnxruntime as ort
 
 import src.config as cfg
 from src.inference.models import BaseModel
+from src.inference.onnx import make_session
 
 
 class {classname}(BaseModel):
@@ -45,11 +45,10 @@ class {classname}(BaseModel):
     digits_results = {digits_results}
 
     def initialize(self):
+        self.embedder.processor = self.processor
         self.embedder.initialize()
         dir_model = os.path.abspath(os.path.join(cfg.DIR_MODELS, self.modelname))
-        self.model = ort.InferenceSession(
-            os.path.join(dir_model, 'model.onnx'),
-            providers=['CPUExecutionProvider'])
+        self.model = make_session(os.path.join(dir_model, 'model.onnx'), self.processor)
         self.name_in = self.model.get_inputs()[0].name
 
     def predict(self, audiosamples):

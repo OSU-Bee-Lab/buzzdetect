@@ -1,9 +1,9 @@
 import os
 
 import numpy as np
-import onnxruntime as ort
 
 from src.inference.embedding import BaseEmbedder
+from src.inference.onnx import make_session
 from embedders.yamnet_onnx import features
 from embedders.yamnet_onnx.params import Params
 
@@ -40,8 +40,7 @@ class EmbedderYamnetOnnx(BaseEmbedder):
     def initialize(self):
         curdir = os.path.dirname(os.path.realpath(__file__))
         path_onnx = os.path.join(curdir, 'yamnet.onnx')
-        self.model = ort.InferenceSession(
-            path_onnx, providers=['CPUExecutionProvider'])
+        self.model = make_session(path_onnx, self.processor)
         self.name_in = self.model.get_inputs()[0].name
 
     def embed(self, audio):

@@ -22,6 +22,8 @@ class BaseModel(ABC):
         """Initialize model
         """
         self.model = None
+        # Set by WorkerInferer before initialize(); 'CPU' or 'GPU'.
+        self.processor = 'CPU'
         self.embedder: BaseEmbedder = load_embedder(embeddername=self.embeddername, framehop_prop=framehop_prop, initialize=False)
 
         with open(os.path.join(cfg.DIR_MODELS, self.modelname, 'config_model.json'), 'r') as f:
