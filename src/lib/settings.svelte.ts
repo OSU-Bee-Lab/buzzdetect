@@ -43,12 +43,26 @@ function defaults(): Settings {
 	};
 }
 
+function isAbsolutePath(path: string): boolean {
+	return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
+}
+
 function load(): Settings {
 	if (typeof localStorage === 'undefined') return defaults();
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) return defaults();
-		return { ...defaults(), ...JSON.parse(raw) };
+		const stored: Settings = { ...defaults(), ...JSON.parse(raw) };
+		// Earlier builds defaulted dirOut to a relative path. The engine
+		// resolves those against its own working directory, which in an
+		// installed app is a read-only directory inside the bundle, so a
+		// carried-over relative path fails with a permission error. Drop it
+		// and let the current default be re-derived.
+		if (stored.dirOut && !isAbsolutePath(stored.dirOut)) {
+			stored.dirOut = '';
+			stored.dirOutTouched = false;
+		}
+		return stored;
 	} catch {
 		return defaults();
 	}

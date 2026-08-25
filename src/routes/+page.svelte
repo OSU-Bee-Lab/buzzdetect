@@ -2,6 +2,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { open } from '@tauri-apps/plugin-dialog';
+	import { documentDir, join } from '@tauri-apps/api/path';
 	import { onMount } from 'svelte';
 	import { run, formatDuration, type TreeDir } from '$lib/progress.svelte';
 	import { settings, LOGLEVELS } from '$lib/settings.svelte';
@@ -96,12 +97,20 @@
 		settings.save();
 	}
 
+	// Where results go when the user hasn't chosen somewhere themselves. Has
+	// to be an absolute path in a writable location: the engine resolves
+	// relative paths against its own working directory, which in an installed
+	// build is the read-only resource directory inside the app bundle.
+	async function defaultDirOut(modelname: string): Promise<string> {
+		return await join(await documentDir(), 'buzzdetect', modelname);
+	}
+
 	// Re-derive the class list whenever the model changes, and auto-fill
-	// dirOut to the model's output dir unless the user has typed their own.
+	// dirOut to a per-model results folder unless the user has picked their own.
 	async function onModelChange() {
 		if (!settings.value.modelname) return;
 		if (!settings.value.dirOutTouched) {
-			settings.value.dirOut = `models/${settings.value.modelname}/output`;
+			settings.value.dirOut = await defaultDirOut(settings.value.modelname);
 			await checkManifest();
 		}
 		try {
@@ -223,11 +232,11 @@
 		return Math.min(100, Math.floor((done / total) * 100));
 	}
 
-	function resetDirOut() {
+	async function resetDirOut() {
 		if (!settings.value.modelname) return;
 		settings.value.dirOutTouched = false;
-		settings.value.dirOut = `models/${settings.value.modelname}/output`;
-		checkManifest();
+		settings.value.dirOut = await defaultDirOut(settings.value.modelname);
+		await checkManifest();
 		settings.save();
 	}
 
