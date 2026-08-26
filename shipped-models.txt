@@ -1,0 +1,20 @@
+# Models the desktop app ships with.
+#
+# One model name per line, naming a directory in engine/models/. Blank lines
+# and lines starting with # are ignored. scripts/build-engine.mjs reads this
+# file and copies each named directory into the app bundle's engine payload;
+# everything else in engine/models/ stays local.
+#
+# engine/models/ is the single model directory. The engine reads it directly
+# when run from a checkout -- by hand, or by the desktop app in dev mode -- so
+# a model you test with is the same directory that ships. This file is the only
+# thing that separates the two.
+#
+# A shipped model must be an ONNX build: it needs a model.onnx, and its
+# model.py must not import TensorFlow, which the frozen sidecar does not carry
+# (see engine/buzzdetect.spec's excludes). The build fails rather than ships if
+# a name here does not meet that. Convert a TensorFlow model first --
+# buzzdetect-training's tools/export_onnx.py does it, checking the ONNX build
+# against the TensorFlow original and refusing to write a mismatch.
+
+model_general_v3

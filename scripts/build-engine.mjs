@@ -28,6 +28,7 @@ import { execFileSync } from 'node:child_process';
 import {
 	cpSync,
 	existsSync,
+	readFileSync,
 	mkdirSync,
 	readdirSync,
 	renameSync,
@@ -42,7 +43,35 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENGINE = join(ROOT, 'engine');
 
+const SHIPLIST = 'shipped-models.txt';
+
+// What a shipped model directory consists of. model.onnx and model.py are
+// required (checked below); the CSVs are carried for whoever reads the results
+// and are copied when present. Notably absent: the TensorFlow weights, which
+// the sidecar has no TensorFlow to run.
+const MODEL_FILES = [
+	'model.onnx',
+	'model.py',
+	'config_model.json',
+	'translation.csv',
+	'weights.csv'
+];
+
 const CUDA = process.argv.includes('--cuda');
+
+/** Names from shipped-models.txt: one per line, # comments and blanks ignored. */
+function readShippedModels() {
+	const path = join(ROOT, SHIPLIST);
+	if (!existsSync(path)) throw new Error(`no ${SHIPLIST} at ${path}`);
+	const names = readFileSync(path, 'utf8')
+		.split('\n')
+		.map((line) => line.replace(/#.*$/, '').trim())
+		.filter((line) => line.length > 0);
+	if (names.length === 0) {
+		throw new Error(`${SHIPLIST} names no models, so the bundle would ship none.`);
+	}
+	return names;
+}
 const REQUIREMENTS = join(ENGINE, CUDA ? 'requirements-onnx-cuda.txt' : 'requirements-onnx.txt');
 // Separate venvs: onnxruntime and onnxruntime-gpu install the same module and
 // cannot coexist, so sharing one would silently freeze whichever was installed
@@ -156,27 +185,44 @@ function copyNvidiaRuntime() {
 function assemblePayload() {
 	rmSync(OUT_PAYLOAD, { recursive: true, force: true });
 
-	// The repo's own models/, not engine/models: the latter is whatever the
-	// developer happens to have locally -- often symlinks, often TensorFlow
-	// models this engine has no TensorFlow to run -- while models/ is the
-	// deliberate list of what ships. See models/README.md.
-	const modelsSrc = join(ROOT, 'models');
+	// engine/models/ is the only model directory -- what the engine reads from
+	// a checkout is what ships. shipped-models.txt is the whole difference
+	// between a model that's merely present and one that goes in the bundle,
+	// so adding a model to a release is editing one line rather than copying
+	// files between directories.
+	const modelsSrc = join(ENGINE, 'models');
 	const modelsOut = join(OUT_PAYLOAD, 'models');
 	mkdirSync(modelsOut, { recursive: true });
-	const shipped = readdirSync(modelsSrc).filter((name) =>
-		existsSync(join(modelsSrc, name, 'model.onnx'))
-	);
-	if (shipped.length === 0) {
-		throw new Error(
-			`no ONNX models found in ${modelsSrc}. Convert one with ` +
-				`engine/tools/onnxify_model.py and copy it there; see models/README.md.`
-		);
-	}
+
+	const shipped = readShippedModels();
 	for (const name of shipped) {
-		cpSync(join(modelsSrc, name), join(modelsOut, name), {
-			recursive: true,
-			dereference: true
-		});
+		const dir = join(modelsSrc, name);
+		if (!existsSync(dir)) {
+			throw new Error(
+				`${SHIPLIST} names '${name}', which is not in ${modelsSrc}.`
+			);
+		}
+		// The sidecar has no TensorFlow (buzzdetect.spec excludes it), so a
+		// TensorFlow model here would build a bundle that fails at analysis
+		// time on the user's machine rather than here.
+		if (!existsSync(join(dir, 'model.onnx'))) {
+			throw new Error(
+				`${SHIPLIST} names '${name}', which has no model.onnx. Only ONNX ` +
+					`builds can ship; convert it with buzzdetect-training's ` +
+					`tools/export_onnx.py.`
+			);
+		}
+		// An allowlist, not the directory. engine/models/ is a working
+		// directory: a model there sits next to its analysis output, its
+		// tests, its training history and its TensorFlow weights, none of
+		// which the bundle can use and one of which (output/) routinely runs
+		// to tens of gigabytes. Copy only the files the engine reads.
+		const dirOut = join(modelsOut, name);
+		mkdirSync(dirOut, { recursive: true });
+		for (const file of MODEL_FILES) {
+			const from = join(dir, file);
+			if (existsSync(from)) cpSync(from, join(dirOut, file), { dereference: true });
+		}
 	}
 
 	cpSync(join(ENGINE, 'embedders', 'yamnet_onnx'), join(OUT_PAYLOAD, 'embedders', 'yamnet_onnx'), {
