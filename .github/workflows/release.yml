@@ -191,58 +191,60 @@ jobs:
             \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.zip' \) \
             -exec ls -lh {} + 2>/dev/null || true
 
-  # Publishes copies of the installers under names a user can recognise, since
-  # the raw ones carry version and arch strings that mean nothing to someone
-  # just trying to download the app.
+  # Renames the installers to something a user can recognise: the raw ones
+  # carry version and arch strings that mean nothing to someone just trying to
+  # download the app. This renames in place via the asset API rather than
+  # re-uploading under a second name -- a copy would leave two of every
+  # installer on the release, and the CUDA zip alone is 1.8GB to round-trip.
   rename-assets:
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Publish user-friendly copies of release assets
+      - name: Rename release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           TAG="${{ inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           REPO="${{ github.repository }}"
           RELEASE_ID=$(gh api "repos/${REPO}/releases" --paginate \
             --jq ".[] | select(.tag_name == \"$TAG\") | .id")
 
-          # Has to go through the authenticated asset API rather than
-          # browser_download_url: the release is still a draft here, and an
-          # unauthenticated fetch of a draft asset quietly returns a tiny
-          # "Not Found" body that would then be published under the friendly
-          # name. The size floor below is the backstop for that.
-          copy_asset() {
+          assets=$(gh api "repos/${REPO}/releases/${RELEASE_ID}/assets" --paginate)
+
+          rename_asset() {
             local from="$1"
             local to="$2"
             local id
-            id=$(gh api "repos/${REPO}/releases/${RELEASE_ID}/assets" --paginate \
-              --jq ".[] | select(.name == \"$from\") | .id")
+            id=$(jq -r ".[] | select(.name == \"$from\") | .id" <<<"$assets")
             if [ -z "$id" ]; then
+              # Already renamed by an earlier run of this job, or the matrix
+              # job that produces it failed; either way there is nothing to do.
               echo "Skipped (not found): $from"
               return
             fi
-            gh api -H 'Accept: application/octet-stream' \
-              "repos/${REPO}/releases/assets/${id}" > "$to"
-            local size
-            size=$(stat -c%s "$to")
-            if [ "$size" -lt 10000000 ]; then
-              echo "Downloaded $from is only ${size} bytes - refusing to publish $to" >&2
-              exit 1
+            # An asset left over under the target name from a previous run
+            # would make the rename collide, so clear it first.
+            local existing
+            existing=$(jq -r ".[] | select(.name == \"$to\") | .id" <<<"$assets")
+            if [ -n "$existing" ]; then
+              gh api -X DELETE "repos/${REPO}/releases/assets/${existing}"
+              echo "Deleted stale: $to"
             fi
-            gh release upload "$TAG" "$to" -R "$REPO" --clobber
-            echo "Published: $from -> $to (${size} bytes)"
+            gh api -X PATCH "repos/${REPO}/releases/assets/${id}" \
+              -f name="$to" > /dev/null
+            echo "Renamed: $from -> $to"
           }
 
-          copy_asset "buzzdetect2_${VERSION}_aarch64.dmg"   "buzzdetect2-macOS-AppleSilicon.dmg"
-          copy_asset "buzzdetect2_${VERSION}_x64.dmg"       "buzzdetect2-macOS-Intel.dmg"
-          copy_asset "buzzdetect2_${VERSION}_amd64.AppImage" "buzzdetect2-Linux.AppImage"
-          copy_asset "buzzdetect2_${VERSION}_amd64.deb"      "buzzdetect2-Linux.deb"
-          copy_asset "buzzdetect2_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows.exe"
+          rename_asset "buzzdetect2_${VERSION}_aarch64.dmg"   "buzzdetect2-macOS-AppleSilicon.dmg"
+          rename_asset "buzzdetect2_${VERSION}_x64.dmg"       "buzzdetect2-macOS-Intel.dmg"
+          rename_asset "buzzdetect2_${VERSION}_amd64.AppImage" "buzzdetect2-Linux.AppImage"
+          rename_asset "buzzdetect2_${VERSION}_amd64.deb"      "buzzdetect2-Linux.deb"
+          rename_asset "buzzdetect2_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows.exe"
 
           # Windows is the only bundled-CUDA build, and it ships as a portable
           # archive rather than an installer; see the matrix comments for why.
-          copy_asset "buzzdetect2-cuda_${VERSION}_windows-x64.zip"  "buzzdetect2-Windows-CUDA.zip"
+          rename_asset "buzzdetect2-cuda_${VERSION}_windows-x64.zip"  "buzzdetect2-Windows-CUDA.zip"
