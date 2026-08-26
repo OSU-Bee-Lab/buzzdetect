@@ -149,6 +149,14 @@ def main():
 
     args = parser.parse_args()
 
+    # First sign of life a host GUI gets. Everything before this point is
+    # interpreter startup (several seconds for the frozen sidecar, which
+    # unpacks itself first) and everything just after is the import of
+    # onnxruntime/tensorflow, so without it the GUI has nothing to say for the
+    # slowest stretch of a run's startup.
+    from src.pipeline.progress_json import emit_progress
+    emit_progress('stage', name='starting')
+
     from src.analyze import analyze
 
     # Handle classes_out: argparse with nargs='*' yields a list; collapse the "all" sentinel.

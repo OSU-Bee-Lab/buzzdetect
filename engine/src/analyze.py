@@ -372,6 +372,10 @@ class Analyzer:
         """Execute the complete analysis workflow."""
         self._log_startup()
         self._launch_logger()
+        # The walk below, and the manifest check before it, can take a while on
+        # a large or network-mounted audio directory. Say so rather than
+        # leaving a host GUI on 'starting'.
+        emit_progress('stage', name='scanning')
         self._cleanup_finalframe_files()
 
         if not self._check_manifest():
@@ -388,6 +392,11 @@ class Analyzer:
         for _ in range(self.coordinator.streamers_total):
             self.coordinator.q_stream.put('exit')
 
+        # Each analyzer builds its own inference session as it starts, which
+        # is the last slow step before the first chunk lands: a cold CoreML or
+        # CUDA session can take tens of seconds. WorkerInferer moves the stage
+        # on to 'analyzing' once one is ready.
+        emit_progress('stage', name='loading')
         self._launch_writer()
         self._launch_streamers()
         self._launch_analyzers()

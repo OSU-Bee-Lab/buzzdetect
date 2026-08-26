@@ -101,6 +101,10 @@ class WorkerInferer:
         # After _managememory, which may have downgraded GPU to CPU.
         self.model.processor = self.processor
         self.model.initialize()
+        # The session is built, so this worker is ready for its first chunk.
+        # Emitted per analyzer; a host GUI is expected to treat the stage as
+        # monotonic and ignore the repeats.
+        emit_progress('stage', name='analyzing', processor=self.processor)
 
         self.timer_bottleneck.restart()
         while True:

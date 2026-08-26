@@ -7,6 +7,24 @@
 
 export type FileStatus = 'pending' | 'running' | 'done' | 'skipped';
 
+// Startup stages, in the order the engine passes through them. Between
+// clicking Start and the first chunk landing there can be the better part of a
+// minute — the sidecar unpacking itself, onnxruntime importing, the audio tree
+// being walked, an inference session being built — and all of it used to read
+// as one undifferentiated "Analyzing…". 'launching' is the frontend's own:
+// it covers the stretch before the engine has said anything at all.
+export type Stage = 'launching' | 'starting' | 'scanning' | 'loading' | 'analyzing';
+
+const STAGE_ORDER: Stage[] = ['launching', 'starting', 'scanning', 'loading', 'analyzing'];
+
+const STAGE_LABELS: Record<Stage, string> = {
+	launching: 'Launching engine…',
+	starting: 'Starting engine…',
+	scanning: 'Finding audio files…',
+	loading: 'Loading model…',
+	analyzing: 'Analyzing…'
+};
+
 // Trailing window the displayed realtime rate averages over, and the longer
 // one the ETA uses so it doesn't chase every fluctuation in throughput.
 const RATE_WINDOW_MS = 30_000;
@@ -191,6 +209,10 @@ class AnalysisRun {
 	// going to (manifest_done). Before that, the file list itself is
 	// incomplete, on top of individual files' work not yet being known.
 	discoveryDone = $state(false);
+	// How far through startup the engine has reported getting. Only ever
+	// advances: 'analyzing' is emitted once per analyzer, and a second
+	// analyzer coming up must not drag the header back a step.
+	stage = $state<Stage>('launching');
 	// Rolling audio-seconds-processed samples, used to compute a live
 	// realtime-multiple rate instead of an average since the run started
 	// (which would understate current speed after a slow startup). Not $state:
@@ -315,6 +337,10 @@ class AnalysisRun {
 		return { workSeconds, doneSeconds, filesDone, filesTotal };
 	}
 
+	get stageLabel(): string {
+		return STAGE_LABELS[this.stage];
+	}
+
 	// Whether the file list is complete — see TreeDir.finalized.
 	get denominatorFinal(): boolean {
 		return this.discoveryDone;
@@ -381,6 +407,7 @@ class AnalysisRun {
 		this.stopped = false;
 		this.stopping = false;
 		this.discoveryDone = false;
+		this.stage = 'launching';
 		const now = Date.now();
 		this.now = now;
 		this.rateSamples = [{ t: now, doneSeconds: 0 }];
@@ -437,6 +464,12 @@ class AnalysisRun {
 
 	handleEvent(payload: any) {
 		switch (payload.event) {
+			case 'stage': {
+				const next = payload.name as Stage;
+				const rank = STAGE_ORDER.indexOf(next);
+				if (rank > STAGE_ORDER.indexOf(this.stage)) this.stage = next;
+				break;
+			}
 			case 'manifest': {
 				const files = new Map(this.files);
 				const sizes = (payload.bytes ?? []) as number[];

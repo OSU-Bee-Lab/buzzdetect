@@ -107,6 +107,37 @@
 		}
 	});
 
+	// The log pane follows new lines only while the user is already at the
+	// bottom; scrolling up to read something has to pin the view there, or the
+	// next report yanks it away. `logStick` is deliberately not $state — it's
+	// read inside the effect below, and making it reactive would re-run the
+	// effect (and re-scroll) every time a scroll event flipped it.
+	let logPre = $state<HTMLPreElement | null>(null);
+	let logDetails = $state<HTMLDetailsElement | null>(null);
+	let logStick = true;
+	// Slack rather than an exact match: momentum scrolling and sub-pixel
+	// layout leave the bottom a pixel or two short of exact.
+	const LOG_STICK_SLOP = 24;
+
+	function onLogScroll() {
+		if (!logPre) return;
+		logStick = logPre.scrollHeight - logPre.scrollTop - logPre.clientHeight <= LOG_STICK_SLOP;
+	}
+
+	function scrollLogToBottom() {
+		if (!logPre) return;
+		logStick = true;
+		logPre.scrollTop = logPre.scrollHeight;
+	}
+
+	// Runs after the DOM has been updated with the new lines, so scrollHeight
+	// already accounts for them.
+	$effect(() => {
+		run.logLines.length;
+		if (!logPre || !logDetails?.open || !logStick) return;
+		logPre.scrollTop = logPre.scrollHeight;
+	});
+
 	// buzzdetect locks schema-defining settings (output classes) to
 	// match an output folder's existing manifest, so a resumed run can't
 	// silently write incompatible results into it — see buzzdetect_gui.py's
@@ -281,9 +312,48 @@
 
 	const tree = $derived(run.tree);
 	const missingDirs = $derived(!settings.value.dirAudio || !settings.value.dirOut);
+
+	// Tauri's WKWebView doesn't render native `title` tooltips on hover, so
+	// `[data-tooltip]` elements are shown via this single fixed-position
+	// tooltip instead. Fixed positioning (rather than a CSS ::after anchored
+	// to the element) is required so the tooltip can escape the settings
+	// panel's `overflow-x: hidden`, which would otherwise clip it.
+	let tooltipText = $state<string | null>(null);
+	let tooltipX = $state(0);
+	let tooltipY = $state(0);
+	let tooltipMaxWidth = $state(352);
+
+	function showTooltip(e: Event) {
+		const target = (e.target as HTMLElement).closest<HTMLElement>('[data-tooltip]');
+		if (!target) return;
+		const text = target.getAttribute('data-tooltip');
+		if (!text) return;
+		const rect = target.getBoundingClientRect();
+		tooltipText = text;
+		// Anchored to the icon's left edge (not centered) so the tooltip never
+		// needs to spill past the left edge of the window; `tooltipMaxWidth`
+		// shrinks to whatever room remains so it can't overflow the right
+		// edge either.
+		tooltipX = Math.max(rect.left, 12);
+		tooltipY = rect.top - 6;
+		tooltipMaxWidth = Math.min(352, window.innerWidth - tooltipX - 12);
+	}
+
+	function hideTooltip(e: Event) {
+		const related = (e as FocusEvent).relatedTarget as HTMLElement | null;
+		if (related?.closest('[data-tooltip]')) return;
+		tooltipText = null;
+	}
 </script>
 
-<main class="app">
+<!-- svelte-ignore a11y_mouse_events_have_key_events -->
+<main class="app" onmouseover={showTooltip} onmouseout={hideTooltip} onfocusin={showTooltip} onfocusout={hideTooltip}>
+{#if tooltipText}
+	<div
+		class="tooltip-popup"
+		style="left: {tooltipX}px; top: {tooltipY}px; max-width: {tooltipMaxWidth}px;"
+	>{tooltipText}</div>
+{/if}
 <div class="panels" style="grid-template-columns: {settingsWidth}px 6px 1fr">
 	<section class="settings">
 		<h2>Settings</h2>
@@ -297,7 +367,7 @@
 		{/if}
 
 		<label>
-			<span class="label-text">Model <span class="qmark" title="Select a model to use for analysis.">?</span></span>
+			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span></span>
 			<select
 				bind:value={settings.value.modelname}
 				onchange={() => {
@@ -317,7 +387,7 @@
 			</select>
 		</label>
 		<label>
-			<span class="label-text">Audio directory <span class="qmark" title="Input folder containing audio files to analyze.">?</span></span>
+			<span class="label-text">Audio directory <span class="qmark" data-tooltip="Input folder containing audio files to analyze.">?</span></span>
 			<span class="path-row">
 				<input
 					bind:value={settings.value.dirAudio}
@@ -328,14 +398,14 @@
 			</span>
 		</label>
 		<label>
-			<span class="label-text">Output directory <span class="qmark" title="Output folder for analysis results.">?</span></span>
+			<span class="label-text">Output directory <span class="qmark" data-tooltip="Output folder for analysis results.">?</span></span>
 			<span class="path-row">
 				<input bind:value={settings.value.dirOut} oninput={onDirOutInput} />
 				<button type="button" onclick={browseDirOut}>Browse…</button>
 				<button
 					type="button"
 					class="icon-btn"
-					title="Reset to the model's default output folder"
+					data-tooltip="Reset to the model's default output folder"
 					onclick={resetDirOut}
 					aria-label="Reset output directory"
 				>
@@ -357,7 +427,7 @@
 				<legend class:locked={manifestLocked}>
 					Classes to output
 					{#if manifestLocked}
-						<span class="lock-icon" title="Locked to match existing results in this output folder">
+						<span class="lock-icon" data-tooltip="Locked to match existing results in this output folder">
 							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
 								<rect x="5" y="11" width="14" height="9" rx="1.5" />
 								<path d="M8 11V7a4 4 0 0 1 8 0v4" stroke-linecap="round" />
@@ -387,7 +457,7 @@
 			</fieldset>
 
 			<label>
-				<span class="label-text">Chunk length (s) <span class="qmark" title="The length of each chunk in seconds.">?</span></span>
+				<span class="label-text">Chunk length (s) <span class="qmark" data-tooltip="The length of each chunk in seconds.">?</span></span>
 				<input type="number" min="1" bind:value={settings.value.chunklength} oninput={() => settings.save()} />
 			</label>
 			<label>
@@ -395,7 +465,7 @@
 					CPU analyzers
 					<span
 						class="qmark"
-						title="The number of CPU-based workers to launch.
+						data-tooltip="The number of CPU-based workers to launch.
 Usually, 1 worker will efficiently use your system's resources, but try adding more."
 					>
 						?
@@ -414,7 +484,7 @@ Usually, 1 worker will efficiently use your system's resources, but try adding m
 					GPU analyzers
 					<span
 						class="qmark"
-						title="The number of GPU-based workers to launch.
+						data-tooltip="The number of GPU-based workers to launch.
 If you're using GPU, you probably don't want any CPU analyzers."
 					>
 						?
@@ -444,26 +514,20 @@ If you're using GPU, you probably don't want any CPU analyzers."
 					Reduced precision (fp16)
 					<span
 						class="qmark"
-						title="Runs the model at half precision on the GPU, which is faster but shifts activations by roughly 0.03 against a full-precision run.
+						data-tooltip="Runs the model at half precision on the GPU, which is faster but shifts activations by roughly 0.03 against a full-precision run.
 Results from a reduced-precision run are not directly comparable with full-precision ones near a detection threshold. Currently affects Apple GPUs only."
 					>
 						?
 					</span>
 				</span>
 			</label>
-			{#if gpu.usable && settings.value.gpuFp16}
-				<p class="hint warn">
-					Half precision shifts activations by about 0.03. Fine for scores that sit well clear
-					of your threshold, but don't mix these results with full-precision ones.
-				</p>
-			{/if}
 			{/if}
 			<label>
 				<span class="label-text">
 					Concurrent streamers
 					<span
 						class="qmark"
-						title="How many parallel audio streamers should be launched?
+						data-tooltip="How many parallel audio streamers should be launched?
 If you run into buffer bottlenecks, try increasing this number.
 Leave blank for automatic assignment."
 					>
@@ -487,7 +551,7 @@ Leave blank for automatic assignment."
 					Stream buffer depth
 					<span
 						class="qmark"
-						title="How many audio chunks should be buffered in memory?
+						data-tooltip="How many audio chunks should be buffered in memory?
 Leave blank for automatic assignment."
 					>
 						?
@@ -506,7 +570,7 @@ Leave blank for automatic assignment."
 				/>
 			</label>
 			<label>
-				<span class="label-text">Console verbosity <span class="qmark" title="How verbose should the console output be?">?</span></span>
+				<span class="label-text">Console verbosity <span class="qmark" data-tooltip="How verbose should the console output be?">?</span></span>
 				<select bind:value={settings.value.verbosityPrint} onchange={() => settings.save()}>
 					{#each LOGLEVELS as lvl}
 						<option value={lvl}>{lvl}</option>
@@ -514,7 +578,7 @@ Leave blank for automatic assignment."
 				</select>
 			</label>
 			<label>
-				<span class="label-text">Log file verbosity <span class="qmark" title="How verbose should the log file output be?">?</span></span>
+				<span class="label-text">Log file verbosity <span class="qmark" data-tooltip="How verbose should the log file output be?">?</span></span>
 				<select bind:value={settings.value.verbosityLog} onchange={() => settings.save()}>
 					{#each LOGLEVELS as lvl}
 						<option value={lvl}>{lvl}</option>
@@ -526,7 +590,7 @@ Leave blank for automatic assignment."
 				Log progress statements to file
 				<span
 					class="qmark"
-					title="Should progress statements (e.g., reports from analyzers) be written to the log file?
+					data-tooltip="Should progress statements (e.g., reports from analyzers) be written to the log file?
 Can produce very large log files."
 				>
 					?
@@ -566,26 +630,32 @@ Can produce very large log files."
 
 	<section class="run">
 		<div class="header">
-			<h2>{run.stopping ? 'Stopping…' : run.running ? 'Analyzing…' : run.stopped ? 'Stopped' : 'Ready'}</h2>
+			<h2>
+				{run.stopping
+					? 'Stopping…'
+					: run.running
+						? run.stageLabel
+						: run.stopped
+							? 'Stopped'
+							: 'Ready'}
+			</h2>
 		</div>
 		{#if hasStarted}
 			{@const s = run.stats}
 			<!-- Stacked rows with a fixed-width label column: values change
 			     length constantly, so nothing may share a line with them. -->
 			<dl class="stats">
+				<!-- Rate and ETA are kept in place with a placeholder until the
+				     first samples land, so the rows don't jump once they do. -->
 				{#if run.running}
-					<!-- Kept in place with a placeholder until the first samples
-					     land, so the rows below don't jump once they do. -->
 					<dt>Rate:</dt>
 					<dd>{s.rate > 0 ? `${s.rate.toFixed(1)}x realtime` : '—'}</dd>
-					<dt>ETA:</dt>
-					<dd>{s.etaSeconds === null ? '—' : formatDuration(s.etaSeconds)}</dd>
 				{/if}
 				<dt>Audio remaining:</dt>
 				<dd>{formatDuration(s.remainingSeconds)}</dd>
-				{#if s.priorSeconds > 0}
-					<dt>Previously analyzed:</dt>
-					<dd>{formatDuration(s.priorSeconds)}</dd>
+				{#if run.running}
+					<dt>ETA:</dt>
+					<dd>{s.etaSeconds === null ? '—' : formatDuration(s.etaSeconds)}</dd>
 				{/if}
 			</dl>
 		{/if}
@@ -601,7 +671,7 @@ Can produce very large log files."
 			<button
 				type="button"
 				class="icon-btn"
-				title={allExpanded ? 'Collapse All' : 'Expand All'}
+				data-tooltip={allExpanded ? 'Collapse All' : 'Expand All'}
 				aria-label={allExpanded ? 'Collapse All' : 'Expand All'}
 				onclick={toggleExpandAll}
 			>
@@ -644,9 +714,9 @@ Can produce very large log files."
 			{/each}
 		</div>
 
-		<details class="log">
+		<details class="log" bind:this={logDetails} ontoggle={scrollLogToBottom}>
 			<summary>Log ({run.logLines.length})</summary>
-			<pre>{run.logLines.join('\n')}</pre>
+			<pre bind:this={logPre} onscroll={onLogScroll}>{run.logLines.join('\n')}</pre>
 		</details>
 
 		{#if run.running}
@@ -754,6 +824,22 @@ Can produce very large log files."
 		opacity: 0.75;
 		cursor: help;
 		vertical-align: middle;
+	}
+
+	.tooltip-popup {
+		position: fixed;
+		transform: translateY(-100%);
+		width: max-content;
+		white-space: pre-line;
+		background: #2a2a2a;
+		color: #fff;
+		font-size: 0.75rem;
+		line-height: 1.35;
+		padding: 0.4rem 0.6rem;
+		border-radius: 4px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+		pointer-events: none;
+		z-index: 1000;
 	}
 
 	.lock-icon {
