@@ -1,4 +1,7 @@
 tensorflow>=2.16
+# Floor set by the model.keras files in models/: a model.keras carries the
+# schema of the Keras that wrote it, and an older Keras refuses to load it.
+keras>=3.14
 soxr
 soundfile
 pandas
