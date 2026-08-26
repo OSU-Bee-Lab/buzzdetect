@@ -17,6 +17,13 @@ class BaseModel(ABC):
     embeddername: str = None
     digits_results: int = None  # how many digits should result files be rounded to?
     dtype_in: str = None
+    # Whether this model's inference runs in TensorFlow. Only TF needs its
+    # device placement managed by hand (see WorkerInferer._managememory);
+    # onnxruntime picks its own execution provider and must not be judged by
+    # what TensorFlow can see -- TF reports no GPU on macOS, where onnxruntime
+    # has CoreML. Defaults True because every model here but the ONNX ones is
+    # a Keras model.
+    uses_tensorflow: bool = True
 
     def __init__(self, framehop_prop):
         """Initialize model

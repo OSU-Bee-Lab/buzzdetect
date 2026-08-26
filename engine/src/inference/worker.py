@@ -29,19 +29,21 @@ class WorkerInferer:
         self.coordinator.q_log.put(AssignLog(message=f'analyzer {self.id_analyzer}: {msg}', level_str=level_str))
 
     def _managememory(self):
-        # tensorflow is imported here rather than at module scope so the ONNX
-        # models can run in an environment that has no tensorflow installed at
-        # all. Device placement for those is onnxruntime's business.
-        try:
-            import tensorflow as tf
-        except ImportError:
-            # Nothing to manage: without tensorflow the model is an ONNX one,
-            # and onnxruntime does its own device placement. Deliberately does
-            # not downgrade GPU to CPU -- that decision belongs to
-            # src/inference/onnx.py, which can tell whether a GPU execution
-            # provider is actually available and says so if it isn't.
+        # Only TensorFlow models need their device placement managed here.
+        # onnxruntime does its own, and asking TensorFlow about the machine's
+        # GPUs on its behalf gets the wrong answer: on macOS TF sees no GPU at
+        # all, so the downgrade below would strand a CoreML-capable ONNX model
+        # on the CPU. Deliberately does not downgrade GPU to CPU for those --
+        # that decision belongs to src/inference/onnx.py, which can tell
+        # whether a GPU execution provider is actually available and says so if
+        # it isn't.
+        if not self.model.uses_tensorflow:
             self.log(f"processing on {self.processor}", 'INFO')
             return
+
+        # Imported here rather than at module scope so the ONNX models can run
+        # in an environment that has no tensorflow installed at all.
+        import tensorflow as tf
 
         if self.processor == 'CPU':
             tf.config.set_visible_devices([], 'GPU')

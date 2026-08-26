@@ -13,6 +13,7 @@ class YamnetMediumGeneralOnnx(BaseModel):
     modelname = "yamnet_medium_general_onnx"
     embeddername = 'yamnet_onnx'
     digits_results = 8
+    uses_tensorflow = False
 
     def initialize(self):
         self.embedder.processor = self.processor
