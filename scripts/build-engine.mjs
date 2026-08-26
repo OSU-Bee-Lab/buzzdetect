@@ -144,13 +144,90 @@ function copyNvidiaRuntime() {
 
 	const out = join(OUT_PAYLOAD, 'nvidia');
 	mkdirSync(out, { recursive: true });
-	let bytes = 0;
+	let before = 0;
 	for (const lib of libraries) {
 		cpSync(lib, join(out, basename(lib)), { dereference: true });
-		bytes += statSync(lib).size;
+		before += statSync(lib).size;
 	}
-	const gb = (bytes / 1024 / 1024 / 1024).toFixed(2);
-	console.log(`  nvidia runtime: ${libraries.length} libraries, ${gb} GB`);
+	const after = pruneArchitectures(libraries.map((lib) => join(out, basename(lib))));
+	console.log(
+		`  nvidia runtime: ${libraries.length} libraries, ${asGB(before)}` +
+			(after === before ? '' : ` -> ${asGB(after)} pruned`)
+	);
+}
+
+function asGB(bytes) {
+	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/**
+ * Strip device code for GPUs this build doesn't support, in place.
+ *
+ * Most of the NVIDIA runtime's bulk is compiled device code (cubins), carried
+ * once per GPU architecture -- cuDNN and cuBLAS ship everything back to
+ * Maxwell. requirements-onnx-cuda.txt puts this build's floor at Turing, so
+ * everything below sm_75 is weight we can't use, and unpruned it doesn't fit:
+ * GitHub rejects a release asset over 2GiB and makensis gives up around the
+ * same size.
+ *
+ * nvprune is NVIDIA's own tool for exactly this. It's a no-op when the binary
+ * isn't on PATH, which keeps a local CUDA build working without it -- the
+ * result is just bigger than a release can carry. CI installs it; see
+ * .github/workflows/release.yml.
+ *
+ * Returns the total size afterwards.
+ */
+function pruneArchitectures(paths) {
+	if (!hasNvprune()) {
+		console.log('  nvprune not on PATH -- shipping every GPU architecture');
+		return paths.reduce((total, path) => total + statSync(path).size, 0);
+	}
+
+	// Turing and newer, consumer and datacenter both: sm_75 (GTX 16xx/RTX 20xx),
+	// sm_80 (A100), sm_86 (RTX 30xx), sm_89 (RTX 40xx), sm_90 (H100), sm_100
+	// (Blackwell datacenter), sm_120 (RTX 50xx). Dropping one here drops the
+	// GPUs it names, so keep this in step with requirements-onnx-cuda.txt.
+	const keep = ['sm_75', 'sm_80', 'sm_86', 'sm_89', 'sm_90', 'sm_100', 'sm_120'];
+	const args = keep.flatMap((arch) => ['--arch', arch]);
+
+	let total = 0;
+	for (const path of paths) {
+		const original = statSync(path).size;
+		const pruned = `${path}.pruned`;
+		try {
+			execFileSync('nvprune', [...args, path, '-o', pruned], { stdio: 'pipe' });
+		} catch {
+			// Some of these carry no device code at all (the cuDNN dispatch stub,
+			// the cuFFTW shim), and nvprune declines them rather than copying
+			// them through. Keeping the original is always correct.
+			rmSync(pruned, { force: true });
+			total += original;
+			continue;
+		}
+		// Only take the pruned copy if it actually is one. A tool that quietly
+		// wrote nothing useful would otherwise ship a broken library.
+		const size = existsSync(pruned) ? statSync(pruned).size : 0;
+		if (size > 0 && size <= original) {
+			rmSync(path);
+			renameSync(pruned, path);
+			total += size;
+		} else {
+			rmSync(pruned, { force: true });
+			total += original;
+		}
+	}
+	return total;
+}
+
+function hasNvprune() {
+	try {
+		execFileSync('nvprune', ['--version'], { stdio: 'pipe' });
+		return true;
+	} catch (err) {
+		// A non-zero exit still means there's an nvprune there to run; only a
+		// missing binary disqualifies it.
+		return err.code !== 'ENOENT';
+	}
 }
 
 function assemblePayload() {

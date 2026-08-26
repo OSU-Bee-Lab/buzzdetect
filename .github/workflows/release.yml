@@ -76,6 +76,44 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
+      # nvprune strips device code for GPUs this build doesn't support, which
+      # is the only reason the CUDA payload fits in a release at all -- see
+      # pruneArchitectures in scripts/build-engine.mjs. It ships only in the
+      # CUDA toolkit, but conda packages it alone at ~100KB, so we take just
+      # the binary rather than installing several GB of toolkit for it.
+      # nvprune strips device code for GPUs this build doesn't support, which
+      # is the only reason the CUDA payload fits in a release at all -- see
+      # pruneArchitectures in scripts/build-engine.mjs. It ships only in the
+      # CUDA toolkit, but conda packages it alone at ~100KB, so we take just
+      # the binary rather than several GB of toolkit to get it.
+      - name: Install nvprune
+        if: matrix.engine_flags != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then subdir=win-64; else subdir=linux-64; fi
+          curl -sSL -o nvprune.zip \
+            "https://conda.anaconda.org/nvidia/${subdir}/cuda-nvprune-12.9.82-1.conda"
+          mkdir -p nvprune-pkg
+          # A .conda is a zip of zstd tarballs; the pkg- one holds the binary.
+          # Windows has no unzip, but its tar is bsdtar, which reads zip.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            tar -xf nvprune.zip -C nvprune-pkg
+          else
+            unzip -q -o nvprune.zip -d nvprune-pkg
+          fi
+          tar -xf nvprune-pkg/pkg-cuda-nvprune-*.tar.zst -C nvprune-pkg
+          # bin/ on Linux, Library/bin/ on Windows, so find it rather than guess.
+          bin=$(find nvprune-pkg -type f \( -name nvprune -o -name nvprune.exe \) | head -1)
+          [ -n "$bin" ] || { echo 'no nvprune in the package'; exit 1; }
+          chmod +x "$bin"
+          "$bin" --version || "$bin" --help || { echo 'nvprune not runnable'; exit 1; }
+          # GITHUB_PATH wants a native path; this step's bash on Windows is Git
+          # Bash, whose /d/a/... form later steps can't resolve.
+          dir=$(cd "$(dirname "$bin")" && pwd)
+          if [ "$RUNNER_OS" = "Windows" ]; then dir=$(cygpath -w "$dir"); fi
+          echo "$dir" >> "$GITHUB_PATH"
+
       - name: Install Linux system dependencies
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
