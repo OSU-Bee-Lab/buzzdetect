@@ -8,6 +8,7 @@ nothing in the logs to say the GPU worker never touched the GPU. This module
 exists so that failure is loud instead.
 """
 
+import glob
 import os
 import sys
 
@@ -124,3 +125,59 @@ def make_session(path_onnx, processor):
             )
 
     return session
+
+
+def _probe_model():
+    """The ONNX file to build the probe session on.
+
+    An embedder in preference to a model: embedders are the convolutional part
+    of the work, so their session exercises cuDNN, while a classifier head on
+    its own may only ever reach cuBLAS and would call a half-installed CUDA
+    healthy.
+    """
+    from src import config as cfg
+
+    for pattern in (
+        os.path.join(cfg.DIR_EMBEDDERS, '*', '*.onnx'),
+        os.path.join(cfg.DIR_MODELS, '*', 'model.onnx'),
+    ):
+        found = sorted(glob.glob(pattern))
+        if found:
+            return found[0]
+    return None
+
+
+def probe_gpu():
+    """GPU execution providers this machine can actually run.
+
+    get_available_providers() answers a different question -- which providers
+    this onnxruntime build was compiled with -- and answers it identically on a
+    workstation with a full CUDA install and on a laptop with no NVIDIA
+    hardware at all. A provider's shared libraries aren't loaded until a
+    session asks for it, so the only honest test is to build one and see which
+    provider survives; onnxruntime falls back to CPU rather than raising when
+    the libraries turn out to be missing.
+
+    Costs a real session creation, so it's worth doing once and remembering.
+    """
+    path_onnx = _probe_model()
+    if path_onnx is None:
+        return []
+
+    usable = []
+    for name, options in GPU_PROVIDERS:
+        if name not in ort.get_available_providers():
+            continue
+        try:
+            session = ort.InferenceSession(
+                path_onnx,
+                providers=[name, 'CPUExecutionProvider'],
+                provider_options=[dict(options), {}],
+            )
+        except Exception:
+            # A provider that can't initialise at all -- no driver, no device,
+            # a CUDA/cuDNN too old for this build. Not usable, and not fatal.
+            continue
+        if name in session.get_providers():
+            usable.append(name)
+    return usable

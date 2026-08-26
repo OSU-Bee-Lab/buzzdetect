@@ -46,13 +46,13 @@ via `scripts/sync-version.mjs`), then push the tag. `.github/workflows/release.y
 builds installers for macOS arm64, macOS x86_64, Windows and Linux and attaches
 them to a **draft** release, which you publish by hand.
 
-The two CUDA variants are delivered differently from the rest: an AppImage on
-Linux and a portable zip on Windows, no `.deb` and no installer. Their payload
-is ~2.7GB of NVIDIA runtime, which passes both makensis's ~2GiB ceiling and
-GitHub's 2GiB release-asset limit. nvprune can't help -- it only accepts static
-libraries, not the prebuilt `.so`/`.dll` the wheels ship -- and cuDNN's
-sub-libraries aren't safely separable, so the size is a fixed cost and the
-packaging bends around it.
+There is one bundled-CUDA variant, Windows only, and it ships as a portable zip
+rather than an installer: its ~2.7GB of NVIDIA runtime passes both makensis's
+~2GiB ceiling and GitHub's 2GiB release-asset limit. That size is a fixed cost
+-- nvprune only accepts static libraries, not the prebuilt `.so`/`.dll` the
+wheels ship, and cuDNN's sub-libraries aren't safely separable -- so the
+packaging bends around it. There is no Linux equivalent for the same reason;
+Linux GPU users install CUDA themselves and the ordinary build finds it.
 
 No universal macOS build is possible: onnxruntime ships no universal2 wheel, so
 PyInstaller can only freeze the engine for the architecture it's running on.
@@ -64,4 +64,5 @@ That's why the matrix has two separate macOS jobs.
 - **Manifest locking is duplicated logic, not shared code.** An output folder records the settings (model, output classes) that fixed its result schema in `buzzdetect_manifest.json`, and both sides independently refuse to let a run drift from it: Python via `reconcile_with_manifest`/`pipeline/manifest.py` (prompts y/N on stdin — Rust's `start_analysis` always auto-answers `y` since there's no attached terminal), Svelte via `checkManifest()` in `+page.svelte` (locks classes in the UI, blocks on model mismatch). Changing the manifest schema means updating both.
 - **`engine/` is a git subtree, not a copy.** It tracks `upstream` = github.com/OSU-Bee-Lab/buzzdetect. Pull upstream work with `git subtree pull --prefix=engine upstream main --squash`; push work the other way with `git subtree push --prefix=engine upstream <branch>`. Keep the fork delta small — anything that isn't GUI-specific (new stream drivers, streaming fixes, format support) belongs upstream, where it comes back for free on the next pull. The current delta is `src/pipeline/progress_json.py` and its `emit_progress()` call sites, `search_dir` in `src/utils.py` being a generator, driver precedence in `src/stream/audio.py`, and `requirements.txt`. `engine/` carries its own `.gitignore` files — don't re-add engine rules to the root one.
 - **The engine that ships is not the engine you develop against.** Shipped builds run the ONNX path only: `models/` at the repo root (not `engine/models/`) is the list of models that get bundled, they run through `embedders/yamnet_onnx`, and `engine/requirements-onnx.txt` — no TensorFlow — is what's frozen. `engine/models/` and the TensorFlow `embedders/yamnet` stay for local work, training and the ONNX export tools. If you change YAMNet's front end or retrain a model, re-run the export scripts; the `.onnx` files are build artifacts, not derived at runtime. The CUDA variant is the same engine with `onnxruntime-gpu` and the NVIDIA runtime wheels; those libraries are deliberately kept *out* of the frozen binary (`strip_nvidia` in `engine/buzzdetect.spec`) and shipped as loose files in `engine-payload/nvidia/`, because a 2.5GB single file is more than makensis will bundle. `start_analysis` puts that directory on the child's `LD_LIBRARY_PATH`/`PATH` — if you move it, move both ends.
+- **GPU availability is two questions, answered in two places.** Whether the *build* has a GPU execution provider is decided at build time and written to `engine-payload/gpu-providers.json`; whether *this machine* can actually run one can only be found by trying, because `ort.get_available_providers()` reports what onnxruntime was compiled with and says the same thing on a CUDA workstation and a laptop with no NVIDIA hardware. So the default builds carry `onnxruntime-gpu` *without* its `[cuda,cudnn]` extras -- the CUDA provider, none of the 2.7GB runtime -- and `probe_gpu` (`engine/src/inference/onnx.py`, reached via `buzzdetect_cli.py --probe_gpu`) builds a real session to see which provider survives. `gpu_status` in `src-tauri/src/lib.rs` runs that once at startup and the frontend shows a spinner until it answers. Two builds skip the probe because they have nothing to discover: the bundled-CUDA one (`engine-payload/nvidia` exists) and any CoreML-only one (CoreML ships with macOS). If you add a GPU provider, decide which of those two groups it's in.
 - `engine/src/gui/` is upstream's legacy CustomTkinter GUI, superseded here by the Tauri frontend; don't extend it. Same for `engine/docs/`, `engine/audio_in/`, and `engine/buzzdetect_gui.py` — they arrive with the subtree and are excluded at bundle time rather than deleted, since deleting them would conflict on every pull.

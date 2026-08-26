@@ -23,8 +23,17 @@
 	let hasAutoExpanded = false;
 	let hasStarted = $state(false);
 	let manifest = $state<Manifest | null>(null);
-	// Whether this build's engine has a GPU execution provider at all.
-	let gpuAvailable = $state(false);
+	// What the engine reports about GPU support. Null until the probe answers,
+	// which is a real wait -- it spawns the engine and asks onnxruntime to build
+	// a session -- so the controls show a checking state rather than flickering
+	// from absent to present.
+	type GpuStatus = {
+		supported: boolean;
+		usable: boolean;
+		providers: string[];
+		detail: string | null;
+	};
+	let gpu = $state<GpuStatus | null>(null);
 
 	const modelMismatch = $derived(
 		manifest !== null && manifest.modelname !== settings.value.modelname
@@ -55,15 +64,22 @@
 			run.stop(!cancelled && e.payload.code !== 0 ? `engine exited with code ${e.payload.code}` : undefined);
 		});
 
-		invoke<boolean>('gpu_available')
-			.then((ok) => {
-				gpuAvailable = ok;
-				if (!ok && settings.value.analyzersGpu !== 0) {
+		invoke<GpuStatus>('gpu_status')
+			.then((status) => {
+				gpu = status;
+				if (!status.usable && settings.value.analyzersGpu !== 0) {
 					settings.value.analyzersGpu = 0;
 					settings.save();
 				}
 			})
-			.catch(() => (gpuAvailable = false));
+			.catch((e) => {
+				gpu = {
+					supported: true,
+					usable: false,
+					providers: [],
+					detail: `Couldn't check this machine for a GPU: ${e}`
+				};
+			});
 
 		invoke<string[]>('list_models').then((list) => {
 			models = list;
@@ -387,7 +403,12 @@ Usually, 1 worker will efficiently use your system's resources, but try adding m
 				</span>
 				<input type="number" min="0" bind:value={settings.value.analyzersCpu} oninput={() => settings.save()} />
 			</label>
-			{#if gpuAvailable}
+			{#if gpu === null}
+				<p class="hint checking">
+					<span class="spinner" aria-hidden="true"></span>
+					Checking this machine for a usable GPU&hellip;
+				</p>
+			{:else if gpu.supported}
 			<label>
 				<span class="label-text">
 					GPU analyzers
@@ -399,12 +420,23 @@ If you're using GPU, you probably don't want any CPU analyzers."
 						?
 					</span>
 				</span>
-				<input type="number" min="0" bind:value={settings.value.analyzersGpu} oninput={() => settings.save()} />
+				<input
+					type="number"
+					min="0"
+					disabled={!gpu.usable}
+					bind:value={settings.value.analyzersGpu}
+					oninput={() => settings.save()}
+				/>
 			</label>
+
+			{#if !gpu.usable && gpu.detail}
+				<p class="hint warn">{gpu.detail}</p>
+			{/if}
 
 			<label class="checkbox-setting">
 				<input
 					type="checkbox"
+					disabled={!gpu.usable}
 					bind:checked={settings.value.gpuFp16}
 					onchange={() => settings.save()}
 				/>
@@ -419,7 +451,7 @@ Results from a reduced-precision run are not directly comparable with full-preci
 					</span>
 				</span>
 			</label>
-			{#if settings.value.gpuFp16}
+			{#if gpu.usable && settings.value.gpuFp16}
 				<p class="hint warn">
 					Half precision shifts activations by about 0.03. Fine for scores that sit well clear
 					of your threshold, but don't mix these results with full-precision ones.
@@ -864,6 +896,34 @@ Can produce very large log files."
 		opacity: 0.9;
 		color: #c98a2b;
 		margin: -0.25rem 0 0.25rem;
+	}
+
+	.hint.checking {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.spinner {
+		width: 0.8em;
+		height: 0.8em;
+		border: 2px solid currentColor;
+		border-top-color: transparent;
+		border-radius: 50%;
+		animation: spin 0.7s linear infinite;
+		flex: none;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	/* A disabled control still has to read as a control, not as absent. */
+	input:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.checkbox-setting {

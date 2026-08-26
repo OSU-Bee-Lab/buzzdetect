@@ -10,4 +10,21 @@ pandas
 soundfile
 av
 soxr
-onnxruntime
+
+# onnxruntime-gpu where it exists, and deliberately without the [cuda,cudnn]
+# extras that would drag in ~2.7GB of NVIDIA runtime. The extras are the only
+# thing that makes those wheels a dependency; without them onnxruntime-gpu
+# carries the CUDA execution provider but loads CUDA and cuDNN from wherever
+# the machine keeps them. So a user who installs CUDA 12 and cuDNN 9 gets their
+# GPU, and one who doesn't gets the CPU provider out of the same wheel and the
+# same installer. src/inference/onnx.py's probe_gpu is what tells the two apart
+# at runtime -- get_available_providers() can't, since it reports what the build
+# was compiled with either way.
+#
+# Pinned to the 1.26 line for the same reason as requirements-onnx-cuda.txt:
+# 1.26 is CUDA 12 (driver ~525 up), 1.27+ is CUDA 13 (driver ~580 up).
+#
+# No macOS: onnxruntime-gpu publishes linux and windows wheels only, and the
+# plain wheel is what carries CoreML there anyway.
+onnxruntime-gpu==1.26.0; sys_platform != 'darwin'
+onnxruntime; sys_platform == 'darwin'

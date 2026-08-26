@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 // Every structured progress line the Python engine prints on stdout starts
@@ -118,26 +120,188 @@ fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, S
     Ok(out)
 }
 
-// Whether this build's engine can run a worker on a GPU. Written into the
-// payload at build time by scripts/build-engine.mjs, which asks the frozen
-// runtime itself -- the CPU installers carry a CPU-only onnxruntime, the CUDA
-// ones carry onnxruntime-gpu, and macOS gets CoreML either way. The frontend
-// uses it to hide the GPU analyzer control rather than offer a setting that
-// would quietly run on the CPU.
+/// What the frontend needs to decide whether to offer the GPU controls.
+///
+/// Two separate questions, because they have different answers. `supported` is
+/// about this build -- the CPU installers carry a CPU-only onnxruntime and can
+/// never use a GPU, so there's nothing to offer and nothing to check. `usable`
+/// is about this machine, and is the one that needs an actual look.
+#[derive(Serialize)]
+struct GpuStatus {
+    supported: bool,
+    usable: bool,
+    providers: Vec<String>,
+    detail: Option<String>,
+}
+
+// How long to let the probe run before giving up on it. Generous: it pays for
+// the sidecar unpacking itself and for CUDA initialising a context on a cold
+// driver. The point is only that a wedged driver can't leave the UI waiting.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Whether a GPU worker would actually reach a GPU on this machine.
+///
+/// `gpu-providers.json` is written at build time by scripts/build-engine.mjs
+/// and answers the build question only -- onnxruntime reports the providers it
+/// was compiled with, which is the same answer on a workstation with a full
+/// CUDA install and on a laptop with no NVIDIA hardware at all. So a build that
+/// could use a GPU has to ask the engine to try one; see probe_gpu in
+/// engine/src/inference/onnx.py.
+///
+/// The bundled-CUDA build is the exception: it ships the NVIDIA runtime itself
+/// (engine-payload/nvidia), so there's nothing about the machine left to
+/// discover and the probe would only cost a second at startup.
 #[tauri::command]
-fn gpu_available(app: AppHandle) -> Result<bool, String> {
-    let path = resolve_engine(&app)?.workdir.join("gpu-providers.json");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        // No payload means a checkout, where whatever is in engine/.venv
-        // decides. Offer the option and let the engine's own warning speak.
-        return Ok(true);
-    };
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    Ok(value
-        .get("gpu_providers")
-        .and_then(|p| p.as_array())
-        .map(|providers| !providers.is_empty())
-        .unwrap_or(false))
+async fn gpu_status(app: AppHandle) -> Result<GpuStatus, String> {
+    let engine = resolve_engine(&app)?;
+    let workdir = engine.workdir.clone();
+
+    let built_in = std::fs::read_to_string(workdir.join("gpu-providers.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|value| {
+            value
+                .get("gpu_providers")
+                .and_then(|p| p.as_array())
+                .map(|providers| {
+                    providers
+                        .iter()
+                        .filter_map(|p| p.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+
+    // No file at all means a checkout, where engine/.venv decides and there's
+    // no build-time answer to consult. Probe it like any other GPU build.
+    if let Some(providers) = &built_in {
+        if providers.is_empty() {
+            return Ok(GpuStatus {
+                supported: false,
+                usable: false,
+                providers: vec![],
+                detail: None,
+            });
+        }
+    }
+
+    // Two builds have nothing to discover, and shouldn't spend several seconds
+    // of startup discovering it:
+    //
+    // - the bundled-CUDA build, which ships the NVIDIA runtime itself
+    //   (engine-payload/nvidia) rather than looking for the machine's;
+    // - any build whose only GPU provider is CoreML, which is part of macOS and
+    //   so can't be absent the way a CUDA install can.
+    let self_contained = workdir.join("nvidia").is_dir()
+        || built_in.as_deref().is_some_and(|providers| {
+            !providers.is_empty()
+                && providers
+                    .iter()
+                    .all(|p| p == "CoreMLExecutionProvider")
+        });
+    if self_contained {
+        return Ok(GpuStatus {
+            supported: true,
+            usable: true,
+            providers: built_in.unwrap_or_default(),
+            detail: None,
+        });
+    }
+
+    match probe_gpu(&engine) {
+        Ok(providers) if !providers.is_empty() => Ok(GpuStatus {
+            supported: true,
+            usable: true,
+            providers,
+            detail: None,
+        }),
+        Ok(_) => Ok(GpuStatus {
+            supported: true,
+            usable: false,
+            providers: vec![],
+            detail: Some(
+                "No usable GPU runtime was found on this machine. For NVIDIA GPUs, \
+                 install CUDA 12 and cuDNN 9; this build can't use CUDA 11 or cuDNN 8."
+                    .into(),
+            ),
+        }),
+        Err(e) => Ok(GpuStatus {
+            supported: true,
+            usable: false,
+            providers: vec![],
+            detail: Some(format!("Couldn't check this machine for a GPU: {e}")),
+        }),
+    }
+}
+
+/// Run the engine's own GPU probe and read back the providers it managed to load.
+fn probe_gpu(engine: &Engine) -> Result<Vec<String>, String> {
+    let mut cmd = Command::new(&engine.program);
+    cmd.current_dir(&engine.workdir)
+        .args(&engine.prefix_args)
+        .arg("--probe_gpu")
+        .env("PYTHONUNBUFFERED", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let child = cmd.spawn().map_err(|e| e.to_string())?;
+    let pid = child.id();
+
+    // A driver in a bad state can hang session creation rather than failing it,
+    // and the frontend is sitting on a spinner until this returns.
+    let finished = Arc::new(AtomicBool::new(false));
+    {
+        let finished = finished.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + PROBE_TIMEOUT;
+            while Instant::now() < deadline {
+                if finished.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            kill_pid(pid);
+        });
+    }
+
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    finished.store(true, Ordering::Relaxed);
+
+    if !output.status.success() {
+        return Err("the engine's GPU probe exited without an answer".into());
+    }
+
+    // onnxruntime and CoreML both narrate on stdout as well as stderr, so take
+    // the line that parses rather than assuming the last one is ours.
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        if let Some(providers) = value.get("gpu_providers").and_then(|p| p.as_array()) {
+            return Ok(providers
+                .iter()
+                .filter_map(|p| p.as_str().map(str::to_string))
+                .collect());
+        }
+    }
+    Err("the engine's GPU probe printed no result".into())
+}
+
+/// Kill one process, and only that one -- unlike signal_engine, which signals a
+/// whole process group and would take this app down with it.
+#[cfg(unix)]
+fn kill_pid(pid: u32) {
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+}
+
+#[cfg(windows)]
+fn kill_pid(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .status();
 }
 
 #[derive(Serialize, Clone)]
@@ -464,7 +628,7 @@ pub fn run() {
             cancel_analysis,
             list_models,
             get_model_classes,
-            gpu_available,
+            gpu_status,
             read_manifest
         ])
         .run(tauri::generate_context!())

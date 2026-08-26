@@ -65,6 +65,16 @@ def reconcile_with_manifest(modelname, dir_out, classes_out, precision, framehop
 
 
 def main():
+    # A standalone question about this machine rather than an analysis, so it's
+    # answered before argparse gets to insist on --modelname. Prints one JSON
+    # line naming the GPU execution providers that actually work here; see
+    # probe_gpu in src/inference/onnx.py for why that can't be answered without
+    # building a session.
+    if '--probe_gpu' in sys.argv:
+        from src.inference.onnx import probe_gpu
+        print(json.dumps({'gpu_providers': probe_gpu()}), flush=True)
+        return
+
     from src.pipeline.loglevels import loglevels
     verbosity_choices = list(loglevels.keys())
 

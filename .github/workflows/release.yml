@@ -45,15 +45,14 @@ jobs:
           # which is ~1GB that only an NVIDIA user can execute. The config
           # overlay renames the product so both can be published to the same
           # release (and installed side by side) without colliding.
-          # AppImage only, and an xz-compressed one (see LDAI_COMP below): a
-          # .deb of this carries the NVIDIA runtime barely compressed and comes
-          # out over GitHub's 2GiB asset limit. A plain portable tarball isn't
-          # an option here the way it is on Windows -- the AppImage is what
-          # carries libwebkit2gtk, which the app won't start without.
-          - platform: ubuntu-22.04
-            args: --bundles appimage --config src-tauri/tauri.cuda.conf.json
-            triple: x86_64-unknown-linux-gnu
-            engine_flags: '--cuda'
+          # There is deliberately no Linux CUDA variant. Its AppImage lands at
+          # 2.3GiB against GitHub's 2GiB asset limit, and the runtime can't be
+          # made smaller: nvprune only accepts static libraries, cuDNN's
+          # sub-libraries aren't safely separable, and the one compression
+          # setting that would have covered the gap (LDAI_COMP=xz) is refused
+          # by linuxdeploy. Linux GPU users install CUDA 12 and cuDNN 9
+          # themselves and the ordinary build finds it -- see probe_gpu.
+          #
           # No installer at all on Windows: makensis is 32-bit and gives up
           # around 2GiB, which this payload passes on its own. Shipped as a
           # portable archive instead -- the same thing Ollama does with its
@@ -133,11 +132,6 @@ jobs:
         if: matrix.portable == ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Squashfs compression for the AppImage, read by
-          # linuxdeploy-plugin-appimage. The default is gzip, which left the
-          # CUDA AppImage at 2.3GiB -- over GitHub's 2GiB asset limit -- and
-          # xz is what brings it back under. Ignored off Linux.
-          LDAI_COMP: xz
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: buzzdetect2 ${{ inputs.tag || github.ref_name }}
@@ -249,7 +243,6 @@ jobs:
           copy_asset "buzzdetect2_${VERSION}_amd64.deb"      "buzzdetect2-Linux.deb"
           copy_asset "buzzdetect2_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows.exe"
 
-          # The CUDA variants ship no .deb and no Windows installer; see the
-          # matrix comments for why.
-          copy_asset "buzzdetect2-cuda_${VERSION}_amd64.AppImage"   "buzzdetect2-Linux-CUDA.AppImage"
+          # Windows is the only bundled-CUDA build, and it ships as a portable
+          # archive rather than an installer; see the matrix comments for why.
           copy_asset "buzzdetect2-cuda_${VERSION}_windows-x64.zip"  "buzzdetect2-Windows-CUDA.zip"
