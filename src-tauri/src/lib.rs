@@ -489,8 +489,14 @@ fn start_analysis(
     // There's no non-interactive flag for that yet, so we pre-empt it here:
     // always answer yes (adopt the existing settings) rather than let the
     // prompt hang forever with no attached terminal.
-    if let Some(mut stdin) = child.stdin.take() {
+    //
+    // The pipe is deliberately left open afterwards rather than dropped: it's
+    // also how cancel_analysis asks for a tidy stop (STOP_COMMAND in
+    // engine/src/pipeline/interrupt.py), which is the only way to ask on
+    // Windows, where there is no SIGTERM to send.
+    if let Some(stdin) = child.stdin.as_mut() {
         let _ = stdin.write_all(b"y\n");
+        let _ = stdin.flush();
     }
 
     let stdout = child.stdout.take().ok_or("failed to capture engine stdout")?;
@@ -536,11 +542,31 @@ fn start_analysis(
     Ok(())
 }
 
+/// When the engine last said anything. A cancelled engine is given room to
+/// wind down for as long as it's still reporting; see cancel_analysis.
+static LAST_ENGINE_OUTPUT: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn note_engine_output() {
+    if let Ok(mut last) = LAST_ENGINE_OUTPUT.lock() {
+        *last = Some(Instant::now());
+    }
+}
+
+fn engine_quiet_for() -> Duration {
+    LAST_ENGINE_OUTPUT
+        .lock()
+        .ok()
+        .and_then(|last| *last)
+        .map(|t| t.elapsed())
+        .unwrap_or_default()
+}
+
 fn spawn_line_reader<R: std::io::Read + Send + 'static>(app: AppHandle, reader: R, is_stderr: bool) {
     std::thread::spawn(move || {
         let buf = BufReader::new(reader);
         for line in buf.lines() {
             let Ok(line) = line else { break };
+            note_engine_output();
             if let Some(json_str) = line.strip_prefix(PROGRESS_MARKER) {
                 match serde_json::from_str::<serde_json::Value>(json_str) {
                     Ok(value) => {
@@ -555,8 +581,16 @@ fn spawn_line_reader<R: std::io::Read + Send + 'static>(app: AppHandle, reader: 
     });
 }
 
-// How long a cancelled engine gets to wind down before it's killed outright.
-const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+// A cancelled engine winds itself down -- workers finish the chunk in flight,
+// then the streamers, analyzers and writer report themselves out in turn --
+// and the point of stopping it politely is that the user gets to watch that
+// happen. So the clock that ends its life is a silence, not a stopwatch: it
+// gets killed once it has stopped saying anything for this long...
+const CANCEL_QUIET_GRACE: Duration = Duration::from_secs(15);
+// ...with an outer bound for an engine that's chatty but wedged.
+const CANCEL_MAX_GRACE: Duration = Duration::from_secs(120);
+// How often the escalation thread rechecks those two.
+const CANCEL_POLL: Duration = Duration::from_millis(250);
 
 #[cfg(unix)]
 fn signal_engine(pid: u32, signal: i32) {
@@ -586,31 +620,52 @@ fn cancel_analysis(app: AppHandle, state: State<AnalysisState>) -> Result<(), St
         }
     };
 
+    // Ask, rather than signal. The engine takes this as a request to run its
+    // early-exit path, which unwinds the workers in order and logs each one
+    // out -- all of which the user is still watching, since the pipes stay
+    // open until the process actually goes.
+    {
+        let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+        if let Some(stdin) = guard.as_mut().and_then(|child| child.stdin.as_mut()) {
+            let _ = stdin.write_all(b"STOP\n");
+            let _ = stdin.flush();
+        }
+    }
+    note_engine_output(); // start the silence clock from the request itself
+
     // Deliberately does NOT clear AnalysisState. The waiter thread spawned by
     // start_analysis is what reaps the child and emits engine-exit, and the
     // frontend keeps the run locked until that lands -- so taking the child
     // out here would strand the UI in a stopping state forever.
-    #[cfg(unix)]
-    signal_engine(pid, libc::SIGTERM);
-    #[cfg(windows)]
-    signal_engine(pid, 0);
 
-    // Escalate if it hasn't gone by itself. Results are written per chunk, so
-    // the worst a hard kill costs is the chunk in flight, which the next run
-    // picks up again.
+    // Escalate only once it's gone quiet (or taken far too long). Results are
+    // written per chunk, so the worst a hard kill costs is the chunk in
+    // flight, which the next run picks up again.
     std::thread::spawn(move || {
-        std::thread::sleep(CANCEL_GRACE);
-        let state = app.state::<AnalysisState>();
-        let still_running = state
-            .0
-            .lock()
-            .map(|guard| guard.as_ref().map(|child| child.id()) == Some(pid))
-            .unwrap_or(false);
-        if still_running {
+        let deadline = Instant::now() + CANCEL_MAX_GRACE;
+        loop {
+            std::thread::sleep(CANCEL_POLL);
+            let state = app.state::<AnalysisState>();
+            let still_running = state
+                .0
+                .lock()
+                .map(|guard| guard.as_ref().map(|child| child.id()) == Some(pid))
+                .unwrap_or(false);
+            if !still_running {
+                return;
+            }
+            if engine_quiet_for() < CANCEL_QUIET_GRACE && Instant::now() < deadline {
+                continue;
+            }
             #[cfg(unix)]
-            signal_engine(pid, libc::SIGKILL);
+            {
+                signal_engine(pid, libc::SIGTERM);
+                std::thread::sleep(EXIT_GRACE);
+                signal_engine(pid, libc::SIGKILL);
+            }
             #[cfg(windows)]
             signal_engine(pid, 0);
+            return;
         }
     });
 
