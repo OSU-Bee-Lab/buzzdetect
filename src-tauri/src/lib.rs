@@ -617,6 +617,55 @@ fn cancel_analysis(app: AppHandle, state: State<AnalysisState>) -> Result<(), St
     Ok(())
 }
 
+// How long an engine gets to wind down when the app itself is on the way out.
+// Shorter than CANCEL_GRACE: the user is closing the window, not waiting on a
+// tidy stop, and a chunk in flight is re-analysed by the next run anyway.
+const EXIT_GRACE: Duration = Duration::from_secs(2);
+
+/// Stop the engine when the app exits, instead of leaving it orphaned.
+///
+/// The engine runs in its own process group (see start_analysis), so nothing
+/// takes it down with the app: it survives, but not usefully -- the app's end
+/// of the stdout pipe closes with it, and the engine wedges on its next
+/// progress write. So it has to be killed explicitly.
+///
+/// Not a complete guarantee, and can't be: a SIGKILL or a force-quit gives the
+/// app no chance to run this, and the engine is orphaned again. It covers
+/// closing the window and quitting, which is how the app is actually exited.
+fn kill_engine_on_exit(app: &AppHandle) {
+    let state = app.state::<AnalysisState>();
+    // Taken out of the state rather than borrowed: nothing else is going to
+    // reap this child, and the waiter thread's engine-exit event has no
+    // frontend left to reach.
+    let Some(mut child) = state.0.lock().ok().and_then(|mut guard| guard.take()) else {
+        return;
+    };
+    let pid = child.id();
+
+    #[cfg(unix)]
+    {
+        signal_engine(pid, libc::SIGTERM);
+        let deadline = Instant::now() + EXIT_GRACE;
+        while Instant::now() < deadline {
+            match child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(_) => return,
+            }
+        }
+        signal_engine(pid, libc::SIGKILL);
+        let _ = child.wait();
+    }
+
+    // taskkill /F /T is already a hard kill of the whole tree, so there's
+    // nothing to escalate to and nothing to wait for.
+    #[cfg(windows)]
+    {
+        signal_engine(pid, 0);
+        let _ = child.wait();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -631,6 +680,11 @@ pub fn run() {
             gpu_status,
             read_manifest
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                kill_engine_on_exit(app);
+            }
+        });
 }
