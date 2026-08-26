@@ -154,7 +154,18 @@ class DualRuntimeModel(BaseModel):
         path_keras = os.path.join(dir_model, 'model.keras')
         if os.path.exists(path_keras):
             import keras
-            self.model = keras.saving.load_model(path_keras, compile=False)
+            try:
+                self.model = keras.saving.load_model(path_keras, compile=False)
+            except (TypeError, ValueError) as e:
+                # A model.keras carries the schema of the Keras that wrote it,
+                # and an older Keras rejects keys it doesn't know rather than
+                # ignoring them. Worth naming, because the failure surfaces as
+                # a bare complaint about a layer argument. The ONNX half has no
+                # such floor, which is part of why both are shipped.
+                raise RuntimeError(
+                    f'{path_keras} was written by a newer Keras than this '
+                    f'environment\'s {keras.__version__}. Upgrade Keras, or run '
+                    f'this model under ONNX ({ENV_RUNTIME}=onnx).') from e
         else:
             from keras.layers import TFSMLayer
             self.model = TFSMLayer(
