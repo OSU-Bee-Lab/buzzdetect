@@ -45,14 +45,22 @@ jobs:
           # which is ~1GB that only an NVIDIA user can execute. The config
           # overlay renames the product so both can be published to the same
           # release (and installed side by side) without colliding.
+          # AppImage only: a .deb of this carries the NVIDIA runtime barely
+          # compressed and comes out over GitHub's 2GiB asset limit, while
+          # squashfs gets the same payload well under it.
           - platform: ubuntu-22.04
-            args: --bundles appimage,deb --config src-tauri/tauri.cuda.conf.json
+            args: --bundles appimage --config src-tauri/tauri.cuda.conf.json
             triple: x86_64-unknown-linux-gnu
             engine_flags: '--cuda'
+          # No installer at all on Windows: makensis is 32-bit and gives up
+          # around 2GiB, which this payload passes on its own. Shipped as a
+          # portable archive instead -- the same thing Ollama does with its
+          # CUDA builds -- assembled by the step below.
           - platform: windows-latest
-            args: --bundles nsis --config src-tauri/tauri.cuda.conf.json
+            args: --no-bundle --config src-tauri/tauri.cuda.conf.json
             triple: x86_64-pc-windows-msvc
             engine_flags: '--cuda'
+            portable: 'windows-x64'
 
     runs-on: ${{ matrix.platform }}
 
@@ -75,41 +83,6 @@ jobs:
             /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY" || true
           sudo docker image prune --all --force || true
           df -h /
-
-      # nvprune strips device code for GPUs this build doesn't support, which
-      # is the only reason the CUDA payload fits in a release at all -- see
-      # pruneArchitectures in scripts/build-engine.mjs. It ships only as part
-      # of the CUDA toolkit, but NVIDIA redistributes each component on its
-      # own, so we take the ~250KB one rather than several GB of toolkit.
-      - name: Install nvprune
-        if: matrix.engine_flags != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          base=https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvprune
-          mkdir -p nvprune-pkg
-          # Two archive formats, and one extractor each that the runner is
-          # certain to have: GNU tar reads .tar.xz, and bash on Windows is Git
-          # Bash, which has neither unzip nor a bsdtar to read the .zip with.
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            curl -sSL -o nvprune.zip \
-              "$base/windows-x86_64/cuda_nvprune-windows-x86_64-12.9.82-archive.zip"
-            powershell -NoProfile -Command \
-              "Expand-Archive -Path nvprune.zip -DestinationPath nvprune-pkg -Force"
-          else
-            curl -sSL -o nvprune.tar.xz \
-              "$base/linux-x86_64/cuda_nvprune-linux-x86_64-12.9.82-archive.tar.xz"
-            tar -xJf nvprune.tar.xz -C nvprune-pkg
-          fi
-          bin=$(find nvprune-pkg -type f \( -name nvprune -o -name nvprune.exe \) | head -1)
-          [ -n "$bin" ] || { echo 'no nvprune in the archive'; exit 1; }
-          chmod +x "$bin"
-          "$bin" --version || "$bin" --help || { echo 'nvprune not runnable'; exit 1; }
-          # GITHUB_PATH wants a native path; Git Bash's /d/a/... form is one
-          # later steps can't resolve.
-          dir=$(cd "$(dirname "$bin")" && pwd)
-          if [ "$RUNNER_OS" = "Windows" ]; then dir=$(cygpath -w "$dir"); fi
-          echo "$dir" >> "$GITHUB_PATH"
 
       - name: Install Linux system dependencies
         if: startsWith(matrix.platform, 'ubuntu')
@@ -155,6 +128,7 @@ jobs:
           ENGINE_TARGET_TRIPLE: ${{ matrix.triple }}
 
       - uses: tauri-apps/tauri-action@v0
+        if: matrix.portable == ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -163,6 +137,58 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # The portable build: tauri compiles the app but bundles nothing, so the
+      # layout an installer would have produced gets assembled here. On Windows
+      # that's flat -- Tauri resolves both the sidecar and resource_dir()
+      # relative to the executable's own directory, which is exactly what
+      # resolve_engine in src-tauri/src/lib.rs expects to find.
+      - name: Package the portable archive
+        if: matrix.portable != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+          npm run tauri build -- ${{ matrix.args }}
+
+          name="buzzdetect2-cuda_${VERSION}_${{ matrix.portable }}"
+          mkdir -p "dist/$name"
+          # Without a bundling step Tauri may leave the binary under its cargo
+          # name rather than the product name, so take whichever is there and
+          # give the user the product name either way.
+          app=src-tauri/target/release/buzzdetect2-cuda.exe
+          if [ ! -f "$app" ]; then app=src-tauri/target/release/buzzdetect2.exe; fi
+          [ -f "$app" ] || { echo "no app binary in src-tauri/target/release"; exit 1; }
+          cp "$app" "dist/$name/buzzdetect2-cuda.exe"
+          cp "src-tauri/binaries/buzzdetect-${{ matrix.triple }}.exe" \
+            "dist/$name/buzzdetect.exe"
+          cp -r src-tauri/engine-payload "dist/$name/engine-payload"
+
+          # 7-Zip rather than Compress-Archive, which is built on a zip writer
+          # that falls over past 2GB -- the exact size this archive is about.
+          7z a -tzip -mx=5 "dist/$name.zip" "./dist/$name" > /dev/null
+          ls -l "dist/$name.zip"
+
+          # Whichever matrix job lands first creates the draft; this one may be
+          # it, so don't assume the release already exists.
+          gh release view "$TAG" -R "$REPO" > /dev/null 2>&1 || \
+            gh release create "$TAG" -R "$REPO" --draft --title "buzzdetect2 $TAG" --notes ""
+          gh release upload "$TAG" "dist/$name.zip" -R "$REPO" --clobber
+
+      # Runs even when the upload above rejected something for being too big,
+      # which is the number we actually need to see.
+      - name: Report artifact sizes
+        if: always() && matrix.engine_flags != ''
+        shell: bash
+        run: |
+          du -sh src-tauri/engine-payload src-tauri/binaries/* 2>/dev/null || true
+          find src-tauri/target/release/bundle dist -maxdepth 2 -type f \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.zip' \) \
+            -exec ls -lh {} + 2>/dev/null || true
 
   # Publishes copies of the installers under names a user can recognise, since
   # the raw ones carry version and arch strings that mean nothing to someone
@@ -216,6 +242,7 @@ jobs:
           copy_asset "buzzdetect2_${VERSION}_amd64.deb"      "buzzdetect2-Linux.deb"
           copy_asset "buzzdetect2_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows.exe"
 
-          copy_asset "buzzdetect2-cuda_${VERSION}_amd64.AppImage" "buzzdetect2-Linux-CUDA.AppImage"
-          copy_asset "buzzdetect2-cuda_${VERSION}_amd64.deb"      "buzzdetect2-Linux-CUDA.deb"
-          copy_asset "buzzdetect2-cuda_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows-CUDA.exe"
+          # The CUDA variants ship no .deb and no Windows installer; see the
+          # matrix comments for why.
+          copy_asset "buzzdetect2-cuda_${VERSION}_amd64.AppImage"   "buzzdetect2-Linux-CUDA.AppImage"
+          copy_asset "buzzdetect2-cuda_${VERSION}_windows-x64.zip"  "buzzdetect2-Windows-CUDA.zip"

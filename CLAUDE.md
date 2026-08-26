@@ -46,6 +46,14 @@ via `scripts/sync-version.mjs`), then push the tag. `.github/workflows/release.y
 builds installers for macOS arm64, macOS x86_64, Windows and Linux and attaches
 them to a **draft** release, which you publish by hand.
 
+The two CUDA variants are delivered differently from the rest: an AppImage on
+Linux and a portable zip on Windows, no `.deb` and no installer. Their payload
+is ~2.7GB of NVIDIA runtime, which passes both makensis's ~2GiB ceiling and
+GitHub's 2GiB release-asset limit. nvprune can't help -- it only accepts static
+libraries, not the prebuilt `.so`/`.dll` the wheels ship -- and cuDNN's
+sub-libraries aren't safely separable, so the size is a fixed cost and the
+packaging bends around it.
+
 No universal macOS build is possible: onnxruntime ships no universal2 wheel, so
 PyInstaller can only freeze the engine for the architecture it's running on.
 That's why the matrix has two separate macOS jobs.
