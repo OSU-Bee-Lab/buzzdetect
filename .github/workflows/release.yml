@@ -45,9 +45,11 @@ jobs:
           # which is ~1GB that only an NVIDIA user can execute. The config
           # overlay renames the product so both can be published to the same
           # release (and installed side by side) without colliding.
-          # AppImage only: a .deb of this carries the NVIDIA runtime barely
-          # compressed and comes out over GitHub's 2GiB asset limit, while
-          # squashfs gets the same payload well under it.
+          # AppImage only, and an xz-compressed one (see LDAI_COMP below): a
+          # .deb of this carries the NVIDIA runtime barely compressed and comes
+          # out over GitHub's 2GiB asset limit. A plain portable tarball isn't
+          # an option here the way it is on Windows -- the AppImage is what
+          # carries libwebkit2gtk, which the app won't start without.
           - platform: ubuntu-22.04
             args: --bundles appimage --config src-tauri/tauri.cuda.conf.json
             triple: x86_64-unknown-linux-gnu
@@ -131,6 +133,11 @@ jobs:
         if: matrix.portable == ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Squashfs compression for the AppImage, read by
+          # linuxdeploy-plugin-appimage. The default is gzip, which left the
+          # CUDA AppImage at 2.3GiB -- over GitHub's 2GiB asset limit -- and
+          # xz is what brings it back under. Ignored off Linux.
+          LDAI_COMP: xz
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: buzzdetect2 ${{ inputs.tag || github.ref_name }}
