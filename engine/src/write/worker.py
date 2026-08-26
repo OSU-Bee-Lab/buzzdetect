@@ -100,4 +100,4 @@ class WorkerWriter:
             a_chunk, fully_analyzed = item
             self.write_results(a_chunk, fully_analyzed)
 
-        self.log("terminating", 'DEBUG')
+        self.log("terminating", 'INFO')

@@ -15,6 +15,7 @@ from src import config as cfg
 from src.pipeline.assignments import AssignFile, AssignLog
 from src.pipeline.coordination import Coordinator, ExitSignal
 from src.pipeline.manifest import build_manifest, check_or_write_manifest
+from src.pipeline.interrupt import install as install_stop
 from src.pipeline.progress_json import emit_progress
 from src.utils import search_dir
 
@@ -98,6 +99,7 @@ class Analyzer:
 
         self.a_stream_list = []
 
+        self.stop = None
         self.thread_logger = None
         self.thread_writer = None
         self.threads_streamers = []
@@ -372,6 +374,9 @@ class Analyzer:
         """Execute the complete analysis workflow."""
         self._log_startup()
         self._launch_logger()
+        # From here on a Ctrl-C, or a host's stop request, goes through the
+        # coordinator's early-exit path instead of felling the process.
+        self.stop = install_stop(self.coordinator)
         # The walk below, and the manifest check before it, can take a while on
         # a large or network-mounted audio directory. Say so rather than
         # leaving a host GUI on 'starting'.
@@ -384,6 +389,15 @@ class Analyzer:
             return
 
         if not self.queue_assignments():
+            self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
+            self.thread_logger.join()
+            return
+
+        # Stopped during the scan, before there are any workers for the
+        # coordinator's early exit to wind down.
+        if self.stop.requested.is_set():
+            self.coordinator.q_log.put(AssignLog(
+                message='Analysis stopped by user', level_str='WARNING'))
             self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
             self.thread_logger.join()
             return

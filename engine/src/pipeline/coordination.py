@@ -9,6 +9,10 @@ from src.pipeline.assignments import AssignFile, AssignChunk, AssignLog
 # sentinel handed to a worker to tell it to stop
 EXIT = 'exit'
 
+# How long an interrupted analysis waits for its workers to wind down before
+# giving up on them and letting the process exit.
+SHUTDOWN_JOIN_TIMEOUT = 60
+
 
 class ExitSignal:
     def __init__(self, message, level, end_reason):
@@ -163,18 +167,18 @@ class Coordinator:
         def watch_workers():
             for t in threads_streamers:
                 t.join()
-            self.log('streamers done', 'DEBUG')
+            self.log('streamers done', 'INFO')
             self.streamers_done.set()
             self._poison(self.q_analyze, self.analyzers_total)
 
             for t in threads_analyzers:
                 t.join()
-            self.log('analyzers done', 'DEBUG')
+            self.log('analyzers done', 'INFO')
             self.analyzers_done.set()
             self._poison(self.q_write, 1)
 
             thread_writer.join()
-            self.log('writer done', 'DEBUG')
+            self.log('writer done', 'INFO')
             self.writer_done.set()
 
             self.exit_analysis(ExitSignal(message='Analysis complete', level='INFO', end_reason='completed'))
@@ -194,3 +198,13 @@ class Coordinator:
         thread_exit.start()
 
         self.event_exitanalysis.wait()
+
+        # On an early exit the workers are only just being woken by the
+        # poisoned queues: they still have a chunk in flight to finish and
+        # each logs itself out on the way. Wait for that here, because the
+        # caller tears the logger down as soon as this returns -- otherwise
+        # the wind-down happens with nobody left to report it. On a normal
+        # exit watch_workers has already finished and this returns at once.
+        thread_worker.join(timeout=SHUTDOWN_JOIN_TIMEOUT)
+        if thread_worker.is_alive():
+            self.log('workers did not finish shutting down; exiting anyway', 'WARNING')

@@ -118,4 +118,4 @@ class WorkerInferer:
             self.process_chunk(a_chunk)
             self.timer_bottleneck.restart()
 
-        self.log("terminating", 'DEBUG')
+        self.log("terminating", 'INFO')
