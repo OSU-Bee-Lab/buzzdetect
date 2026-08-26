@@ -12,10 +12,29 @@ vite.config.ts.timestamp-*
 # Rust
 /src-tauri/target
 
-# engine/ is a git subtree of OSU-Bee-Lab/buzzdetect and brings its own
-# .gitignore files (engine/.gitignore, engine/models/.gitignore,
-# engine/embedders/.gitignore), which already cover __pycache__, .venv, and
-# untracked model/embedder directories. Don't duplicate those rules here.
+# engine/ brings its own .gitignore files (engine/.gitignore,
+# engine/models/.gitignore, engine/embedders/.gitignore), which already cover
+# __pycache__, .venv, and untracked model/embedder directories. Don't
+# duplicate those rules here -- but they only apply under engine/, so the
+# equivalents for the repo root are listed below.
+
+# python
+__pycache__/
+.venv/
+
+# r
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+
+# editors
+.idea/
+
+# local scratch, engine gui settings
+local/
+guisettings.json
 
 # Frozen engine build outputs (node scripts/build-engine.mjs)
 /src-tauri/binaries
