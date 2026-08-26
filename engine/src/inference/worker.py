@@ -1,8 +1,7 @@
-import tensorflow as tf
-
 from src.inference.models import load_model
 from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
+from src.pipeline.progress_json import emit_progress
 from src.utils import Timer
 
 
@@ -30,6 +29,22 @@ class WorkerInferer:
         self.coordinator.q_log.put(AssignLog(message=f'analyzer {self.id_analyzer}: {msg}', level_str=level_str))
 
     def _managememory(self):
+        # Only TensorFlow models need their device placement managed here.
+        # onnxruntime does its own, and asking TensorFlow about the machine's
+        # GPUs on its behalf gets the wrong answer: on macOS TF sees no GPU at
+        # all, so the downgrade below would strand a CoreML-capable ONNX model
+        # on the CPU. Deliberately does not downgrade GPU to CPU for those --
+        # that decision belongs to src/inference/onnx.py, which can tell
+        # whether a GPU execution provider is actually available and says so if
+        # it isn't.
+        if not self.model.uses_tensorflow:
+            self.log(f"processing on {self.processor}", 'INFO')
+            return
+
+        # Imported here rather than at module scope so the ONNX models can run
+        # in an environment that has no tensorflow installed at all.
+        import tensorflow as tf
+
         if self.processor == 'CPU':
             tf.config.set_visible_devices([], 'GPU')
             visible_devices = tf.config.get_visible_devices()
@@ -62,6 +77,13 @@ class WorkerInferer:
                  f"in {self.timer_analysis.get_total():.2f}s (rate: {analysis_rate:.1f})")
 
         self.log(msg, 'PROGRESS')
+        emit_progress(
+            'chunk_done',
+            path=a_chunk.file.shortpath_audio,
+            chunk_start=float(a_chunk.chunk[0]),
+            chunk_end=float(a_chunk.chunk[1]),
+            done=a_chunk.last_chunk,
+        )
         self.timer_analysis.restart()
 
     def report_bottleneck(self):
@@ -75,7 +97,14 @@ class WorkerInferer:
 
     def run(self):
         self.log('launching', 'INFO')
+        self._managememory()
+        # After _managememory, which may have downgraded GPU to CPU.
+        self.model.processor = self.processor
         self.model.initialize()
+        # The session is built, so this worker is ready for its first chunk.
+        # Emitted per analyzer; a host GUI is expected to treat the stage as
+        # monotonic and ignore the repeats.
+        emit_progress('stage', name='analyzing', processor=self.processor)
 
         self.timer_bottleneck.restart()
         while True:
@@ -89,4 +118,4 @@ class WorkerInferer:
             self.process_chunk(a_chunk)
             self.timer_bottleneck.restart()
 
-        self.log("terminating", 'DEBUG')
+        self.log("terminating", 'INFO')

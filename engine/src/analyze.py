@@ -15,7 +15,16 @@ from src import config as cfg
 from src.pipeline.assignments import AssignFile, AssignLog
 from src.pipeline.coordination import Coordinator, ExitSignal
 from src.pipeline.manifest import build_manifest, check_or_write_manifest
+from src.pipeline.interrupt import install as install_stop
+from src.pipeline.progress_json import emit_progress
 from src.utils import search_dir
+
+def _file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
 
 def run_worker(workerclass, **kwargs):
     worker = workerclass(**kwargs)
@@ -90,6 +99,7 @@ class Analyzer:
 
         self.a_stream_list = []
 
+        self.stop = None
         self.thread_logger = None
         self.thread_writer = None
         self.threads_streamers = []
@@ -272,9 +282,22 @@ class Analyzer:
 
     def queue_assignments(self):
         assignments = []
+        # search_dir is a generator: each match is reported as soon as it's
+        # found, so a UI watching for 'manifest' events can populate its file
+        # list while the walk is still going, rather than waiting for the
+        # entire (possibly large, possibly network-mounted) tree to finish
+        # being walked before showing anything.
         for p in search_dir(self.dir_audio, extensions=list(driver_map.keys())):
             a_file = AssignFile(path_audio=p, dir_audio=self.dir_audio, dir_results=self.dir_out)
             assignments.append(a_file)
+            # Byte size lets a UI weight files it has no duration for yet
+            # (still queued, or skipped without ever being opened). One stat
+            # per file is cheap; actually opening each file to read a real
+            # duration would delay the start of analysis by minutes on a large
+            # network-mounted tree, and wouldn't be reliable for mp3 anyway.
+            emit_progress('manifest', paths=[a_file.shortpath_audio], bytes=[_file_size(p)])
+
+        emit_progress('manifest_done', count=len(assignments))
 
         if not assignments:
             self.coordinator.exit_analysis(
@@ -305,10 +328,13 @@ class Analyzer:
         for a in assignments:
             # drop all conflicts
             if a.ident in idents_conflicting:
+                emit_progress('file_skip', path=a.shortpath_audio, reason='name_conflict')
                 continue
 
             # drop already finished (cleaner/faster exit)
-            if not os.path.exists(a.path_results_complete):
+            if os.path.exists(a.path_results_complete):
+                emit_progress('file_skip', path=a.shortpath_audio, reason='already_analyzed')
+            else:
                 assignments_unfinished.append(a)
 
         if not assignments_unfinished:
@@ -348,6 +374,13 @@ class Analyzer:
         """Execute the complete analysis workflow."""
         self._log_startup()
         self._launch_logger()
+        # From here on a Ctrl-C, or a host's stop request, goes through the
+        # coordinator's early-exit path instead of felling the process.
+        self.stop = install_stop(self.coordinator)
+        # The walk below, and the manifest check before it, can take a while on
+        # a large or network-mounted audio directory. Say so rather than
+        # leaving a host GUI on 'starting'.
+        emit_progress('stage', name='scanning')
         self._cleanup_finalframe_files()
 
         if not self._check_manifest():
@@ -360,10 +393,24 @@ class Analyzer:
             self.thread_logger.join()
             return
 
+        # Stopped during the scan, before there are any workers for the
+        # coordinator's early exit to wind down.
+        if self.stop.requested.is_set():
+            self.coordinator.q_log.put(AssignLog(
+                message='Analysis stopped by user', level_str='WARNING'))
+            self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
+            self.thread_logger.join()
+            return
+
         # queue termination sentinels
         for _ in range(self.coordinator.streamers_total):
             self.coordinator.q_stream.put('exit')
 
+        # Each analyzer builds its own inference session as it starts, which
+        # is the last slow step before the first chunk lands: a cold CoreML or
+        # CUDA session can take tens of seconds. WorkerInferer moves the stage
+        # on to 'analyzing' once one is ready.
+        emit_progress('stage', name='loading')
         self._launch_writer()
         self._launch_streamers()
         self._launch_analyzers()

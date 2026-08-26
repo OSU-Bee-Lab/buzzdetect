@@ -1,0 +1,250 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to rebuild (e.g. v0.2.0)'
+        required: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # No universal macOS build: onnxruntime publishes no universal2
+          # wheel, so PyInstaller can only freeze the engine for the arch it
+          # runs on. macos-14 is Apple silicon, macos-15-intel is Intel --
+          # don't move that one back to macos-13, which GitHub has retired:
+          # the job doesn't fail, it queues forever, stranding rename-assets
+          # behind it.
+          - platform: macos-14
+            args: --bundles dmg,app
+            triple: aarch64-apple-darwin
+            engine_flags: ''
+          - platform: macos-15-intel
+            args: --bundles dmg,app
+            triple: x86_64-apple-darwin
+            engine_flags: ''
+          - platform: ubuntu-22.04
+            args: --bundles appimage,deb
+            triple: x86_64-unknown-linux-gnu
+            engine_flags: ''
+          - platform: windows-latest
+            args: --bundles nsis
+            triple: x86_64-pc-windows-msvc
+            engine_flags: ''
+          # CUDA variants. Separate installers rather than fattening the
+          # default ones: they bundle onnxruntime-gpu plus the NVIDIA runtime,
+          # which is ~1GB that only an NVIDIA user can execute. The config
+          # overlay renames the product so both can be published to the same
+          # release (and installed side by side) without colliding.
+          # There is deliberately no Linux CUDA variant. Its AppImage lands at
+          # 2.3GiB against GitHub's 2GiB asset limit, and the runtime can't be
+          # made smaller: nvprune only accepts static libraries, cuDNN's
+          # sub-libraries aren't safely separable, and the one compression
+          # setting that would have covered the gap (LDAI_COMP=xz) is refused
+          # by linuxdeploy. Linux GPU users install CUDA 12 and cuDNN 9
+          # themselves and the ordinary build finds it -- see probe_gpu.
+          #
+          # No installer at all on Windows: makensis is 32-bit and gives up
+          # around 2GiB, which this payload passes on its own. Shipped as a
+          # portable archive instead -- the same thing Ollama does with its
+          # CUDA builds -- assembled by the step below.
+          - platform: windows-latest
+            args: --no-bundle --config src-tauri/tauri.cuda.conf.json
+            triple: x86_64-pc-windows-msvc
+            engine_flags: '--cuda'
+            portable: 'windows-x64'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # A stock ubuntu runner has ~14GB free and a CUDA build wants more than
+      # that: the build venv unpacks ~5GB of nvidia wheels, PyInstaller stages
+      # a copy of everything it freezes, and cargo and the AppImage each want a
+      # few GB of their own. The v0.3.0 run died linking the Rust lib with
+      # ENOSPC. None of the toolchains removed here are used by this job.
+      - name: Free up disk space
+        if: startsWith(matrix.platform, 'ubuntu') && matrix.engine_flags != ''
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/local/lib/node_modules \
+            /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install Linux system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # The engine is frozen with PyInstaller, which needs a real Python
+      # toolchain; uv provides one and installs engine/requirements-onnx.txt
+      # into the throwaway venv that scripts/build-engine.mjs creates.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Must run before tauri-action: it produces the sidecar binary and the
+      # engine payload that tauri.conf.json's externalBin/resources point at,
+      # and the bundle step fails outright if they're missing.
+      - name: Build the engine sidecar
+        run: node scripts/build-engine.mjs ${{ matrix.engine_flags }}
+        env:
+          ENGINE_TARGET_TRIPLE: ${{ matrix.triple }}
+
+      - uses: tauri-apps/tauri-action@v0
+        if: matrix.portable == ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: buzzdetect2 ${{ inputs.tag || github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      # The portable build: tauri compiles the app but bundles nothing, so the
+      # layout an installer would have produced gets assembled here. On Windows
+      # that's flat -- Tauri resolves both the sidecar and resource_dir()
+      # relative to the executable's own directory, which is exactly what
+      # resolve_engine in src-tauri/src/lib.rs expects to find.
+      - name: Package the portable archive
+        if: matrix.portable != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+          npm run tauri build -- ${{ matrix.args }}
+
+          name="buzzdetect2-cuda_${VERSION}_${{ matrix.portable }}"
+          mkdir -p "dist/$name"
+          # Without a bundling step Tauri may leave the binary under its cargo
+          # name rather than the product name, so take whichever is there and
+          # give the user the product name either way.
+          app=src-tauri/target/release/buzzdetect2-cuda.exe
+          if [ ! -f "$app" ]; then app=src-tauri/target/release/buzzdetect2.exe; fi
+          [ -f "$app" ] || { echo "no app binary in src-tauri/target/release"; exit 1; }
+          cp "$app" "dist/$name/buzzdetect2-cuda.exe"
+          cp "src-tauri/binaries/buzzdetect-${{ matrix.triple }}.exe" \
+            "dist/$name/buzzdetect.exe"
+          cp -r src-tauri/engine-payload "dist/$name/engine-payload"
+
+          # 7-Zip rather than Compress-Archive, which is built on a zip writer
+          # that falls over past 2GB -- the exact size this archive is about.
+          7z a -tzip -mx=5 "dist/$name.zip" "./dist/$name" > /dev/null
+          ls -l "dist/$name.zip"
+
+          # Whichever matrix job lands first creates the draft; this one may be
+          # it, so don't assume the release already exists.
+          gh release view "$TAG" -R "$REPO" > /dev/null 2>&1 || \
+            gh release create "$TAG" -R "$REPO" --draft --title "buzzdetect2 $TAG" --notes ""
+          gh release upload "$TAG" "dist/$name.zip" -R "$REPO" --clobber
+
+      # Runs even when the upload above rejected something for being too big,
+      # which is the number we actually need to see.
+      - name: Report artifact sizes
+        if: always() && matrix.engine_flags != ''
+        shell: bash
+        run: |
+          du -sh src-tauri/engine-payload src-tauri/binaries/* 2>/dev/null || true
+          find src-tauri/target/release/bundle dist -maxdepth 2 -type f \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.zip' \) \
+            -exec ls -lh {} + 2>/dev/null || true
+
+  # Renames the installers to something a user can recognise: the raw ones
+  # carry version and arch strings that mean nothing to someone just trying to
+  # download the app. This renames in place via the asset API rather than
+  # re-uploading under a second name -- a copy would leave two of every
+  # installer on the release, and the CUDA zip alone is 1.8GB to round-trip.
+  rename-assets:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rename release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+          RELEASE_ID=$(gh api "repos/${REPO}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+
+          assets=$(gh api "repos/${REPO}/releases/${RELEASE_ID}/assets" --paginate)
+
+          rename_asset() {
+            local from="$1"
+            local to="$2"
+            local id
+            id=$(jq -r ".[] | select(.name == \"$from\") | .id" <<<"$assets")
+            if [ -z "$id" ]; then
+              # Already renamed by an earlier run of this job, or the matrix
+              # job that produces it failed; either way there is nothing to do.
+              echo "Skipped (not found): $from"
+              return
+            fi
+            # An asset left over under the target name from a previous run
+            # would make the rename collide, so clear it first.
+            local existing
+            existing=$(jq -r ".[] | select(.name == \"$to\") | .id" <<<"$assets")
+            if [ -n "$existing" ]; then
+              gh api -X DELETE "repos/${REPO}/releases/assets/${existing}"
+              echo "Deleted stale: $to"
+            fi
+            gh api -X PATCH "repos/${REPO}/releases/assets/${id}" \
+              -f name="$to" > /dev/null
+            echo "Renamed: $from -> $to"
+          }
+
+          rename_asset "buzzdetect2_${VERSION}_aarch64.dmg"   "buzzdetect2-macOS-AppleSilicon.dmg"
+          rename_asset "buzzdetect2_${VERSION}_x64.dmg"       "buzzdetect2-macOS-Intel.dmg"
+          rename_asset "buzzdetect2_${VERSION}_amd64.AppImage" "buzzdetect2-Linux.AppImage"
+          rename_asset "buzzdetect2_${VERSION}_amd64.deb"      "buzzdetect2-Linux.deb"
+          rename_asset "buzzdetect2_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows.exe"
+
+          # Windows is the only bundled-CUDA build, and it ships as a portable
+          # archive rather than an installer; see the matrix comments for why.
+          rename_asset "buzzdetect2-cuda_${VERSION}_windows-x64.zip"  "buzzdetect2-Windows-CUDA.zip"

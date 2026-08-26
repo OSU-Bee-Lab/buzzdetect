@@ -1,7 +1,6 @@
 from queue import Full
 
-import tensorflow as tf
-import librosa
+import soxr
 import numpy as np
 
 from src.pipeline.assignments import AssignChunk
@@ -16,6 +15,7 @@ from src.pipeline.assignments import AssignFile, AssignLog
 from src.pipeline.coordination import Coordinator
 from src.stream.audio import get_duration
 from src.inference.models import BaseModel
+from src.pipeline.progress_json import emit_progress
 
 class WorkerStreamer:
     def __init__(self,
@@ -61,11 +61,13 @@ class WorkerStreamer:
     def _chunk_file(self, a_file: AssignFile):
         if os.path.exists(a_file.path_results_complete):
             self.log(f'Skipping {a_file.shortpath_audio}; already analyzed', 'DEBUG')
+            emit_progress('file_skip', path=a_file.shortpath_audio, reason='already_analyzed')
             a_file.chunklist = []
             return
 
         if os.path.getsize(a_file.path_audio) < cfg.FILE_SIZE_MINIMUM:
             self.log(f'Skipping {a_file.shortpath_audio}; below minimum analyzeable size', 'DEBUG')
+            emit_progress('file_skip', path=a_file.shortpath_audio, reason='too_small')
             a_file.chunklist = []
             return
 
@@ -100,9 +102,16 @@ class WorkerStreamer:
                 df.sort_values("start", inplace=True)
                 df.to_csv(a_file.path_results_complete, index=False)
                 os.remove(a_file.path_results_partial)
+                emit_progress('file_skip', path=a_file.shortpath_audio, reason='already_analyzed')
                 a_file.chunklist = []
                 return
 
+        emit_progress(
+            'file_start',
+            path=a_file.shortpath_audio,
+            duration=a_file.duration_audio,
+            work_seconds=sum(b - a for a, b in gaps),
+        )
         a_file.chunklist = gaps_to_chunklist(gaps, self.chunklength)
         return
 
@@ -120,13 +129,16 @@ class WorkerStreamer:
 
         if n_samples < read_size:
             self.handle_bad_read(a_file)
-            chunk = (chunk[0], round(chunk[0] + (n_samples/a_file.track.samplerate), 1))
+            chunk = (chunk[0], round(chunk[0] + (n_samples/a_file.track.samplerate), self.model.embedder.digits_time))
             continue_file = False
         else:
             continue_file = True
 
-        samples = librosa.resample(y=samples, orig_sr=a_file.track.samplerate, target_sr=self.resample_rate)
-        samples = tf.convert_to_tensor(samples, dtype=tf.float32)
+        # soxr directly rather than librosa.resample, which is a thin wrapper
+        # over this same call (res_type='soxr_hq') but drags numba/llvmlite/scipy
+        # in with it -- a few hundred MB of dependency for one function.
+        samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality='HQ')
+        samples = samples.astype(np.float32)
 
         last_chunk = force_last or not continue_file
         a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, last_chunk=last_chunk)
