@@ -18,23 +18,32 @@ import onnxruntime as ort
 # onnxruntime falls back along the list per-operator, so CPU is always
 # appended as the backstop.
 #
-# CoreML is pinned to ModelFormat=MLProgram deliberately. Measured on this
-# model (YAMNet trunk, 209 patches, Apple silicon):
+# CoreML is pinned to ModelFormat=MLProgram deliberately, and that is now
+# load-bearing rather than a preference. Measured on the fused waveform-in
+# graph, 200 s of audio on an Apple M1 (benchmarks/onnx-vs-tf/COREML.md):
 #
-#   CPU                                213 ms   reference
-#   CoreML, default NeuralNetwork       14 ms   embeddings off by 2.9e-2
-#   CoreML, MLProgram + CPUAndGPU       50 ms   embeddings off by 5.6e-6
+#   CPU                                 231 ms   reference
+#   CoreML, default NeuralNetwork       144 ms   predictions off by 1.6e-2
+#   CoreML, MLProgram + CPUAndGPU        68 ms   predictions off by 4.5e-6
 #
-# The default format is quicker still because it runs fp16 on the Neural
-# Engine, but 2.9e-2 is three hundred times our float32 parity budget -- results
-# would depend on which machine analysed them. MLProgram keeps fp32, runs on
-# the GPU via Metal, and stays within the same tolerance as the CPU-versus-
-# TensorFlow comparison the models were validated against, for a 4.3x win.
+# The default NeuralNetwork format runs fp16 on the Neural Engine, and 1.6e-2
+# is three hundred times our float32 parity budget -- results would depend on
+# which machine analysed them. It also declines the com.microsoft.FusedConv
+# nodes the export bakes in, so all 27 convolutions fall back to the CPU and
+# the graph ends up slower than not using CoreML at all. MLProgram keeps fp32,
+# takes the whole graph in two partitions, and is 3.4x the CPU.
 GPU_PROVIDERS = (
     ('CUDAExecutionProvider', {}),
     ('ROCMExecutionProvider', {}),
     ('CoreMLExecutionProvider', {'ModelFormat': 'MLProgram', 'MLComputeUnits': 'CPUAndGPU'}),
 )
+
+# The symbolic dimension the export gives a model's waveform input. Fixing it
+# before session creation is not an optimisation: CoreML's MLProgram format
+# cannot compile a graph with an unbounded dimension and the session fails
+# outright, and a fixed length is what lets CoreML constant-fold the front
+# end's shape arithmetic and swallow the graph whole.
+DIM_SAMPLES = 'samples'
 
 # Set to '1' to let a GPU provider drop to reduced precision. Deliberately an
 # environment variable rather than an analysis parameter: it changes nothing
@@ -42,9 +51,25 @@ GPU_PROVIDERS = (
 # desktop app sets it per run from a checkbox.
 ENV_ALLOW_FP16 = 'BUZZDETECT_GPU_FP16'
 
-# Options that let CoreML use the Neural Engine, which is fp16-only. Roughly
-# 3.5x quicker than the fp32 MLProgram path on the same hardware.
-COREML_FP16 = {'MLComputeUnits': 'ALL'}
+# Reduced precision is a different file, not a different provider option: an
+# fp32 graph handed to the Neural Engine is the NeuralNetwork path above, which
+# is both inaccurate and, since the fusion, slow. The export writes this sibling
+# beside model.onnx with the trunk and head in fp16 and the front end left in
+# fp32.
+FNAME_FP16 = 'model.fp16.onnx'
+
+# What reduced precision buys, and costs, on the fused graph (Apple M1, 200 s,
+# COREML.md):
+#
+#   MLProgram + CPUAndGPU, fp32      71 ms   4.3e-06 on the predictions
+#   MLProgram + ALL,       fp16      38 ms   1.7e-02, and one frame in 209
+#                                            changes its top class
+#
+# 1.9x. The trunk on its own is 3.3x; the front end stays in fp32 and becomes
+# most of what is left. MLComputeUnits=ALL is what reaches the Neural Engine --
+# CPUAndGPU with an fp16 graph gains nothing, because Metal was already running
+# fp32 at full rate.
+COREML_FP16 = {'ModelFormat': 'MLProgram', 'MLComputeUnits': 'ALL'}
 
 
 def allow_fp16():
@@ -55,8 +80,9 @@ def fp16_supported(provider):
     """Whether reduced precision does anything for this provider.
 
     Only CoreML, for now. The CUDA and ROCm providers take precision from the
-    model's own dtype, so running them in fp16 would mean shipping an fp16
-    export rather than flipping a runtime switch.
+    model's own dtype, so an fp16 graph would run in fp16 on them too -- but
+    nobody has measured whether that is a win there, and on the one card it was
+    tried (GTX 1650) fp16 ran at half speed.
     """
     return provider == 'CoreMLExecutionProvider'
 
@@ -67,17 +93,16 @@ def gpu_providers_available():
     return [name for name, _ in GPU_PROVIDERS if name in available]
 
 
-_warned = False
+_warned = set()
 
 
-def _warn_once(message):
-    global _warned
-    if _warned:
+def _warn_once(key, message):
+    if key in _warned:
         return
-    _warned = True
-    # stderr rather than the worker log: sessions are built inside embedder and
-    # model plugins, which have no handle on the coordinator's logger. The
-    # desktop app surfaces engine stderr in its log pane either way.
+    _warned.add(key)
+    # stderr rather than the worker log: sessions are built inside model
+    # plugins, which have no handle on the coordinator's logger. The desktop
+    # app surfaces engine stderr in its log pane either way.
     print(f'WARNING: {message}', file=sys.stderr, flush=True)
 
 
@@ -92,17 +117,11 @@ def providers_for(processor):
             continue
         options = dict(options)
         if allow_fp16() and fp16_supported(name):
-            # Drops ModelFormat too: the fp32 guarantee lives in MLProgram, and
-            # the default NeuralNetwork format is what reaches the ANE.
             options = dict(COREML_FP16)
-            _warn_once(
-                f'{name} is running in reduced precision (fp16) by request. '
-                'Activations shift by ~3e-2 against the fp32 reference, so '
-                'results are not comparable with fp32 output at the margins.'
-            )
         return [name, 'CPUExecutionProvider'], [options, {}]
 
     _warn_once(
+        'no-gpu-provider',
         'GPU processing was requested, but this onnxruntime installation has no '
         f'GPU execution provider (it offers: {", ".join(available)}). Install '
         'onnxruntime-gpu for CUDA. Running on CPU instead.'
@@ -110,15 +129,59 @@ def providers_for(processor):
     return ['CPUExecutionProvider'], [{}]
 
 
-def make_session(path_onnx, processor):
-    """Build an InferenceSession, and complain if it didn't get the GPU it asked for."""
+def path_for(path_onnx, processor):
+    """Which of a model's graphs to load: the fp32 one, or its fp16 sibling.
+
+    Reduced precision only means anything where a provider can act on it, so a
+    CPU worker gets the fp32 graph whatever the environment says.
+    """
+    if not (allow_fp16() and processor == 'GPU'):
+        return path_onnx
+    requested, _ = providers_for(processor)
+    if not fp16_supported(requested[0]):
+        return path_onnx
+
+    path_fp16 = os.path.join(os.path.dirname(path_onnx), FNAME_FP16)
+    if not os.path.exists(path_fp16):
+        _warn_once(
+            'no-fp16-graph',
+            f'{ENV_ALLOW_FP16}=1 was set, but {os.path.basename(os.path.dirname(path_onnx))} '
+            f'has no {FNAME_FP16}. Re-export it with buzzdetect-training to get one. '
+            'Running at full precision.'
+        )
+        return path_onnx
+
+    _warn_once(
+        'fp16',
+        f'{requested[0]} is running in reduced precision (fp16) by request. '
+        'Predictions shift by ~2e-2 against the fp32 reference, so results are '
+        'not comparable with fp32 output at the margins.'
+    )
+    return path_fp16
+
+
+def make_session(path_onnx, processor, samples):
+    """Build an InferenceSession pinned to a fixed input length.
+
+    `samples` fixes the graph's one free dimension. onnxruntime does this
+    itself, given the dimension's name, so the graph on disk stays general and
+    nothing here has to rewrite it -- which also keeps the `onnx` package out
+    of the shipped sidecar.
+
+    Complains if it didn't get the GPU it asked for.
+    """
     requested, options = providers_for(processor)
-    session = ort.InferenceSession(path_onnx, providers=requested, provider_options=options)
+
+    so = ort.SessionOptions()
+    so.add_free_dimension_override_by_name(DIM_SAMPLES, samples)
+    session = ort.InferenceSession(path_for(path_onnx, processor), so,
+                                   providers=requested, provider_options=options)
 
     if processor == 'GPU' and requested[0] != 'CPUExecutionProvider':
         got = session.get_providers()
         if requested[0] not in got:
             _warn_once(
+                'gpu-not-loaded',
                 f'{requested[0]} was requested but onnxruntime did not load it '
                 f'(active providers: {", ".join(got)}). This usually means the '
                 'CUDA/cuDNN runtime it was built against is missing. Running on CPU.'
@@ -128,23 +191,11 @@ def make_session(path_onnx, processor):
 
 
 def _probe_model():
-    """The ONNX file to build the probe session on.
-
-    An embedder in preference to a model: embedders are the convolutional part
-    of the work, so their session exercises cuDNN, while a classifier head on
-    its own may only ever reach cuBLAS and would call a half-installed CUDA
-    healthy.
-    """
+    """The ONNX file to build the probe session on."""
     from src import config as cfg
 
-    for pattern in (
-        os.path.join(cfg.DIR_EMBEDDERS, '*', '*.onnx'),
-        os.path.join(cfg.DIR_MODELS, '*', 'model.onnx'),
-    ):
-        found = sorted(glob.glob(pattern))
-        if found:
-            return found[0]
-    return None
+    found = sorted(glob.glob(os.path.join(cfg.DIR_MODELS, '*', 'model.onnx')))
+    return found[0] if found else None
 
 
 def probe_gpu():
@@ -159,6 +210,9 @@ def probe_gpu():
     the libraries turn out to be missing.
 
     Costs a real session creation, so it's worth doing once and remembering.
+    The length the probe pins the input to is arbitrary -- one 0.96 s frame,
+    which keeps the probe quick -- but it has to be pinned, or CoreML will
+    decline a graph it would accept in an analysis.
     """
     path_onnx = _probe_model()
     if path_onnx is None:
@@ -169,8 +223,10 @@ def probe_gpu():
         if name not in ort.get_available_providers():
             continue
         try:
+            so = ort.SessionOptions()
+            so.add_free_dimension_override_by_name(DIM_SAMPLES, 16000)
             session = ort.InferenceSession(
-                path_onnx,
+                path_onnx, so,
                 providers=[name, 'CPUExecutionProvider'],
                 provider_options=[dict(options), {}],
             )

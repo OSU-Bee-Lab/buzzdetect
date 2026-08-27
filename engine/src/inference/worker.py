@@ -11,6 +11,7 @@ class WorkerInferer:
                  processor: str,
                  modelname: str,
                  framehop_prop: float,
+                 chunklength: float,
                  coordinator: Coordinator, ):
 
         self.id_analyzer = id_analyzer
@@ -18,6 +19,7 @@ class WorkerInferer:
         self.coordinator = coordinator
 
         self.model = load_model(modelname, framehop_prop, initialize=False)
+        self.chunklength = chunklength
         self.timer_analysis = Timer()
         self.timer_bottleneck = Timer()
 
@@ -28,51 +30,13 @@ class WorkerInferer:
     def log(self, msg, level_str):
         self.coordinator.q_log.put(AssignLog(message=f'analyzer {self.id_analyzer}: {msg}', level_str=level_str))
 
-    def _managememory(self):
-        # Only TensorFlow models need their device placement managed here.
-        # onnxruntime does its own, and asking TensorFlow about the machine's
-        # GPUs on its behalf gets the wrong answer: on macOS TF sees no GPU at
-        # all, so the downgrade below would strand a CoreML-capable ONNX model
-        # on the CPU. Deliberately does not downgrade GPU to CPU for those --
-        # that decision belongs to src/inference/onnx.py, which can tell
-        # whether a GPU execution provider is actually available and says so if
-        # it isn't.
-        if not self.model.uses_tensorflow:
-            self.log(f"processing on {self.processor}", 'INFO')
-            return
-
-        # Imported here rather than at module scope so the ONNX models can run
-        # in an environment that has no tensorflow installed at all.
-        import tensorflow as tf
-
-        if self.processor == 'CPU':
-            tf.config.set_visible_devices([], 'GPU')
-            visible_devices = tf.config.get_visible_devices()
-            for device in visible_devices:
-                assert device.device_type != 'GPU'
-        elif self.processor == 'GPU':
-            # let memory grow when processing on GPU
-            gpus = tf.config.experimental.list_physical_devices('GPU')
-            if not gpus:
-                self.log("GPU not found; using CPU", 'WARNING')
-                self.processor = 'CPU'
-            else:
-                for gpu in gpus:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-
-            if len(gpus) > 1:
-                self.log("Use of multiple GPUs is untested", 'WARNING')
-
-        self.log(f"processing on {self.processor}", 'INFO')
-
-
     def report_rate(self, a_chunk: AssignChunk):
         chunk_duration = a_chunk.chunk[1] - a_chunk.chunk[0]
 
         self.timer_analysis.stop()
         analysis_rate = chunk_duration / self.timer_analysis.get_total(5)
 
-        digits_time = self.model.embedder.digits_time
+        digits_time = self.model.digits_time
         msg = (f"analyzed {a_chunk.file.shortpath_audio}, chunk ({float(a_chunk.chunk[0]):.{digits_time}f}, {float(a_chunk.chunk[1]):.{digits_time}f}) "
                  f"in {self.timer_analysis.get_total():.2f}s (rate: {analysis_rate:.1f})")
 
@@ -97,9 +61,15 @@ class WorkerInferer:
 
     def run(self):
         self.log('launching', 'INFO')
-        self._managememory()
-        # After _managememory, which may have downgraded GPU to CPU.
+        self.log(f'processing on {self.processor}', 'INFO')
+        # onnxruntime picks its own execution provider and says so itself if it
+        # cannot get the one it asked for (src/inference/onnx.py). There is
+        # nothing for this worker to place by hand.
         self.model.processor = self.processor
+        # The session is built at one fixed input length, because CoreML cannot
+        # compile a graph with an unbounded dimension. predict() pads each chunk
+        # up to it and drops the frames that padding produced.
+        self.model.samples_session = self.model.session_length(self.chunklength)
         self.model.initialize()
         # The session is built, so this worker is ready for its first chunk.
         # Emitted per analyzer; a host GUI is expected to treat the stage as

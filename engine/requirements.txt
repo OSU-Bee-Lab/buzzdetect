@@ -1,7 +1,7 @@
-tensorflow>=2.16
-# Floor set by the model.keras files in models/: a model.keras carries the
-# schema of the Keras that wrote it, and an older Keras refuses to load it.
-keras>=3.14
+# A checkout's dependencies. The engine runs ONNX and nothing else, so this is
+# requirements-onnx.txt plus what only a checkout uses (the legacy tkinter GUI
+# in src/gui). TensorFlow is not here and is not needed: models are exported to
+# a single ONNX graph ahead of time by buzzdetect-training's tools/export_onnx.py.
 soxr
 soundfile
 pandas

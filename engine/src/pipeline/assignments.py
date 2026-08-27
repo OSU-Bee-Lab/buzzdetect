@@ -36,8 +36,8 @@ class AssignChunk:
     chunk: tuple[float, float] | None = None
     last_chunk: bool = False
     samples: np.ndarray = None
-    # ndarray from the onnx models, tf.Tensor from the tensorflow ones
-    results = None
+    # [n_frames, n_classes] from OnnxModel.predict
+    results: np.ndarray = None
 
 
 @dataclass

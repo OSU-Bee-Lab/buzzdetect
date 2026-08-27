@@ -1,10 +1,9 @@
-# Runtime dependencies for the ONNX inference path -- what actually ships in
-# the frozen desktop binary (see buzzdetect.spec). No tensorflow, no keras:
-# models are exported to ONNX ahead of time by tools/onnxify_model.py and run
-# through onnxruntime.
+# Runtime dependencies for the frozen desktop binary (see buzzdetect.spec).
+# Each model is one ONNX graph -- waveform in, predictions out -- exported
+# ahead of time by buzzdetect-training's tools/export_onnx.py and run through
+# onnxruntime. Nothing here computes features, and nothing here is TensorFlow.
 #
-# requirements.txt remains the full set, including tensorflow, for training,
-# for the tensorflow models, and for running the ONNX export tools.
+# requirements.txt is this plus what only a checkout uses.
 numpy
 pandas
 soundfile

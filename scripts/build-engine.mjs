@@ -19,7 +19,7 @@
  * src/inference) and the stream drivers (src/stream/audio.py builds its driver
  * map by listing that directory). The app runs the sidecar with the payload as
  * its working directory, which is what makes engine/src/config.py's relative
- * paths -- 'models', 'embedders', 'src/stream/drivers' -- resolve.
+ * paths -- 'models', 'src/stream/drivers' -- resolve.
  *
  * Requires uv (https://docs.astral.sh/uv/) and a Rust toolchain on PATH.
  */
@@ -51,6 +51,9 @@ const SHIPLIST = 'shipped-models.txt';
 // the sidecar has no TensorFlow to run.
 const MODEL_FILES = [
 	'model.onnx',
+	// Optional: the reduced-precision sibling, used only when a run asks for it
+	// (BUZZDETECT_GPU_FP16) on a provider that can act on it.
+	'model.fp16.onnx',
 	'model.py',
 	'config_model.json',
 	'translation.csv',
@@ -202,9 +205,9 @@ function assemblePayload() {
 				`${SHIPLIST} names '${name}', which is not in ${modelsSrc}.`
 			);
 		}
-		// The sidecar has no TensorFlow (buzzdetect.spec excludes it), so a
-		// TensorFlow model here would build a bundle that fails at analysis
-		// time on the user's machine rather than here.
+		// The engine runs ONNX and nothing else, so a model directory that
+		// carries only Keras weights would build a bundle that fails at
+		// analysis time on the user's machine rather than here.
 		if (!existsSync(join(dir, 'model.onnx'))) {
 			throw new Error(
 				`${SHIPLIST} names '${name}', which has no model.onnx. Only ONNX ` +
@@ -224,12 +227,6 @@ function assemblePayload() {
 			if (existsSync(from)) cpSync(from, join(dirOut, file), { dereference: true });
 		}
 	}
-
-	cpSync(join(ENGINE, 'embedders', 'yamnet_onnx'), join(OUT_PAYLOAD, 'embedders', 'yamnet_onnx'), {
-		recursive: true,
-		dereference: true,
-		filter: (src) => !src.includes('__pycache__')
-	});
 
 	// src/stream/audio.py only lists this directory; the modules themselves are
 	// frozen into the binary (see buzzdetect.spec's collect_submodules).

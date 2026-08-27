@@ -112,11 +112,11 @@ class Analyzer:
     def _setup_chunklength(self, chunklength):
         # Round chunklength to nearest frame for seamless processing
         chunklength = round(
-            chunklength / self.model.embedder.framelength_s
-        ) * self.model.embedder.framelength_s
-        chunklength = round(chunklength, self.model.embedder.digits_time)
-        if chunklength < self.model.embedder.framelength_s:
-            chunklength = self.model.embedder.framelength_s
+            chunklength / self.model.framelength_s
+        ) * self.model.framelength_s
+        chunklength = round(chunklength, self.model.digits_time)
+        if chunklength < self.model.framelength_s:
+            chunklength = self.model.framelength_s
 
         return chunklength
 
@@ -213,8 +213,8 @@ class Analyzer:
                 'classes_out': self.classes_out,
                 'threshold': self.threshold,
                 'classes': self.model.config['classes'],
-                'framehop_s': self.model.embedder.framehop_s,
-                'digits_time': self.model.embedder.digits_time,
+                'framehop_s': self.model.framehop_s,
+                'digits_time': self.model.digits_time,
                 'dir_audio': self.dir_audio,
                 'dir_out': self.dir_out,
                 'digits_results': self.model.config['digits_results'],
@@ -236,6 +236,7 @@ class Analyzer:
                     'processor': 'CPU',
                     'modelname': self.modelname,
                     'framehop_prop': self.framehop_prop,
+                    'chunklength': self.chunklength,
                     'coordinator': self.coordinator,
                 }
             )
@@ -243,7 +244,6 @@ class Analyzer:
             self.threads_analyzers.append(analyzer)
 
         for a in range(self.coordinator.analyzers_gpu):
-            os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
             analyzer = threading.Thread(
                 target=run_worker,
                 name=f"analyzer_gpu_{a}",
@@ -253,6 +253,7 @@ class Analyzer:
                     'processor': 'GPU',
                     'modelname': self.modelname,
                     'framehop_prop': self.framehop_prop,
+                    'chunklength': self.chunklength,
                     'coordinator': self.coordinator,
                 }
             )

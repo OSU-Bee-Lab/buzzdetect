@@ -14,13 +14,13 @@ from src.stream.results_coverage import melt_coverage, get_gaps, smooth_gaps, ga
 from src.pipeline.assignments import AssignFile, AssignLog
 from src.pipeline.coordination import Coordinator
 from src.stream.audio import get_duration
-from src.inference.models import BaseModel
+from src.inference.models import OnnxModel
 from src.pipeline.progress_json import emit_progress
 
 class WorkerStreamer:
     def __init__(self,
                  id_streamer,
-                 model: BaseModel,
+                 model: OnnxModel,
                  chunklength: float,
                  coordinator: Coordinator, ):
 
@@ -29,8 +29,8 @@ class WorkerStreamer:
         self.coordinator = coordinator
 
         self.chunklength = chunklength
-        self.framelength_s = self.model.embedder.framelength_s
-        self.resample_rate = self.model.embedder.samplerate
+        self.framelength_s = self.model.framelength_s
+        self.resample_rate = self.model.samplerate
 
     def __call__(self):
         self.run()
@@ -129,7 +129,7 @@ class WorkerStreamer:
 
         if n_samples < read_size:
             self.handle_bad_read(a_file)
-            chunk = (chunk[0], round(chunk[0] + (n_samples/a_file.track.samplerate), self.model.embedder.digits_time))
+            chunk = (chunk[0], round(chunk[0] + (n_samples/a_file.track.samplerate), self.model.digits_time))
             continue_file = False
         else:
             continue_file = True

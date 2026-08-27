@@ -10,9 +10,9 @@ assembles the data payload that has to sit next to the binary.
 Three things this build deliberately does NOT contain:
 
 - TensorFlow. Only the ONNX models ship; see requirements-onnx.txt.
-- models/ and embedders/. buzzdetect loads those by reading .py files off disk
-  at runtime (importlib.util.spec_from_file_location in src/inference), so
-  freezing them in would be pointless -- they're shipped as a Tauri resource
+- models/. buzzdetect loads each model by reading its model.py off disk at
+  runtime (importlib.util.spec_from_file_location in src/inference/models.py),
+  so freezing them in would be pointless -- they're shipped as a Tauri resource
   directory instead, and the app runs the binary with that as its cwd.
 - The NVIDIA runtime, on the CUDA build. See strip_nvidia() below.
 """
@@ -62,14 +62,10 @@ def strip_nvidia(binaries):
 # importing each module by name, which no static analysis can see.
 hidden = collect_submodules('src.stream.drivers')
 
-# Reached only from plugin .py files loaded off disk at runtime, so likewise
-# invisible to the import graph. Without these the app raises ImportError on
-# the first chunk it tries to analyse.
-hidden += [
-    'onnxruntime',
-    'embedders.yamnet_onnx.features',
-    'embedders.yamnet_onnx.params',
-]
+# Reached only from model.py files loaded off disk at runtime, so likewise
+# invisible to the import graph. Without it the app raises ImportError on the
+# first chunk it tries to analyse.
+hidden += ['onnxruntime']
 
 a = Analysis(
     ['buzzdetect_cli.py'],
