@@ -357,7 +357,8 @@
 <div class="panels" style="grid-template-columns: {settingsWidth}px 6px 1fr">
 	<section class="settings">
 		<h2>Settings</h2>
-		<fieldset class="settings-fields" disabled={run.running || run.stopping}>
+		<div class="settings-body">
+			<fieldset class="settings-fields" disabled={run.running || run.stopping}>
 
 		{#if modelMismatch}
 			<p class="error">
@@ -605,6 +606,7 @@ Can produce very large log files."
 			<p class="error">{startError}</p>
 		{/if}
 		</fieldset>
+		</div>
 
 		{#if !run.running && !run.stopping}
 			<div class="settings-actions">
@@ -641,23 +643,29 @@ Can produce very large log files."
 			</h2>
 		</div>
 		{#if hasStarted}
-			{@const s = run.stats}
-			<!-- Stacked rows with a fixed-width label column: values change
-			     length constantly, so nothing may share a line with them. -->
-			<dl class="stats">
-				<!-- Rate and ETA are kept in place with a placeholder until the
-				     first samples land, so the rows don't jump once they do. -->
-				{#if run.running}
+			{#if run.running}
+				{@const s = run.stats}
+				<!-- Stacked rows with a fixed-width label column: values change
+				     length constantly, so nothing may share a line with them. -->
+				<dl class="stats">
+					<!-- Rate and ETA are kept in place with a placeholder until the
+					     first samples land, so the rows don't jump once they do. -->
 					<dt>Rate:</dt>
 					<dd>{s.rate > 0 ? `${s.rate.toFixed(1)}x realtime` : '—'}</dd>
-				{/if}
-				<dt>Audio remaining:</dt>
-				<dd>{formatDuration(s.remainingSeconds)}</dd>
-				{#if run.running}
+					<dt>Audio remaining:</dt>
+					<dd>{formatDuration(s.remainingSeconds)}</dd>
 					<dt>ETA:</dt>
 					<dd>{s.etaSeconds === null ? '—' : formatDuration(s.etaSeconds)}</dd>
-				{/if}
-			</dl>
+				</dl>
+			{:else if run.summary}
+				{@const sum = run.summary}
+				{@const runtimeStr = sum.runtimeSeconds < 10 && sum.runtimeSeconds > 0
+					? `${sum.runtimeSeconds.toFixed(1)}s`
+					: formatDuration(sum.runtimeSeconds)}
+				<p class="summary">
+					Analyzed {formatDuration(sum.audioSeconds)} of audio in {runtimeStr} ({sum.rate.toFixed(1)}x)
+				</p>
+			{/if}
 		{/if}
 		{#if !run.running && !hasStarted && missingDirs}
 			<p class="hint">Set audio and output directories to begin.</p>
@@ -762,11 +770,24 @@ Can produce very large log files."
 	.settings {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		height: 100%;
+		min-height: 0;
+		min-width: 0;
+		padding-right: 1rem;
+		box-sizing: border-box;
+	}
+
+	.settings h2 {
+		margin: 0 0 0.5rem 0;
+		flex-shrink: 0;
+	}
+
+	.settings-body {
+		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
 		overflow-x: hidden;
-		padding-right: 1rem;
-		min-width: 0;
+		padding-right: 0.25rem;
 	}
 
 	.settings-fields {
@@ -785,9 +806,15 @@ Can produce very large log files."
 
 	.settings-actions {
 		display: flex;
-		justify-content: flex-end;
 		flex-shrink: 0;
+		padding-top: 0.75rem;
 		margin-top: 0.5rem;
+		border-top: 1px solid rgba(127, 127, 127, 0.2);
+	}
+
+	.settings-actions button {
+		width: 100%;
+		font-weight: 600;
 	}
 
 	.run-actions {
@@ -1050,6 +1077,13 @@ Can produce very large log files."
 
 	.stats dd {
 		margin: 0;
+	}
+
+	.summary {
+		margin: -0.5rem 0 0;
+		font-size: 0.85rem;
+		opacity: 0.85;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.tree {

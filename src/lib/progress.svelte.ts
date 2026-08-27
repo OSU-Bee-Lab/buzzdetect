@@ -39,6 +39,12 @@ export interface Stats {
 	etaSeconds: number | null;
 }
 
+export interface RunSummary {
+	audioSeconds: number;
+	runtimeSeconds: number;
+	rate: number;
+}
+
 const ZERO_STATS: Stats = {
 	priorSeconds: 0,
 	remainingSeconds: 0,
@@ -203,6 +209,7 @@ class AnalysisRun {
 	// (a user-initiated cancel has nothing to say in the error paragraph).
 	stopped = $state(false);
 	startedAt = $state<number | null>(null);
+	summary = $state<RunSummary | null>(null);
 	// True once the engine's directory walk has reported every file it's
 	// going to (manifest_done). Before that, the file list itself is
 	// incomplete, on top of individual files' work not yet being known.
@@ -401,6 +408,7 @@ class AnalysisRun {
 		this.error = null;
 		this.stopped = false;
 		this.stopping = false;
+		this.summary = null;
 		this.discoveryDone = false;
 		this.stage = 'launching';
 		const now = Date.now();
@@ -446,9 +454,16 @@ class AnalysisRun {
 		this.stopping = false;
 		this.stopped = true;
 		if (error) this.error = error;
-		this.now = Date.now();
+		const now = Date.now();
+		this.now = now;
 		this.instantaneousRate = 0;
 		this.statsSnapshot = this.computeStats();
+		if (this.startedAt !== null) {
+			const runtimeSeconds = Math.max(0, (now - this.startedAt) / 1000);
+			const audioSeconds = this.totals.doneSeconds;
+			const rate = runtimeSeconds > 0 ? audioSeconds / runtimeSeconds : 0;
+			this.summary = { audioSeconds, runtimeSeconds, rate };
+		}
 		if (this.ticker !== null) {
 			clearInterval(this.ticker);
 			this.ticker = null;
