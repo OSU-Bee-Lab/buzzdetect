@@ -6,9 +6,14 @@ directory; raw outputs in the gitignored `local/bench/`.
 **Verdict: the ~30% suspicion does not reproduce as stated, and the cause is
 not the one anyone expected.** ONNX as shipped is 3.4x slower than TensorFlow,
 not 30%. Almost all of that is a CPU-side spectrogram that has nothing to do
-with onnxruntime. What remains after fixing it is a *shared* problem — two
-convolution layers that run ~100x off hardware peak in onnxruntime, in every
-ONNX graph we have.
+with onnxruntime. What remained after fixing it was a 1.29x gap, and §8 closes
+it: fusing Conv+Relu takes the fused graph to **49.1 ms against TensorFlow's
+52.6 ms**, bit-exact. **The ONNX path wins outright.**
+
+> **§3's per-layer attribution below is wrong, and §8 explains why.** The "two
+> convolution layers ~100x off peak" are a profiling artifact. Timed properly
+> they take 0.48 ms and 0.87 ms. The section is kept as written because the
+> mistake is instructive and the rejected hypotheses in §4 remain valid.
 
 ## Environment
 
@@ -66,6 +71,9 @@ timing comparison is valid.
 
 ## 3. Where the time actually goes (onnxruntime per-node profiler)
 
+> **Superseded by §8.** Everything in this section that attributes cost to a
+> *particular node* is an artifact of the profiler. The totals are fine.
+
 Profiling the fused graph, 200 s input, everything on `CUDAExecutionProvider`
 (no CPU partition):
 
@@ -100,6 +108,12 @@ under a millisecond of arithmetic. It is taking 20 ms — about two orders of
 magnitude off peak. Even judged as memory-bound (depthwise convolutions have
 poor arithmetic intensity), layer 2 moves ~82 MB in 29 ms — about 2.8 GB/s
 against the card's ~192 GB/s. Slow by any measure.
+
+**And that reasoning was right, which is exactly why the measurement should
+have been doubted.** A number two orders of magnitude off hardware is more
+often a broken measurement than a broken kernel. The tell was in this table
+already: the per-node kernel times sum to 54.9 ms against a 41 ms wall clock.
+The parts exceed the whole. See §8.
 
 **But this is not why TensorFlow wins, and an earlier draft of this document
 said it was.** That draft blamed TensorFlow's hand-tuned depthwise kernels. Our
@@ -262,21 +276,108 @@ preloads its own copies — which is also why the fused arm looked healthy befor
 the fix: it imports TensorFlow for its declared embedder and inherited TF's
 resolution.
 
+## 8. The 1.29x, closed — it was the Relus, not the convolutions
+
+`profile_trunk.py`'s per-node kernel times are not trustworthy. Enabling
+profiling makes onnxruntime record CUDA events around every kernel, which
+serialises the stream and bills queue wait to whichever node is doing the
+waiting — always one of the first large ones. That is how layer 1 and layer 2
+came to be charged 18.6 and 29.0 ms, and why the column sums to 54.9 ms against
+a 41 ms wall clock.
+
+Timed honestly — rebuilt as standalone graphs on their real shapes, inputs
+device-resident via `IOBinding`, outputs synchronised explicitly
+(`isolate_convs.py`):
+
+| layer | profiler said | actually |
+|---|---|---|
+| layer 2 depthwise, `[209,32,48,32]` | 29.0 ms | **0.87 ms** |
+| layer 1 conv, `[209,1,96,64]` | 18.6 ms | **0.48 ms** |
+
+*(Device-resident inputs are not optional here. Bound from the host, an 80 MB
+tensor's PCIe copy dwarfs the kernel: layer 3, which costs well under a
+millisecond, "took" 19.7 ms. The trunk control in that script exists to catch
+exactly this — it must reproduce the known ~41 ms or nothing else is credible.)*
+
+`sum_of_parts.py` then rebuilds **every** node of ORT's own optimized graph and
+times it the same way:
+
+| op | nodes | standalone |
+|---|---|---|
+| Conv | 27 | 32.34 ms |
+| Relu | 27 | **10.34 ms** |
+| everything else | 3 | 0.25 ms |
+| **sum of parts** | | **42.93 ms** |
+| **whole trunk** | | **41.00 ms** |
+
+The parts add up to the whole. **There is no pathology**: cost is flat across
+the trunk and the convolutions are near what this card can do. The largest
+single node is `Conv__289` at 4.45 ms; layer 1 is not in the top ten.
+
+What the flat profile does expose is the Relus — 27 standalone passes that
+re-read and re-write an entire activation tensor to apply a `max()`. Layer 2's
+alone moves 82 MB. tf2onnx emits them as separate nodes, and ORT's
+`ConvActivationFusion` is not registered for the CUDA EP, so nothing folds
+them. Handing the graph `com.microsoft.FusedConv` nodes directly
+(`try_fusedconv.py`, `bench_fusedconv_endtoend.py`):
+
+| arm | time | vs TF |
+|---|---|---|
+| TensorFlow (`yamnet_k2`) | 52.6 ms | 1.00x |
+| `onnx_fused`, as exported | 67.8 ms | 1.29x slower |
+| **`onnx_fused` + FusedConv** | **49.1 ms** | **0.93x — faster** |
+
+Standalone trunk: 41.7 ms -> 23.2 ms, **1.80x**. Both are **bit-exact** (max
+abs diff 0.0), since the rewrite only changes which kernel applies the `max()`.
+The saving exceeds the Relus' own 10.3 ms because fusion also eliminates the
+intermediate write.
+
+### Also ruled out in the course of this
+
+| lever | result |
+|---|---|
+| Dynamic batch dim (`unk__360`) | static batch, and free-dimension override: both within noise (`try_static_batch.py`) |
+| Asymmetric padding on layer 1 | symmetric and unpadded variants identical (`isolate_convs.py`) |
+| Layer 1's single input channel | 3 channels is *slower* in wall time, 2.4x better per FLOP |
+| Folding depthwise BN by hand | 26 nodes removed, bit-exact, **1.00x** — ORT's optimizer already does it (`fold_depthwise_bn.py`) |
+| GPU clocks / thermals | boosting correctly: 1875 MHz, P0, 99% util, 61 W of 75 W |
+
+That last one also explains why `bisect_trunk.py`'s prefix marginals disagreed
+with both the profiler and `sum_of_parts.py`: ORT re-optimizes each prefix, so
+a cut placed between a Conv and its Mul/Add yields a *different* graph, not a
+smaller one. Prefix bisection is only valid across fusion boundaries.
+
 ## What to do about it
 
 1. **Ship the fused ONNX model.** 177 ms -> 67.7 ms for every user, no size
    cost (14 MB replaces 56 KB + a 13 MB embedder), no new dependency, and it
    loads 10x faster than TensorFlow. Two small blockers in NEXT_STEPS §1.
-2. **Do not chase the remaining 1.29x through onnxruntime tuning.** Four levers
-   tested, none moved it (§4). The two slow convolutions are real, but appear
-   to be slow under TensorFlow too. Pushing further means a newer onnxruntime
-   or TensorRT — real projects, not config changes.
-3. **Do not re-export for an FFT** (§3) — the DFT costs 0.83 ms.
-4. **Do not switch to fp16 on NVIDIA** (§4) — it halves throughput on this
+2. **Apply the FusedConv rewrite at export** (§8). 67.8 ms -> 49.1 ms,
+   bit-exact, no new dependency, no runtime cost — it is a graph rewrite over a
+   build artifact, so it belongs in `tools/onnxify_model.py` beside the export
+   it corrects.
+3. **Do not ship or source TensorFlow for CUDA users.** With §8 the ONNX path
+   is *faster* than TensorFlow (0.93x). NEXT_STEPS §5 is retired.
+4. **Do not chase the convolutions further** (§8). They are not slow; the
+   premise was a measurement artifact. A newer onnxruntime and TensorRT were
+   the next candidates and neither is now worth its cost.
+5. **Do not re-export for an FFT** (§3) — the DFT costs 0.83 ms.
+6. **Do not switch to fp16 on NVIDIA** (§4) — it halves throughput on this
    class of card.
-5. **Judge TensorFlow on the honest number, which is 1.29x** over the fused
-   model — not the 3.4x today's shipped path implies, and not the 30%
-   originally suspected. On an 80 h analysis that is roughly 18 h, to be
-   weighed against shipping or sourcing TensorFlow.
-6. **Finish the end-to-end runs before acting on 5** (§6). If real throughput
-   is decode-bound on 8 cores, that 1.29x may never reach users.
+7. **Finish the end-to-end runs before sizing any of this** (§6). If real
+   throughput is decode-bound on 8 cores, a 1.38x on inference may not reach
+   users at all.
+
+## Method note
+
+Three separate attributions of the trunk's 41 ms disagreed with each other, and
+the first two were wrong:
+
+- **Per-node profiler** — inflated, and inflated *non-uniformly*. Its own total
+  exceeding the wall clock was the available tell.
+- **Prefix bisection** — invalidated by re-optimization at each cut.
+- **Standalone-node sum, validated against a whole-graph control** — the only
+  one that reconciled, and only because the control was there to check it.
+
+Any per-node GPU timing here should carry a whole-graph control that reproduces
+a known number. Both wrong methods looked entirely plausible in isolation.
