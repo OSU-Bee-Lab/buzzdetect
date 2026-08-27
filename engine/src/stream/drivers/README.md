@@ -187,6 +187,47 @@ Streaming the full file in 200 s chunks, no inference:
 Output is bit-identical to plain `soundfile` at every offset tested, so
 adopting the driver does not shift existing results.
 
+### Why the read path runs in a helper process
+
+Every one of those millions of virtual-IO callbacks is a Python call, so the
+scan holds the GIL for as long as it runs. On one streamer that is invisible.
+On eight it is the whole analysis: the streamers stop parallelising and crawl
+together, and since the ONNX fusion made the analyzer roughly 30x faster, a
+streamer stall that used to hide under TensorFlow inference became the runtime.
+
+The scan cannot be moved on its own. libsndfile fixes an mp3's length at open
+and clamps every later read and seek to it, and there is no API to inject a
+length it already knows — so a subprocess cannot compute the frame count and
+hand the number back. The shim has to stay in place for the lifetime of the
+track. What moves is therefore the whole decoder: `LocalDriver` is the
+in-process reader, and `Driver` normally runs one inside a helper process,
+answering open/read/seek/tell over a `Pipe` with sample data returned through
+shared memory (a 200 s chunk is ~35 MB, far too much to pickle through a pipe).
+
+Streamers stay threads and the coordinator's shared state is untouched, which
+is why this shape was chosen over making the streamers themselves processes:
+`Coordinator.assigned_chunks` is a plain dict under a `threading.Lock`, and
+`AssignFile.track` is an open file handle that cannot cross a process boundary.
+
+A helper is leased for the lifetime of one open file and returned to a pool. A
+helper that dies or stops answering is not fatal — the file reopens in-process,
+seeks back to where it was, and the read is retried once — so the worst case is
+the old behaviour, not a failed analysis. `BUZZDETECT_MP3_HELPERS` selects
+`auto` (the default: a helper whenever another file is already open, which is
+exactly when there is contention to lose), `always`, or `never`.
+
+Measured on beelab-files, 8 threads opening 8 distinct 12.75 h files from a
+network mount and reading three 200 s chunks from each:
+
+| | wall | slowest open | mean open |
+| --- | --- | --- | --- |
+| in-process (`never`) | 17.2 s | 16.8 s | 8.98 s |
+| helpers (`auto`) | **5.05 s** | **4.28 s** | **3.69 s** |
+
+End to end, the same eight files (102 h of audio) through a full GPU analysis
+with 8 streamers: **184 s in-process, 61 s with helpers** — 3.0x, and the
+per-file output is byte-identical between the two.
+
 ### Alternatives that were tried and rejected
 
 - **A PyAV/ffmpeg driver.** Correct, and it reports the length to within 3
