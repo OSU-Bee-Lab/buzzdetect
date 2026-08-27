@@ -83,7 +83,12 @@ class Coordinator:
     # Getters block on a bare ``.get()``. They unblock either because real work
     # arrived or because the coordinator poisoned the queue with EXIT.
     def get_stream(self):
-        return self.q_stream.get()
+        if self.event_exitanalysis.is_set():
+            return EXIT
+        item = self.q_stream.get()
+        if self.event_exitanalysis.is_set():
+            return EXIT
+        return item
 
     def put_analyze(self, a_chunk: AssignChunk):
         with self._lock:
@@ -106,7 +111,12 @@ class Coordinator:
                 continue
 
     def get_analyze(self):
-        return self.q_analyze.get()
+        if self.event_exitanalysis.is_set():
+            return EXIT
+        item = self.q_analyze.get()
+        if self.event_exitanalysis.is_set():
+            return EXIT
+        return item
 
     def put_write(self, a_chunk: AssignChunk):
         self.q_write.put(a_chunk)

@@ -59,6 +59,10 @@ class WorkerStreamer:
         self.log(msg, level)
 
     def _chunk_file(self, a_file: AssignFile):
+        if self.coordinator.event_exitanalysis.is_set():
+            a_file.chunklist = []
+            return
+
         if os.path.exists(a_file.path_results_complete):
             self.log(f'Skipping {a_file.shortpath_audio}; already analyzed', 'DEBUG')
             emit_progress('file_skip', path=a_file.shortpath_audio, reason='already_analyzed')
@@ -167,8 +171,10 @@ class WorkerStreamer:
     def run(self):
         self.log('launching', 'INFO')
         while True:
+            if self.coordinator.event_exitanalysis.is_set():
+                break
             a_file = self.coordinator.get_stream()
-            if a_file == 'exit':
+            if a_file == 'exit' or self.coordinator.event_exitanalysis.is_set():
                 break
 
             self.log(f"buffering {a_file.shortpath_audio}", 'INFO')
