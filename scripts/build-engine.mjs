@@ -45,6 +45,12 @@ const ENGINE = join(ROOT, 'engine');
 
 const SHIPLIST = 'shipped-models.txt';
 
+// The frozen engine binary, and so the externalBin name in tauri.conf.json.
+// Not plain 'buzzdetect': Tauri drops the target triple and installs the
+// sidecar beside the app executable, which is itself named buzzdetect -- the
+// two would be the same path.
+const SIDECAR = 'buzzdetect-engine';
+
 // What a shipped model directory consists of. model.onnx and model.py are
 // required (checked below); the CSVs are carried for whoever reads the results
 // and are copied when present. Notably absent: the TensorFlow weights, which
@@ -123,11 +129,11 @@ function freeze() {
 		cwd: ENGINE
 	});
 
-	const built = join(ENGINE, 'dist', IS_WINDOWS ? 'buzzdetect.exe' : 'buzzdetect');
+	const built = join(ENGINE, 'dist', IS_WINDOWS ? `${SIDECAR}.exe` : SIDECAR);
 	if (!existsSync(built)) throw new Error(`pyinstaller produced no binary at ${built}`);
 
 	mkdirSync(OUT_BIN_DIR, { recursive: true });
-	const dest = join(OUT_BIN_DIR, `buzzdetect-${targetTriple()}${IS_WINDOWS ? '.exe' : ''}`);
+	const dest = join(OUT_BIN_DIR, `${SIDECAR}-${targetTriple()}${IS_WINDOWS ? '.exe' : ''}`);
 	// Moved rather than copied, and PyInstaller's staging directory deleted
 	// right after: between them they were most of a CUDA build's disk
 	// footprint, and the Linux CI runner has under 14GB for the whole job.

@@ -1,8 +1,8 @@
-# buzzdetect2 — desktop app for buzzdetect
+# buzzdetect — desktop app
 
-[![Latest release](https://img.shields.io/github/v/release/LukeHearon/buzzdetect-2)](https://github.com/LukeHearon/buzzdetect-2/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/OSU-Bee-Lab/buzzdetect)](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest)
 
-buzzdetect2 is a desktop front end for [buzzdetect](https://github.com/OSU-Bee-Lab/buzzdetect), the OSU Bee Lab's bioacoustics classifier. Point it at a folder of audio, pick a model, pick somewhere for the results to land, and press Analyze. You get a CSV per audio file giving each model class's activation over time.
+A desktop front end for [buzzdetect](https://github.com/OSU-Bee-Lab/buzzdetect), the OSU Bee Lab's bioacoustics classifier. Point it at a folder of audio, pick a model, pick somewhere for the results to land, and press Analyze. You get a CSV per audio file giving each model class's activation over time.
 
 The whole analysis engine ships inside the app. There is no Python to install, no environment to build, no dependencies to chase — download it, open it, run it.
 
@@ -14,29 +14,31 @@ One thing does differ, and it's worth stating plainly. So the app can ship witho
 
 ## Install
 
-[![Download for macOS (Apple Silicon)](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-macOS-AppleSilicon.dmg) [![Download for macOS (Intel)](https://img.shields.io/badge/Download-macOS%20Intel-555?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-macOS-Intel.dmg) [![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Windows.exe) [![Download for Linux (.deb)](https://img.shields.io/badge/Download-.deb-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux.deb)
+[![Download for macOS (Apple Silicon)](https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-macOS-AppleSilicon.dmg) [![Download for macOS (Intel)](https://img.shields.io/badge/Download-macOS%20Intel-555?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-macOS-Intel.dmg) [![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-Windows.exe) [![Download for Linux (.deb)](https://img.shields.io/badge/Download-.deb-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-Linux.deb)
 
 Pick the right macOS build: **Apple Silicon** for M1 and later, **Intel** for pre-2020 Macs. There's no universal build — the machine learning runtime the engine uses isn't published in a form that allows one.
 
-Mac users will have to fight against macOS to open buzzdetect2. More on that [below](#macos-woes).
+Mac users will have to fight against macOS to open buzzdetect. More on that [below](#macos-woes).
 
 On Debian/Ubuntu, use the `.deb`:
 
 ``` sh
-sudo apt install ./buzzdetect2-Linux.deb
+sudo apt install ./buzzdetect-Linux.deb
 ```
 
-On other distros, grab the [AppImage](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux.AppImage) instead.
+On other distros, grab the [AppImage](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-Linux.AppImage) instead.
 
 ### NVIDIA GPU builds
 
-If you have an NVIDIA card, there are separate CUDA installers that run inference on the GPU — [Linux .deb](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux-CUDA.deb), [Linux AppImage](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Linux-CUDA.AppImage), [Windows](https://github.com/LukeHearon/buzzdetect-2/releases/latest/download/buzzdetect2-Windows-CUDA.exe). They bundle the CUDA runtime, so you need a recent NVIDIA driver but no system CUDA install. Turing (GTX 16-series, RTX 20-series) and newer are supported.
+If you have an NVIDIA card on Windows, there's a separate CUDA build that runs inference on the GPU: [Windows CUDA](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-Windows-CUDA.zip). It bundles the CUDA runtime, so you need a recent NVIDIA driver but no system CUDA install. Turing (GTX 16-series, RTX 20-series) and newer are supported. It ships as a portable zip rather than an installer — unpack it anywhere and run `buzzdetect-cuda.exe` — because the bundled runtime is larger than the installer format can take.
 
-They're about a gigabyte, which is why they're separate rather than the default. Set GPU analyzers to 1 and CPU analyzers to 0 in Advanced settings to use the card. The GPU analyzers setting only appears in builds whose engine can actually use one, and if a CUDA build can't reach your card it says so in the log and falls back to the CPU rather than pretending.
+On Linux there's no separate CUDA build for the same size reason. Install CUDA 12 and cuDNN 9 yourself and the ordinary `.deb`/AppImage finds them.
+
+It's about a gigabyte, which is why it's separate rather than the default. Set GPU analyzers to 1 and CPU analyzers to 0 in Advanced settings to use the card. The GPU analyzers setting only appears in builds whose engine can actually use one, and if a CUDA build can't reach your card it says so in the log and falls back to the CPU rather than pretending.
 
 On Apple Silicon the regular macOS build already has a GPU option — it runs the model on the GPU through CoreML, at full float32 precision, for a bit over 2x end to end. Nothing extra to install.
 
-The CUDA builds install alongside the regular ones rather than replacing them.
+The CUDA build installs alongside the regular one rather than replacing it.
 
 ## Overview
 
@@ -57,17 +59,27 @@ Analysis is *resumable and idempotent*. Results are written incrementally as eac
 
 ## macOS woes
 
-buzzdetect2 is not code-signed, because I cannot afford the developer licenses. Because of this, macOS helpfully pitches a tantrum when you try to use this tool. Here's how to get past the worst of it:
+buzzdetect is not code-signed, because I cannot afford the developer licenses. Because of this, macOS helpfully pitches a tantrum when you try to use this tool.
 
-1.  Install buzzdetect2 to `/Applications` (drag it there from the DMG).
-2.  Open buzzdetect2. You'll see a "buzzdetect2.app" Not Opened popup.
-    - Click "Done"
-3.  Open System Settings → Privacy & Security, scroll to the Security section near the bottom. You should see ""buzzdetect2.app" was blocked to protect your Mac".
+Install it to `/Applications` (drag it there from the DMG), then open it. You'll get one of two complaints, and they need different answers.
+
+**"buzzdetect.app" is damaged and can't be opened.** Nothing is damaged — this is what macOS says about an unsigned app it has quarantined, and there's no button that gets past it. Remove the quarantine flag in Terminal:
+
+``` sh
+xattr -dr com.apple.quarantine /Applications/buzzdetect.app
+```
+
+Then open it normally.
+
+**"buzzdetect.app" Not Opened.** The milder version, which you can click through:
+
+1.  Click "Done".
+2.  Open System Settings → Privacy & Security, scroll to the Security section near the bottom. You should see ""buzzdetect.app" was blocked to protect your Mac".
     - Click "Open Anyway"
-4.  In one last bid to stop you from working, macOS will throw up a dialogue titled "Open "buzzdetect2.app"?"
+3.  In one last bid to stop you from working, macOS will throw up a dialogue titled "Open "buzzdetect.app"?"
     - Click "Open Anyway"
 
-You will only have to do this once. Thank goodness.
+Either way, you only have to do it once. Thank goodness.
 
 Windows does something similar but less elaborate: SmartScreen shows "Windows protected your PC", and you click "More info" → "Run anyway".
 

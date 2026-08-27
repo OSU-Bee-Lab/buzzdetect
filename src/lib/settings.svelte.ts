@@ -24,7 +24,7 @@ export interface Settings {
 	logProgress: boolean;
 }
 
-const STORAGE_KEY = 'buzzdetect2.settings';
+const STORAGE_KEY = 'buzzdetect.settings';
 
 function defaults(): Settings {
 	return {

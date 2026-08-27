@@ -161,7 +161,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
-          releaseName: buzzdetect2 ${{ inputs.tag || github.ref_name }}
+          releaseName: buzzdetect ${{ inputs.tag || github.ref_name }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
@@ -183,17 +183,17 @@ jobs:
           REPO="${{ github.repository }}"
           npm run tauri build -- ${{ matrix.args }}
 
-          name="buzzdetect2-cuda_${VERSION}_${{ matrix.portable }}"
+          name="buzzdetect-cuda_${VERSION}_${{ matrix.portable }}"
           mkdir -p "dist/$name"
           # Without a bundling step Tauri may leave the binary under its cargo
           # name rather than the product name, so take whichever is there and
           # give the user the product name either way.
-          app=src-tauri/target/release/buzzdetect2-cuda.exe
-          if [ ! -f "$app" ]; then app=src-tauri/target/release/buzzdetect2.exe; fi
+          app=src-tauri/target/release/buzzdetect-cuda.exe
+          if [ ! -f "$app" ]; then app=src-tauri/target/release/buzzdetect.exe; fi
           [ -f "$app" ] || { echo "no app binary in src-tauri/target/release"; exit 1; }
-          cp "$app" "dist/$name/buzzdetect2-cuda.exe"
-          cp "src-tauri/binaries/buzzdetect-${{ matrix.triple }}.exe" \
-            "dist/$name/buzzdetect.exe"
+          cp "$app" "dist/$name/buzzdetect-cuda.exe"
+          cp "src-tauri/binaries/buzzdetect-engine-${{ matrix.triple }}.exe" \
+            "dist/$name/buzzdetect-engine.exe"
           cp -r src-tauri/engine-payload "dist/$name/engine-payload"
 
           # 7-Zip rather than Compress-Archive, which is built on a zip writer
@@ -204,7 +204,7 @@ jobs:
           # Whichever matrix job lands first creates the draft; this one may be
           # it, so don't assume the release already exists.
           gh release view "$TAG" -R "$REPO" > /dev/null 2>&1 || \
-            gh release create "$TAG" -R "$REPO" --draft --title "buzzdetect2 $TAG" --notes ""
+            gh release create "$TAG" -R "$REPO" --draft --title "buzzdetect $TAG" --notes ""
           gh release upload "$TAG" "dist/$name.zip" -R "$REPO" --clobber
 
       # Runs even when the upload above rejected something for being too big,
@@ -269,12 +269,12 @@ jobs:
             echo "Renamed: $from -> $to"
           }
 
-          rename_asset "buzzdetect2_${VERSION}_aarch64.dmg"   "buzzdetect2-macOS-AppleSilicon.dmg"
-          rename_asset "buzzdetect2_${VERSION}_x64.dmg"       "buzzdetect2-macOS-Intel.dmg"
-          rename_asset "buzzdetect2_${VERSION}_amd64.AppImage" "buzzdetect2-Linux.AppImage"
-          rename_asset "buzzdetect2_${VERSION}_amd64.deb"      "buzzdetect2-Linux.deb"
-          rename_asset "buzzdetect2_${VERSION}_x64-setup.exe"  "buzzdetect2-Windows.exe"
+          rename_asset "buzzdetect_${VERSION}_aarch64.dmg"   "buzzdetect-macOS-AppleSilicon.dmg"
+          rename_asset "buzzdetect_${VERSION}_x64.dmg"       "buzzdetect-macOS-Intel.dmg"
+          rename_asset "buzzdetect_${VERSION}_amd64.AppImage" "buzzdetect-Linux.AppImage"
+          rename_asset "buzzdetect_${VERSION}_amd64.deb"      "buzzdetect-Linux.deb"
+          rename_asset "buzzdetect_${VERSION}_x64-setup.exe"  "buzzdetect-Windows.exe"
 
           # Windows is the only bundled-CUDA build, and it ships as a portable
           # archive rather than an installer; see the matrix comments for why.
-          rename_asset "buzzdetect2-cuda_${VERSION}_windows-x64.zip"  "buzzdetect2-Windows-CUDA.zip"
+          rename_asset "buzzdetect-cuda_${VERSION}_windows-x64.zip"  "buzzdetect-Windows-CUDA.zip"

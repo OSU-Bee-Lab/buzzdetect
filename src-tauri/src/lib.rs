@@ -38,14 +38,15 @@ struct Engine {
 }
 
 #[cfg(target_os = "windows")]
-const SIDECAR_NAME: &str = "buzzdetect.exe";
+const SIDECAR_NAME: &str = "buzzdetect-engine.exe";
 #[cfg(not(target_os = "windows"))]
-const SIDECAR_NAME: &str = "buzzdetect";
+const SIDECAR_NAME: &str = "buzzdetect-engine";
 
 fn resolve_engine(app: &AppHandle) -> Result<Engine, String> {
     // Tauri strips the target triple when it copies an externalBin into the
     // bundle, so the sidecar lands beside the app executable under its plain
-    // name.
+    // name -- which is why that name is buzzdetect-engine rather than
+    // buzzdetect, the app executable's own.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             let sidecar = exe_dir.join(SIDECAR_NAME);

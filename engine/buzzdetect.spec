@@ -1,8 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for the frozen buzzdetect engine.
 
-Produces a single `buzzdetect` executable that the desktop app spawns as a
-sidecar, so users don't need Python or a venv. Build it through
+Produces a single `buzzdetect-engine` executable that the desktop app spawns
+as a sidecar, so users don't need Python or a venv. Named for the app rather
+than after it: Tauri installs an externalBin beside the app executable, which
+is itself named buzzdetect, so a sidecar called buzzdetect would be the same
+file. Build it through
 `node scripts/build-engine.mjs` from the repo root rather than calling
 pyinstaller directly -- that script creates the TF-free venv this expects and
 assembles the data payload that has to sit next to the binary.
@@ -106,7 +109,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='buzzdetect',
+    name='buzzdetect-engine',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

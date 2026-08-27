@@ -1,5 +1,5 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "buzzdetect2-cuda",
-  "identifier": "com.luke.buzzdetect2.cuda"
+  "productName": "buzzdetect-cuda",
+  "identifier": "com.luke.buzzdetect.cuda"
 }

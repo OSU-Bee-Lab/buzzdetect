@@ -26,7 +26,7 @@ const cargoLockPath = resolve(root, 'src-tauri/Cargo.lock');
 writeFileSync(
 	cargoLockPath,
 	readFileSync(cargoLockPath, 'utf8').replace(
-		/(\[\[package\]\]\nname = "buzzdetect2"\nversion = ").*(")/,
+		/(\[\[package\]\]\nname = "buzzdetect"\nversion = ").*(")/,
 		`$1${version}$2`
 	)
 );
