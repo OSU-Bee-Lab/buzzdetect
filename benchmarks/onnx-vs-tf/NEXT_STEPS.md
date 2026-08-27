@@ -4,6 +4,19 @@ Written 2026-08-27, out of the ONNX-vs-TensorFlow benchmark
 (`benchmarks/onnx-vs-tf/` on the `bench/onnx-vs-tf` branch). Ordered by
 value-for-effort, best first.
 
+**Status, 2026-08-27 (later the same day).** §1 and §2 are done, and §3 with
+them. buzzdetect-training's `tools/export_onnx.py` now emits one fused graph
+per model -- front end, trunk and head, batchnorms folded, Conv+Relu fused --
+and the engine runs that and nothing else: no embedder plugin, no NumPy front
+end, no TensorFlow. §4 stays moot and §5's motivation stays retired. What is
+left below is §6.
+
+The CoreML question §2 flagged as unmeasured is answered in `COREML.md`, along
+with §5.1's fp16 claim (real: 3.3x on the trunk, 1.9x end to end) and §5.6's
+decode-bound question (not decode-bound on macOS with local files -- four hours
+of audio in nine seconds). The one thing still unmeasured is the finished graph
+on CUDA.
+
 Measured on a GTX 1650, 200 s of audio per call, median of 30:
 
 | path | time | vs TensorFlow |

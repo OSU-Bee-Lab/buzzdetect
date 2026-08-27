@@ -147,3 +147,41 @@ CoreML configurations that matter, including the shipped one.
 ```
 python verify_coreml.py path/to/model.onnx
 ```
+
+---
+
+## §5.6: is throughput decode-bound?
+
+Not on this machine, at this speed, on local files. 48 copies of the 300 s
+fixture — four hours of 44.1 kHz FLAC — through `buzzdetect_cli.py` with one
+CoreML analyzer:
+
+| streamers | wall | vs real time |
+|---|---|---|
+| 1 | 11.4 s | 1267x |
+| **2** | **8.9 s** | **1614x** |
+| 4 | 9.2 s | 1565x |
+| 8 | 10.2 s | 1412x |
+
+No `BUFFER BOTTLENECK` was reported at any setting, so the analyzer never
+waited more than 10 ms for an assignment. Two streamers is 21% better than the
+default of one; past that the decoder threads start taking cores off the
+analyzer and it gets slower again, which is the contention `RESULTS.md` §6
+describes, just much milder here.
+
+Read this narrowly. Forty-eight copies of one file on a local SSD is the
+friendliest possible decode: everything after the first read is in the page
+cache, FLAC is cheap to decode, and there is no network. The Linux box's
+finding — twelve decoder threads and an analyzer contending for eight cores —
+is about a different shape of workload. What this does show is that the
+inference side is no longer the thing to optimise on an Apple machine: four
+hours of audio in nine seconds.
+
+## Still unmeasured
+
+**The fused graph has not been run on CUDA.** `RESULTS.md` §8 measured
+FusedConv, and `fold_depthwise_bn.py` measured the batchnorm fold, but on the
+old `model_combined.onnx` and separately. The graph that now ships has both
+rewrites and a pinned input length, and no one has timed that combination on a
+GPU. The rewrites are the same ones, so the expectation is the same 1.38x or
+better — but it is an expectation, not a measurement.
