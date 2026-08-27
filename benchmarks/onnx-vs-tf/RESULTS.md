@@ -97,9 +97,18 @@ artifact:
 
 For scale: layer 1 is roughly 0.18 GFLOP. On a ~2.9 TFLOP card that is well
 under a millisecond of arithmetic. It is taking 20 ms — about two orders of
-magnitude off peak. Depthwise convolutions are a known weak spot for cuDNN;
-TensorFlow ships its own hand-tuned depthwise kernels, which is the most likely
-reason it wins at all.
+magnitude off peak. Even judged as memory-bound (depthwise convolutions have
+poor arithmetic intensity), layer 2 moves ~82 MB in 29 ms — about 2.8 GB/s
+against the card's ~192 GB/s. Slow by any measure.
+
+**But this is not why TensorFlow wins, and an earlier draft of this document
+said it was.** That draft blamed TensorFlow's hand-tuned depthwise kernels. Our
+own numbers refute it: onnxruntime's trunk alone is **42.4 ms**, while
+TensorFlow's *entire* embed — front end and trunk together — is **52.4 ms**.
+TensorFlow cannot be beating onnxruntime at convolutions when its whole
+pipeline costs more than onnxruntime's convolutions do. The likelier reading is
+that these layers are slow under *both* runtimes: a property of YAMNet's shape
+on this GPU, not an onnxruntime defect.
 
 ### Hypothesis tested and REJECTED: the missing FFT
 
@@ -115,12 +124,13 @@ for an FFT; it would buy at most a fraction of a millisecond.
 *(This corrects §2 of the first draft of NEXT_STEPS.md, which recommended
 exactly that.)*
 
-## 4. CUDA provider tuning — no effect
+## 4. Tuning attempts — four levers, none of them moved it
 
 `providers_for()` (`src/inference/onnx.py:84`) passes `{}` today, so cuDNN
-algorithm selection and tensor layout are at their defaults. Depthwise convs
-are the classic case where those defaults are wrong, so this looked promising.
-It isn't:
+algorithm selection and tensor layout sit at their defaults.
+
+**Provider options.** Depthwise convs are the classic case where those defaults
+are wrong. They aren't:
 
 | config | median | vs default |
 |---|---|---|
@@ -132,15 +142,49 @@ It isn't:
 | nhwc + EXHAUSTIVE | 66.8 ms | 0.99x |
 | nhwc + EXHAUSTIVE + workspace | 66.7 ms | 0.99x |
 
-Every knob is within noise, and NHWC is marginally *worse*. Provider options do
-not reach whatever is wrong here.
+Everything within noise; NHWC marginally worse.
 
-One lead surfaced from the session logs, not yet chased:
+**Batch size.** Everything else here runs 209 frames at once (200 s at
+framehop 1). If cuDNN were picking a bad kernel at that shape, `--chunklength`
+would be a user-facing fix. Per-frame cost on the standalone trunk:
 
-```
-13 Memcpy nodes are added to the graph tf2onnx_tf2onnx for CUDAExecutionProvider.
-It might have negative impact on performance (including unable to run CUDA graph).
-```
+| frames | 1 | 8 | 32 | 64 | 128 | **209** | 256 | 418 | 836 |
+|---|---|---|---|---|---|---|---|---|---|
+| ms/frame | 0.976 | 0.328 | 0.213 | 0.207 | 0.203 | **0.206** | 0.205 | 0.232 | 0.203 |
+
+Flat from 32 frames upward — the convolutions scale linearly, so they are
+uniformly slow rather than badly shaped. `--chunklength 200` is already fine
+and is not a tuning knob for this.
+
+**fp16.** The last lever on convolution throughput, and it is actively harmful
+here:
+
+| | time | rate |
+|---|---|---|
+| fp32 (current) | 42.3 ms | 4741 audio-s/wall-s |
+| fp16 | 81.0 ms | 2478 audio-s/wall-s |
+
+**0.52x — half the speed** — plus 0.0108 max absolute error on the embeddings.
+The GTX 16xx Turing dies have a crippled fp16 rate and this is one of them.
+(Says nothing about CoreML's fp16/ANE path on macOS: different silicon,
+reportedly ~3.5x the other way.)
+
+**CPU fallback and host/device copies.** onnxruntime warns that it inserts
+`13 Memcpy nodes` into this graph. Profiled, they cost **0.000 ms** — the
+optimizer removes them. 59 of 147 nodes do sit on `CPUExecutionProvider`, but
+all are tiny shape arithmetic (`Shape`, `Concat`, `Split`, `Cast`) totalling
+**0.618 ms/run — 0.9%**. Not a factor.
+
+**Where that leaves it.** Splitting the fused graph's profile by op class:
+convolution-side work (Conv/Relu/Pool/Gemm) is 56.2 ms, and everything else —
+the entire STFT front end — is 13.0 ms (18.8%). So the front end isn't the
+problem either. The ONNX path looks close to its practical floor under
+onnxruntime 1.26 on this GPU.
+
+Untested, both larger lifts than a config change: a newer onnxruntime (1.27+,
+CUDA 13 — this box's 580 driver supports it), and the TensorRT execution
+provider.
+
 
 ## 5. The async-dispatch confound — real in principle, worthless in practice
 
@@ -223,10 +267,16 @@ resolution.
 1. **Ship the fused ONNX model.** 177 ms -> 67.7 ms for every user, no size
    cost (14 MB replaces 56 KB + a 13 MB embedder), no new dependency, and it
    loads 10x faster than TensorFlow. Two small blockers in NEXT_STEPS §1.
-2. **Chase the two convolutions.** ~50 ms of every ONNX run, in every graph.
-   If they can be brought anywhere near hardware peak, ONNX beats TensorFlow
-   outright and the whole question closes. This is the open thread.
-3. **Do not re-export for an FFT** (§3).
-4. **Do not tune CUDA provider options** (§4).
-5. **Do not build a TensorFlow distribution path yet.** It buys 1.29x over the
-   fused model, and item 2 may erase even that.
+2. **Do not chase the remaining 1.29x through onnxruntime tuning.** Four levers
+   tested, none moved it (§4). The two slow convolutions are real, but appear
+   to be slow under TensorFlow too. Pushing further means a newer onnxruntime
+   or TensorRT — real projects, not config changes.
+3. **Do not re-export for an FFT** (§3) — the DFT costs 0.83 ms.
+4. **Do not switch to fp16 on NVIDIA** (§4) — it halves throughput on this
+   class of card.
+5. **Judge TensorFlow on the honest number, which is 1.29x** over the fused
+   model — not the 3.4x today's shipped path implies, and not the 30%
+   originally suspected. On an 80 h analysis that is roughly 18 h, to be
+   weighed against shipping or sourcing TensorFlow.
+6. **Finish the end-to-end runs before acting on 5** (§6). If real throughput
+   is decode-bound on 8 cores, that 1.29x may never reach users.
