@@ -42,3 +42,6 @@ guisettings.json
 /engine/.venv-build
 /engine/build
 /engine/dist
+
+# conda env for local engine work (10GB); see engine/environment.yml to rebuild
+environment/
