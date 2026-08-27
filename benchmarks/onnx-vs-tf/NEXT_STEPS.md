@@ -9,10 +9,17 @@ Measured on a GTX 1650, 200 s of audio per call, median of 30:
 | path | time | vs TensorFlow |
 |---|---|---|
 | TensorFlow (`yamnet_k2`) | 52.6 ms | 1.00x |
+| **ONNX fused + FusedConv** | **49.1 ms** | **0.93x — faster** |
 | ONNX fused (`model_combined.onnx`) | 67.7 ms | 1.29x slower |
 | **ONNX as shipped today** | **177.0 ms** | **3.37x slower** |
 
-All three agree numerically to 2.5e-05, top class for top class.
+All agree numerically to 2.5e-05, top class for top class; the FusedConv row is
+bit-exact against the row above it.
+
+**Updated 2026-08-27, after §2 closed.** §2 asked whether two slow convolutions
+could be rescued. They were never slow — the per-node profiler was
+misattributing (`RESULTS.md` §8). The real saving was fusing Conv+Relu, which
+puts ONNX ahead of TensorFlow and retires §4 and §5 below.
 
 ---
 
@@ -38,51 +45,48 @@ Two small blockers:
   a TensorFlow op. It needs an embedder whose class attributes exist without
   importing TensorFlow.
 
-## 2. Chase the two convolutions  (the open thread)
+## 2. Fuse Conv+Relu at export  (CLOSED — do this, it is ~20 lines)
 
-**Supersedes the previous §2, which recommended re-exporting with a real FFT.
-Profiling disproved that: the dense-matmul DFT costs 0.83 ms, 1.1% of the run.
-Do not spend effort there.**
+**This section previously asked how to rescue two convolutions running two
+orders of magnitude off peak. There were no such convolutions.** The per-node
+profiler was charging them other nodes' queue wait; timed properly they take
+0.48 ms and 0.87 ms, and cost is flat across the trunk. `RESULTS.md` §8 has
+the full accounting. (That in turn supersedes the §2 before it, which
+recommended re-exporting with a real FFT — the dense-matmul DFT costs 0.83 ms.
+This section has now been wrong twice; the current version is the first one
+whose measurement carried a control.)
 
-The real cost is two convolution layers, and they are slow in **every** ONNX
-graph we have -- the fused one and the standalone trunk alike, so it is not an
-export artifact:
+The actual saving is the **Relus**: 27 standalone nodes that re-read and
+re-write a whole activation tensor to apply a `max()`. tf2onnx emits them
+separately, and ORT's `ConvActivationFusion` is not registered for the CUDA EP,
+so nothing folds them. Rewriting each Conv+Relu pair into a
+`com.microsoft.FusedConv` node:
 
-| layer | fused graph | standalone `yamnet.onnx` |
+| arm | time | vs TF |
 |---|---|---|
-| layer2 depthwise conv | 29.87 ms | 29.03 ms |
-| layer1 conv | 20.69 ms | 18.58 ms |
-| the other 25 convs | ~4.3 ms | ~3.3 ms |
+| `onnx_fused`, as exported | 67.8 ms | 1.29x slower |
+| **`onnx_fused` + FusedConv** | **49.1 ms** | **0.93x — faster** |
 
-Convolutions are 73.6% of the fused graph's runtime and those two are 68% of
-it. Layer 1 is about 0.18 GFLOP; on a ~2.9 TFLOP card that is well under a
-millisecond of arithmetic, so it is running roughly **two orders of magnitude
-off peak**. Depthwise convolutions are a known cuDNN weak spot, and TensorFlow
-ships its own hand-tuned depthwise kernels -- most likely the entire reason it
-wins.
+Bit-exact. Standalone trunk 41.7 -> 23.2 ms, 1.80x.
 
-**If these can be brought near hardware peak, ONNX beats TensorFlow outright
-and every question below closes.** That is why this is the top item.
+**What to do:** put the rewrite in `engine/tools/onnxify_model.py`, beside the
+export it corrects — the `.onnx` files are build artifacts, so this belongs at
+export time, not at runtime.
+`benchmarks/onnx-vs-tf/bench_fusedconv_endtoend.py::fuse_conv_relu` is the
+entire implementation. Fold it into §1's re-export so the two ship together,
+then re-run the §2 parity check in `RESULTS.md`.
 
-Already ruled out:
+**Caveats before shipping it:**
 
-- **CUDA provider options.** `cudnn_conv_algo_search` (EXHAUSTIVE and
-  HEURISTIC), `cudnn_conv_use_max_workspace`, and `prefer_nhwc`, alone and
-  combined: all within noise of the 65.9 ms default, and NHWC is marginally
-  worse. See RESULTS §4.
-
-Not yet tried:
-
-- The `13 Memcpy nodes are added to the graph` warning onnxruntime emits for
-  this graph -- it explicitly says it may prevent CUDA graph capture.
-- fp16. `BUZZDETECT_GPU_FP16` exists but only reaches CoreML today
-  (`fp16_supported`); Turing does packed fp16 at 2x fp32.
-- Batch size. Everything here runs 209 frames at once; a different batch may
-  land on better kernels.
-- Per-layer timing on the **TensorFlow** side, to confirm it really is fast on
-  these same two layers rather than slow everywhere else.
-- A newer onnxruntime (1.27+, CUDA 13 -- this box's 580 driver supports it),
-  or the TensorRT execution provider.
+- `FusedConv` is a `com.microsoft` contrib op, not standard ONNX. It is part of
+  onnxruntime proper (not a separate package), but it does pin the artifact to
+  onnxruntime as the runtime. That is already true in practice.
+- Measured only on the CUDA EP on one Turing card. Check it does not *regress*
+  the CPU EP, which is what most users run, and CoreML on macOS — CoreML may
+  decline the contrib op and partition the graph around it, which would be a
+  real regression on the platform with the most to lose.
+- Fuse only where the Conv's output has exactly one consumer, as the reference
+  implementation does; otherwise the rewrite drops a value someone else reads.
 
 ## 3. Model shipping shape  (aspirational, from Luke)
 
@@ -107,9 +111,16 @@ all, while ONNX gets CoreML and its Neural Engine path is worth ~3.5x. So the
 rule would have to be "prefer TensorFlow only where a CUDA GPU is present",
 which is platform-aware logic that doesn't exist yet.
 
-If §2 works, this becomes moot -- don't build it before then.
+**Moot: §2 worked.** ONNX is now the faster path on CUDA as well as on macOS,
+so there is no reason to prefer TensorFlow anywhere, and no platform-aware
+logic to build. Don't build it.
 
-## 5. Bring-your-own interpreter  (only if §2 fails to close the gap)
+## 5. Bring-your-own interpreter  (motivation retired; the §6 use stands)
+
+**§2 closed, so the reason this section existed is gone** — nobody needs to
+bring their own TensorFlow to get GPU speed, because ONNX is now faster. What
+survives is the smaller, unrelated use: somewhere for a packaged app to fix the
+cuDNN library path (§6). Judge it on that alone, which is a much weaker case.
 
 `resolve_engine` (`src-tauri/src/lib.rs:45`) has two shapes: frozen sidecar, or
 `engine/.venv` + `buzzdetect_cli.py`. The second only resolves in dev mode, so
