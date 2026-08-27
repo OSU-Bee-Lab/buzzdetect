@@ -1,5 +1,6 @@
 import multiprocessing
 import threading
+import traceback
 
 from src.inference.models import load_model
 from src.inference.worker import WorkerInferer
@@ -27,8 +28,31 @@ def _file_size(path):
 
 
 def run_worker(workerclass, **kwargs):
-    worker = workerclass(**kwargs)
-    worker()
+    """Run one worker to completion, and end the analysis if it can't.
+
+    A worker that raises used to take only its own thread with it: the
+    traceback printed, the thread ended, and everyone else blocked forever on a
+    queue nobody was draining any more -- an analysis that looked alive and
+    made no progress until it was killed. The failure that prompted this was a
+    GPU analyzer dying on its first chunk (a mismatched cuDNN install), but any
+    worker dying leaves the same shape of deadlock, so the handling belongs
+    here rather than in one worker.
+
+    Construction is inside the try for the same reason: WorkerInferer builds
+    its inference session in run(), but a model plugin can fail in __init__.
+    """
+    name = getattr(workerclass, '__name__', str(workerclass))
+    try:
+        worker = workerclass(**kwargs)
+        worker()
+    except Exception as e:
+        traceback.print_exc()
+        coordinator = kwargs.get('coordinator')
+        if coordinator is not None:
+            coordinator.q_earlyexit.put(
+                f'{name} failed and the analysis cannot continue '
+                f'({type(e).__name__}: {e})')
+        return
     print(f"DEBUG, run_worker: {worker.__class__.__name__} finished.")
 
 

@@ -12,6 +12,7 @@ import glob
 import os
 import sys
 
+import numpy as np
 import onnxruntime as ort
 
 # GPU providers worth trying, best first, with the options each needs.
@@ -190,12 +191,38 @@ def make_session(path_onnx, processor, samples):
     return session
 
 
+# Input length the probe pins its session to. One 0.96 s frame -- short enough
+# that building and running the session is quick, long enough to be a shape the
+# graph actually accepts.
+PROBE_SAMPLES = 16000
+
+
 def _probe_model():
     """The ONNX file to build the probe session on."""
     from src import config as cfg
 
     found = sorted(glob.glob(os.path.join(cfg.DIR_MODELS, '*', 'model.onnx')))
     return found[0] if found else None
+
+
+def _run_probe(session):
+    """Execute the probe session once on zeros.
+
+    Building a session is not proof that it runs. A provider initialises, takes
+    the graph, reports itself in get_providers(), and then fails on the first
+    kernel -- which is what a mixed cuDNN install does here: cuDNN 9 dispatches
+    to sub-libraries by soname, so a loader path carrying two 9.x installs (a
+    pip nvidia-cudnn-cu12 wheel alongside a system one, say) can pair a core
+    from one with a sub-library from the other, and the handshake fails with
+    CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH the first time a convolution runs.
+    Nothing before that first run says anything is wrong.
+
+    So the probe runs. Without this the desktop app offers a GPU that dies a
+    chunk into the analysis, taking its analyzer thread with it.
+    """
+    info = session.get_inputs()[0]
+    shape = [d if isinstance(d, int) else PROBE_SAMPLES for d in info.shape]
+    session.run(None, {info.name: np.zeros(shape, dtype=np.float32)})
 
 
 def probe_gpu():
@@ -205,14 +232,15 @@ def probe_gpu():
     this onnxruntime build was compiled with -- and answers it identically on a
     workstation with a full CUDA install and on a laptop with no NVIDIA
     hardware at all. A provider's shared libraries aren't loaded until a
-    session asks for it, so the only honest test is to build one and see which
-    provider survives; onnxruntime falls back to CPU rather than raising when
-    the libraries turn out to be missing.
+    session asks for it, so the only honest test is to build one, run it, and
+    see which provider survives both; onnxruntime falls back to CPU rather than
+    raising when the libraries turn out to be missing, and raises rather than
+    falling back when they are present but mismatched.
 
-    Costs a real session creation, so it's worth doing once and remembering.
-    The length the probe pins the input to is arbitrary -- one 0.96 s frame,
-    which keeps the probe quick -- but it has to be pinned, or CoreML will
-    decline a graph it would accept in an analysis.
+    Costs a real session creation and one inference, so it's worth doing once
+    and remembering. The length the probe pins the input to is arbitrary, but
+    it has to be pinned, or CoreML will decline a graph it would accept in an
+    analysis.
     """
     path_onnx = _probe_model()
     if path_onnx is None:
@@ -224,7 +252,7 @@ def probe_gpu():
             continue
         try:
             so = ort.SessionOptions()
-            so.add_free_dimension_override_by_name(DIM_SAMPLES, 16000)
+            so.add_free_dimension_override_by_name(DIM_SAMPLES, PROBE_SAMPLES)
             session = ort.InferenceSession(
                 path_onnx, so,
                 providers=[name, 'CPUExecutionProvider'],
@@ -234,6 +262,17 @@ def probe_gpu():
             # A provider that can't initialise at all -- no driver, no device,
             # a CUDA/cuDNN too old for this build. Not usable, and not fatal.
             continue
-        if name in session.get_providers():
-            usable.append(name)
+        if name not in session.get_providers():
+            continue
+        try:
+            _run_probe(session)
+        except Exception as e:
+            # Took the graph and then couldn't execute it. Report it: the user
+            # has the hardware and something about the install is stopping them
+            # using it, which is worth more than a silent drop to CPU.
+            print(f'WARNING: {name} loaded but could not run this machine\'s '
+                  f'GPU probe, so it is not offered: {type(e).__name__}: {e}',
+                  file=sys.stderr, flush=True)
+            continue
+        usable.append(name)
     return usable
