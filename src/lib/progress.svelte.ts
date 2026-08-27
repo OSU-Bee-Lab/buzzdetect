@@ -25,10 +25,8 @@ const STAGE_LABELS: Record<Stage, string> = {
 	analyzing: 'Analyzing…'
 };
 
-// Trailing window the displayed realtime rate averages over, and the longer
-// one the ETA uses so it doesn't chase every fluctuation in throughput.
-const RATE_WINDOW_MS = 30_000;
-const ETA_WINDOW_MS = 300_000;
+// Trailing window the ETA uses so it doesn't chase every fluctuation in throughput.
+const ETA_WINDOW_MS = 30_000;
 // How often the clock driving rate/ETA advances, and the minimum spacing
 // between retained samples (bounding the buffer over the ETA window).
 const TICK_MS = 2_000;
@@ -213,11 +211,12 @@ class AnalysisRun {
 	// advances: 'analyzing' is emitted once per analyzer, and a second
 	// analyzer coming up must not drag the header back a step.
 	stage = $state<Stage>('launching');
-	// Rolling audio-seconds-processed samples, used to compute a live
-	// realtime-multiple rate instead of an average since the run started
-	// (which would understate current speed after a slow startup). Not $state:
-	// nothing renders from it directly, only from the tick's snapshot.
+	// Rolling audio-seconds-processed samples, used to compute trailing ETA rate.
+	// Not $state: nothing renders from it directly, only from the tick's snapshot.
 	private rateSamples: { t: number; doneSeconds: number }[] = [];
+	private lastPollTime = Date.now();
+	private lastPollDoneSeconds = 0;
+	private instantaneousRate = 0;
 	// Wall clock, advanced on the tick so rate/ETA keep updating (and decay)
 	// between engine events rather than freezing at the last one.
 	private now = Date.now();
@@ -346,13 +345,10 @@ class AnalysisRun {
 		return this.discoveryDone;
 	}
 
-	// Realtime multiple over the trailing window: audio seconds analyzed per
-	// wall-clock second, computed here rather than taken from the engine (the
-	// analyzers report their own throughput, not this end-to-end rate). The
-	// window ends at `now`, not at the last event, so a stall decays the rate
-	// instead of freezing it at the last burst.
+	// Instantaneous realtime multiple: audio seconds analyzed since last poll
+	// divided by elapsed wall-clock seconds.
 	get rate(): number {
-		return this.rateOver(RATE_WINDOW_MS);
+		return this.instantaneousRate;
 	}
 
 	private rateOver(windowMs: number): number {
@@ -388,8 +384,7 @@ class AnalysisRun {
 		const t = this.tree;
 		const analyzed = t.doneSeconds + t.activeSeconds;
 		const remainingSeconds = Math.max(0, t.totalSeconds - t.priorSeconds - analyzed);
-		// The ETA runs off a much longer window than the displayed rate: it's a
-		// projection over the whole remaining run, so a momentary spike or dip
+		// The ETA runs off a trailing window so a momentary spike or dip
 		// in throughput shouldn't swing it.
 		const etaRate = this.rateOver(ETA_WINDOW_MS);
 		return {
@@ -412,6 +407,9 @@ class AnalysisRun {
 		this.now = now;
 		this.rateSamples = [{ t: now, doneSeconds: 0 }];
 		this.startedAt = now;
+		this.lastPollTime = now;
+		this.lastPollDoneSeconds = 0;
+		this.instantaneousRate = 0;
 		this.running = true;
 		this.statsSnapshot = ZERO_STATS;
 		if (this.ticker === null && typeof setInterval === 'function') {
@@ -420,7 +418,16 @@ class AnalysisRun {
 	}
 
 	private tick() {
-		this.now = Date.now();
+		const now = Date.now();
+		this.now = now;
+		const currentDoneSeconds = this.totals.doneSeconds;
+		const dt = (now - this.lastPollTime) / 1000;
+		if (dt > 0) {
+			const dDone = currentDoneSeconds - this.lastPollDoneSeconds;
+			this.instantaneousRate = Math.max(0, dDone / dt);
+		}
+		this.lastPollTime = now;
+		this.lastPollDoneSeconds = currentDoneSeconds;
 		this.statsSnapshot = this.computeStats();
 	}
 
@@ -440,6 +447,7 @@ class AnalysisRun {
 		this.stopped = true;
 		if (error) this.error = error;
 		this.now = Date.now();
+		this.instantaneousRate = 0;
 		this.statsSnapshot = this.computeStats();
 		if (this.ticker !== null) {
 			clearInterval(this.ticker);
