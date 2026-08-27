@@ -9,59 +9,86 @@ on:
       tag:
         description: 'Existing release tag to rebuild (e.g. v0.2.0)'
         required: true
+      only:
+        description: >-
+          Comma-separated matrix ids to build, e.g. "windows,windows-cuda".
+          Blank builds all of them. For rebuilding the legs that failed after
+          a fix: `gh run rerun --failed` replays the original commit, so it
+          cannot pick one up -- move the tag and dispatch this instead.
+        required: false
+        default: ''
 
 jobs:
+  # The matrix is built here rather than declared on `build`, so that a
+  # dispatch can rebuild a subset of it: a job-level `if` cannot see the
+  # `matrix` context, which is the only place a static matrix could be
+  # filtered. Legs left out are never created, so whatever an earlier run
+  # uploaded for them stays on the release untouched.
+  #
+  # No universal macOS build: onnxruntime publishes no universal2 wheel, so
+  # PyInstaller can only freeze the engine for the arch it runs on. macos-14
+  # is Apple silicon, macos-15-intel is Intel -- don't move that one back to
+  # macos-13, which GitHub has retired: the job doesn't fail, it queues
+  # forever, stranding rename-assets behind it.
+  #
+  # The CUDA variant is a separate installer rather than a fatter default one:
+  # it bundles onnxruntime-gpu plus the NVIDIA runtime, ~1GB that only an
+  # NVIDIA user can execute. The config overlay renames the product so both can
+  # be published to the same release (and installed side by side) without
+  # colliding.
+  #
+  # There is deliberately no Linux CUDA variant. Its AppImage lands at 2.3GiB
+  # against GitHub's 2GiB asset limit, and the runtime can't be made smaller:
+  # nvprune only accepts static libraries, cuDNN's sub-libraries aren't safely
+  # separable, and the one compression setting that would have covered the gap
+  # (LDAI_COMP=xz) is refused by linuxdeploy. Linux GPU users install CUDA 12
+  # and cuDNN 9 themselves and the ordinary build finds it -- see probe_gpu.
+  #
+  # And no installer at all for CUDA on Windows: makensis is 32-bit and gives
+  # up around 2GiB, which this payload passes on its own. It ships as a
+  # portable archive instead -- the same thing Ollama does with its CUDA builds
+  # -- assembled by the "Package the portable archive" step below.
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - id: pick
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          set -euo pipefail
+          cat > all.json <<'JSON'
+          [
+            {"id": "macos-arm",    "platform": "macos-14",       "triple": "aarch64-apple-darwin",     "args": "--bundles dmg,app",                                              "engine_flags": "", "portable": ""},
+            {"id": "macos-intel",  "platform": "macos-15-intel", "triple": "x86_64-apple-darwin",      "args": "--bundles dmg,app",                                              "engine_flags": "", "portable": ""},
+            {"id": "linux",        "platform": "ubuntu-22.04",   "triple": "x86_64-unknown-linux-gnu", "args": "--bundles appimage,deb",                                         "engine_flags": "", "portable": ""},
+            {"id": "windows",      "platform": "windows-latest", "triple": "x86_64-pc-windows-msvc",   "args": "--bundles nsis",                                                 "engine_flags": "", "portable": ""},
+            {"id": "windows-cuda", "platform": "windows-latest", "triple": "x86_64-pc-windows-msvc",   "args": "--no-bundle --config src-tauri/tauri.cuda.conf.json",            "engine_flags": "--cuda", "portable": "windows-x64"}
+          ]
+          JSON
+          if [ -z "${ONLY:-}" ]; then
+            include=$(jq -c . all.json)
+          else
+            include=$(jq -c --arg only "$ONLY" \
+              '[ ($only | split(",") | map(ascii_downcase | gsub("^\\s+|\\s+$"; ""))) as $want
+                 | .[] | select(.id as $id | $want | index($id)) ]' all.json)
+            # A typo in `only` would otherwise produce an empty matrix and a
+            # green run that built nothing.
+            [ "$(jq length <<<"$include")" -gt 0 ] || {
+              echo "only='$ONLY' matched no matrix ids"; exit 1; }
+          fi
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+          jq -r '.[].id' <<<"$include" | sed 's/^/building: /'
+
   build:
+    needs: matrix
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # No universal macOS build: onnxruntime publishes no universal2
-          # wheel, so PyInstaller can only freeze the engine for the arch it
-          # runs on. macos-14 is Apple silicon, macos-15-intel is Intel --
-          # don't move that one back to macos-13, which GitHub has retired:
-          # the job doesn't fail, it queues forever, stranding rename-assets
-          # behind it.
-          - platform: macos-14
-            args: --bundles dmg,app
-            triple: aarch64-apple-darwin
-            engine_flags: ''
-          - platform: macos-15-intel
-            args: --bundles dmg,app
-            triple: x86_64-apple-darwin
-            engine_flags: ''
-          - platform: ubuntu-22.04
-            args: --bundles appimage,deb
-            triple: x86_64-unknown-linux-gnu
-            engine_flags: ''
-          - platform: windows-latest
-            args: --bundles nsis
-            triple: x86_64-pc-windows-msvc
-            engine_flags: ''
-          # CUDA variants. Separate installers rather than fattening the
-          # default ones: they bundle onnxruntime-gpu plus the NVIDIA runtime,
-          # which is ~1GB that only an NVIDIA user can execute. The config
-          # overlay renames the product so both can be published to the same
-          # release (and installed side by side) without colliding.
-          # There is deliberately no Linux CUDA variant. Its AppImage lands at
-          # 2.3GiB against GitHub's 2GiB asset limit, and the runtime can't be
-          # made smaller: nvprune only accepts static libraries, cuDNN's
-          # sub-libraries aren't safely separable, and the one compression
-          # setting that would have covered the gap (LDAI_COMP=xz) is refused
-          # by linuxdeploy. Linux GPU users install CUDA 12 and cuDNN 9
-          # themselves and the ordinary build finds it -- see probe_gpu.
-          #
-          # No installer at all on Windows: makensis is 32-bit and gives up
-          # around 2GiB, which this payload passes on its own. Shipped as a
-          # portable archive instead -- the same thing Ollama does with its
-          # CUDA builds -- assembled by the step below.
-          - platform: windows-latest
-            args: --no-bundle --config src-tauri/tauri.cuda.conf.json
-            triple: x86_64-pc-windows-msvc
-            engine_flags: '--cuda'
-            portable: 'windows-x64'
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
 
     runs-on: ${{ matrix.platform }}
 
@@ -198,6 +225,9 @@ jobs:
   # installer on the release, and the CUDA zip alone is 1.8GB to round-trip.
   rename-assets:
     needs: build
+    # `always()` so a targeted rebuild, whose unselected legs are skipped,
+    # still gets its assets renamed -- but not over a failed build.
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
