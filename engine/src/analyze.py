@@ -45,7 +45,11 @@ def run_worker(workerclass, **kwargs):
     try:
         worker = workerclass(**kwargs)
         worker()
-    except Exception as e:
+    except BaseException as e:
+        # BaseException, not Exception: SystemExit and friends end a thread
+        # silently, which is exactly the deadlock this exists to prevent. The
+        # analysis is ending either way, so there is nothing here to re-raise
+        # into -- a worker thread has no caller to propagate to.
         traceback.print_exc()
         coordinator = kwargs.get('coordinator')
         if coordinator is not None:

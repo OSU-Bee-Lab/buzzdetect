@@ -54,8 +54,44 @@ class WorkerInferer:
         msg = f"BUFFER BOTTLENECK: analyzer {self.id_analyzer} received assignment after {self.timer_bottleneck.get_total().__round__(1)}s"
         self.log(msg, 'DEBUG')
 
+    # Substrings that mark an inference failure as "ran out of memory" rather
+    # than anything wrong with the audio or the graph. onnxruntime reports an
+    # exhausted device arena as a plain Fail with the allocator's own wording,
+    # so there is no exception type to catch -- the text is what there is.
+    OOM_MARKERS = (
+        'out of memory',
+        'cudaerrormemoryallocation',
+        'failed to allocate memory',
+        'cublas_status_alloc_failed',
+        'hipErrorOutOfMemory'.lower(),
+    )
+
+    @classmethod
+    def _is_oom(cls, e):
+        if isinstance(e, MemoryError):
+            return True
+        text = str(e).lower()
+        return any(marker in text for marker in cls.OOM_MARKERS)
+
     def process_chunk(self, a_chunk: AssignChunk):
-        a_chunk.results = self.model.predict(a_chunk.samples)
+        try:
+            a_chunk.results = self.model.predict(a_chunk.samples)
+        except Exception as e:
+            # Chunk length is the one setting a user can act on here, and it is
+            # not obvious from an allocator's error text that it is implicated
+            # at all -- the session is built for the whole chunk, so the
+            # footprint scales with it. Say so, then let the failure through:
+            # an analyzer that cannot infer has nothing useful left to do, and
+            # run_worker winds the analysis down rather than leaving the
+            # streamers filling a queue nobody drains.
+            if self._is_oom(e):
+                raise MemoryError(
+                    f'ran out of memory inferring a {self.chunklength}s chunk on '
+                    f'{self.processor}. Lower --chunklength (the inference session '
+                    f'is built for a whole chunk, so its memory scales with it) or '
+                    f'use fewer analyzers. Original error: {e}') from e
+            raise
+
         self.coordinator.put_write(a_chunk)
         self.report_rate(a_chunk)
 
