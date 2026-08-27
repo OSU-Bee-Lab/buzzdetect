@@ -62,13 +62,21 @@ const MODEL_FILES = [
 
 const CUDA = process.argv.includes('--cuda');
 
-/** Names from shipped-models.txt: one per line, # comments and blanks ignored. */
+/**
+ * Names from shipped-models.txt: one per line, # comments and blanks ignored.
+ *
+ * Split on either line ending and strip the comment unanchored: a Windows
+ * runner checks the file out with CRLF, and `.` does not match `\r` while JS's
+ * `$` (no `m` flag) only matches the true end of the string -- so an anchored
+ * /#.*$/ silently matches nothing there and every comment line comes back as a
+ * model name.
+ */
 function readShippedModels() {
 	const path = join(ROOT, SHIPLIST);
 	if (!existsSync(path)) throw new Error(`no ${SHIPLIST} at ${path}`);
 	const names = readFileSync(path, 'utf8')
-		.split('\n')
-		.map((line) => line.replace(/#.*$/, '').trim())
+		.split(/\r?\n/)
+		.map((line) => line.replace(/#.*/, '').trim())
 		.filter((line) => line.length > 0);
 	if (names.length === 0) {
 		throw new Error(`${SHIPLIST} names no models, so the bundle would ship none.`);
