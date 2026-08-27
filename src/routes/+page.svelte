@@ -514,7 +514,7 @@ If you're using GPU, you probably don't want any CPU analyzers."
 					Reduced precision (fp16)
 					<span
 						class="qmark"
-						data-tooltip="Runs the model at half precision on the GPU, which is faster but shifts activations by roughly 0.03 against a full-precision run.
+						data-tooltip="Runs the model at half precision on Apple's Neural Engine, which is about twice as fast but shifts results by roughly 0.015 against a full-precision run.
 Results from a reduced-precision run are not directly comparable with full-precision ones near a detection threshold. Currently affects Apple GPUs only."
 					>
 						?
