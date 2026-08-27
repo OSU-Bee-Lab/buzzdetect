@@ -10,6 +10,17 @@ CORPUS="${CORPUS:?set CORPUS to the symlink corpus directory}"
 OUTBASE="${OUTBASE:-/home/luke/projects/buzzdetect/local/bench}"
 STREAMERS="${STREAMERS:-12}"
 
+# Force the venv's own NVIDIA wheels to win the dynamic loader. This box also
+# carries a system cuDNN (libcudnn9-cuda-12, 9.25) that ldconfig finds, while
+# the venv wheel is 9.24, and onnxruntime ends up resolving cuDNN's
+# sub-libraries from both -- CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH, after
+# which it falls back to CPU and reports a plausible-looking number that has
+# nothing to do with the GPU. Same trick start_analysis uses for the
+# bundled-CUDA build. Do not drop this.
+NVLIB=$(ls -d "$ENGINE"/.venv-bench/lib/python3.12/site-packages/nvidia/*/lib \
+        | xargs -I{} readlink -f {} | tr '\n' ':')
+export LD_LIBRARY_PATH="$NVLIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 # label : BUZZDETECT_RUNTIME : modelname
 ARMS=(
   "onnx:onnx:model_general_v3"

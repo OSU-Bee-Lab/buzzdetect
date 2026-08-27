@@ -101,6 +101,35 @@ It proves coexistence is possible. Prefer `.venv-bench` with the 1.26 pin so
 you measure the version that ships; fall back to `environment/` only if
 resolution fails, and say in the report that the ORT version differs.
 
+### [revised] Force the venv's NVIDIA wheels onto LD_LIBRARY_PATH
+
+**This is not optional, and skipping it silently invalidates the ONNX arm.**
+This machine has a system cuDNN (`libcudnn9-cuda-12`, 9.25.0.15) that
+`ldconfig` finds, while the venv wheel is `nvidia_cudnn_cu12` 9.24.0.43.
+onnxruntime resolves cuDNN's sub-libraries from *both*, and dies with:
+
+    CUDNN_BACKEND_TENSOR_DESCRIPTOR cudnnFinalize failed
+    cudnn_status: CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH
+    ... Falling back to ['CPUExecutionProvider'] and retrying.
+
+It then runs on the CPU and reports a perfectly plausible number. Measured
+cost of not noticing: the ONNX trunk timed 214.7 ms on CPU versus 42.4 ms on
+the GPU -- a 5x error, in the direction that would have "confirmed" the
+suspicion.
+
+    NVLIB=$(ls -d engine/.venv-bench/lib/python3.12/site-packages/nvidia/*/lib \
+            | xargs -I{} readlink -f {} | tr '\n' ':')
+    export LD_LIBRARY_PATH="$NVLIB"
+
+`run_all.sh` and `run_endtoend.sh` do this for you. TensorFlow is unaffected --
+it preloads its own copies -- which is exactly why the `onnx_fused` arm
+appeared healthy before the fix: it imports TF (for its declared `yamnet_k2`
+embedder) and inherited TF's consistent cuDNN.
+
+Note the provider list lies here. `get_providers()` still reported
+`['CUDAExecutionProvider', 'CPUExecutionProvider']` on the CPU-bound run, so
+check for the cuDNN error text and check the timings, not just the providers.
+
 ## 2. Prove both runtimes actually reach the GPU
 
 This is the step that makes or breaks the result. A CPU-bound run looks
