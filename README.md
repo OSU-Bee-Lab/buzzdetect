@@ -32,7 +32,7 @@ On other distros, grab the [AppImage](https://github.com/OSU-Bee-Lab/buzzdetect/
 
 If you have an NVIDIA card on Windows, there's a separate CUDA build that runs inference on the GPU: [Windows CUDA](https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-Windows-CUDA.zip). It bundles the CUDA runtime, so you need a recent NVIDIA driver but no system CUDA install. Turing (GTX 16-series, RTX 20-series) and newer are supported. It ships as a portable zip rather than an installer — unpack it anywhere and run `buzzdetect-cuda.exe` — because the bundled runtime is larger than the installer format can take.
 
-On Linux there's no separate CUDA build for the same size reason. Install CUDA 12 and cuDNN 9 yourself and the ordinary `.deb`/AppImage finds them.
+On Linux there's no separate CUDA build for the same size reason. Install CUDA 12 and cuDNN 9 yourself and the ordinary `.deb`/AppImage finds them — see **[Using an NVIDIA GPU on Linux](docs/linux-gpu.md)** for what to install, how to check it worked, and the failure modes (including one where a machine with two cuDNN installs reports a working GPU and then dies partway through an analysis).
 
 It's about a gigabyte, which is why it's separate rather than the default. Set GPU analyzers to 1 and CPU analyzers to 0 in Advanced settings to use the card. The GPU analyzers setting only appears in builds whose engine can actually use one, and if a CUDA build can't reach your card it says so in the log and falls back to the CPU rather than pretending.
 
