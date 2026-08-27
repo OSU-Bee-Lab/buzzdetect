@@ -81,10 +81,11 @@ then re-run the §2 parity check in `RESULTS.md`.
 - `FusedConv` is a `com.microsoft` contrib op, not standard ONNX. It is part of
   onnxruntime proper (not a separate package), but it does pin the artifact to
   onnxruntime as the runtime. That is already true in practice.
-- Measured only on the CUDA EP on one Turing card. Check it does not *regress*
-  the CPU EP, which is what most users run, and CoreML on macOS — CoreML may
-  decline the contrib op and partition the graph around it, which would be a
-  real regression on the platform with the most to lose.
+- The CPU EP is fine: 343.1 ms as exported vs 339.2 ms fused, i.e. no change
+  (it already applies this fusion itself). **CoreML is the one still
+  unmeasured** — it may decline the contrib op and partition the graph around
+  it, which would be a real regression on the platform with the most to lose.
+  Measure on macOS before shipping.
 - Fuse only where the Conv's output has exactly one consumer, as the reference
   implementation does; otherwise the rewrite drops a value someone else reads.
 
