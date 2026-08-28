@@ -632,14 +632,21 @@ class LocalDriver:
 
         `body` is what the caller's read has already produced when that read
         crossed the seam, which for any chunk the streamer asks for is far more
-        than enough. Failing that, the tail end of the last body read, if it
-        happens to end at the clamp. Failing that, the body's decode is replayed
-        on a scratch track from the same seek it came from, which reproduces it
-        exactly -- a single uninterrupted read is a plain function of where it
-        started -- as long as that is not more decoding than it is worth.
+        than enough. It is the right window precisely because it came out of one
+        uninterrupted read: that is the decode the fragment has to continue.
 
-        Returns None when none of those is possible; the window is then
-        unknowable and the caller says so.
+        Failing that -- a read that begins at or a hair before the clamp -- the
+        range from the last seek is replayed on a scratch track in a single
+        call, as long as that is not more decoding than it is worth.
+
+        What does *not* work, and was tried: handing this the tail end of an
+        earlier body read. Those samples are real, but they come from a read
+        libsndfile resumed partway through a frame, so they are not what any
+        single decode of that range produces, and verifying against them chose
+        the wrong boundary on all eight corpus files.
+
+        Returns None when neither is possible; the window is then unknowable and
+        the caller says so.
         """
         window = _VERIFY_FRAMES * self._layout.samples_per_frame
 
