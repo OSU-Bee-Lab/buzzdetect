@@ -72,21 +72,32 @@ the new read path is held to:
 
 - **The streamer's pattern** — `seek(chunk start)`, one `read(chunk length)`,
   which is what `worker.py::queue_chunk` does — must be identical. It is, at
-  500 s and at 20 s chunks, over the seam and over the whole file.
+  500 s and at 20 s chunks, over the seam and over the whole file. The binding
+  version of that check is `diff_results.py`: the same corpus analysed through
+  both read paths produces byte-identical per-file CSVs, in-process and through
+  helper processes.
 - **Any single read crossing the clamp** must equal the old driver's unbroken
   read of the same range. It does.
 - **Any read after a seek** must be identical. It is: seeking into the fragment
   was measured to return exactly what seeking to the same place in the whole
   file returns, from either boundary, because a seek resets the decoder.
 
-Two corners are deliberately not identical, both documented in `mp3.py`:
+Three corners are deliberately not identical. All three are documented in
+`mp3.py`, asserted as bounds in `engine/tests/test_mp3_driver.py`, and reached
+only by access patterns the streamer does not use:
 
 - A caller that **breaks a read at the clamp** and carries on gets the unbroken
   decode from the new driver and the broken one from the old. The new answer is
   the more defensible of the two; they differ by ≤2.4e-7.
 - A caller that **breaks reads less than one frame past the clamp** and carries
   on without seeking sees ≤1.5e-8, because the fragment's read boundaries and
-  the caller's fall out of step. The streamer never does this: it seeks.
+  the caller's fall out of step.
+- A caller that **seeks to within a frame of the clamp, or back into the body
+  after visiting the tail**, having already decoded something, sees ≤1.2e-7.
+  The old driver has one decoder for the whole file and this one hands the tail
+  to a second, so from there the two are no longer carrying the same history —
+  and by (2) above, history is what a seek's answer depends on. The streamer
+  reads a file's chunks in order and never goes back over the seam.
 
 ## The other thing that fell out
 

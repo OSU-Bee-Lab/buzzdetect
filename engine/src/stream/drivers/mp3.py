@@ -466,11 +466,14 @@ class LocalDriver:
     and for any single read that crosses the seam, and for any read after a
     seek. That qualification is not hedging: libsndfile's own mp3 output depends
     on where the caller seeks and on where it breaks its reads, so "identical"
-    only means anything against a stated access pattern. The three corners where
-    this driver deliberately answers differently, all of them by <=2.4e-7 and
-    none of them reachable from the streamer, are in
-    benchmarks/mp3-driver-gpu/STEP1_RESULT.md and asserted as bounds in
-    tests/test_mp3_driver.py.
+    only means anything against a stated access pattern -- the old driver is not
+    one fixed answer either. The three corners where this driver deliberately
+    answers differently, all of them by <=2.4e-7 and none of them reachable from
+    the streamer, are listed in benchmarks/mp3-driver-gpu/STEP1_RESULT.md and
+    asserted as bounds in tests/test_mp3_driver.py.
+
+    The check that settles it in practice: the Solar Eclipse corpus analysed
+    through both read paths produces byte-identical per-file CSVs.
 
     `Driver` is what the driver map hands out.
     """
