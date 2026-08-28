@@ -31,7 +31,7 @@ def search_dir(dir_in, extensions=None):
     collecting a full list first), so a caller processing thousands of files
     across a large/slow-to-stat tree can act on each match as it's found
     instead of blocking until the entire tree has been walked."""
-    if extensions is not None and not (extensions.__class__ is list and extensions[0].__class__ is str):
+    if extensions is not None and not (extensions.__class__ is list and all(e.__class__ is str for e in extensions)):
         raise ValueError("input extensions should be None, or list of strings")
 
     patterns = None
@@ -51,12 +51,23 @@ def search_dir(dir_in, extensions=None):
 
 
 def build_ident(path, root_dir, tag=None):
-    ident = re.sub(root_dir, '', path)
+    """The path of an audio file relative to the audio directory, without its
+    extension. This is the file's identity everywhere downstream: it names the
+    result files and it's what the GUI shows.
+
+    Both removals here are literal, not patterns. root_dir is a path the user
+    chose, so it can hold regex metacharacters ('site+raw', 'a.b', a Windows
+    backslash) that a regex would either misread or match too widely -- and it
+    is only stripped from the front, where the walk put it, rather than
+    wherever else it happens to appear in the path.
+    """
+    ident = path
+    if root_dir and ident.startswith(root_dir):
+        ident = ident[len(root_dir):]
+
     ident = os.path.splitext(ident)[0]
 
     if tag is not None:
-        ident = re.sub(re.escape(tag), '', ident)
+        ident = ident.replace(tag, '')
 
-    ident = re.sub('^/', '', ident)
-
-    return ident
+    return ident.lstrip('/' + os.sep)
