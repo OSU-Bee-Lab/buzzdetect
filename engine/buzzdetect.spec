@@ -1,14 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for the frozen buzzdetect engine.
 
-Produces a single `buzzdetect-engine` executable that the desktop app spawns
-as a sidecar, so users don't need Python or a venv. Named for the app rather
-than after it: Tauri installs an externalBin beside the app executable, which
-is itself named buzzdetect, so a sidecar called buzzdetect would be the same
-file. Build it through
-`node scripts/build-engine.mjs` from the repo root rather than calling
-pyinstaller directly -- that script creates the TF-free venv this expects and
-assembles the data payload that has to sit next to the binary.
+Produces a `buzzdetect-engine/` directory (onedir -- see the EXE/COLLECT note
+below for why not onefile) that the desktop app spawns as a sidecar, so users
+don't need Python or a venv. Build it through `node scripts/build-engine.mjs`
+from the repo root rather than calling pyinstaller directly -- that script
+creates the TF-free venv this expects and assembles the data payload that has
+to sit next to the binary.
 
 Three things this build deliberately does NOT contain:
 
@@ -103,22 +101,41 @@ a.binaries = strip_nvidia(a.binaries)
 
 pyz = PYZ(a.pure)
 
+# onedir, not onefile. A onefile binary re-extracts its ~hundreds of MB of
+# libraries to a fresh temp directory on every launch and imports them from
+# there with a cold page cache; measured on the packaged app, the engine's
+# module import alone (numpy, pandas, the audio stack) was ~25s and read to a
+# user as a frozen window. onedir ships those libraries unpacked inside the app
+# bundle, so the import is an ordinary read the OS can cache between runs.
+#
+# The tradeoff is that the output is a directory (buzzdetect-engine/ holding
+# the launcher plus _internal/), not a single file, so it can't be a Tauri
+# externalBin -- scripts/build-engine.mjs drops the whole directory into the
+# engine-payload resource tree and src-tauri/src/lib.rs spawns the launcher
+# from there.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='buzzdetect-engine',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name='buzzdetect-engine',
 )

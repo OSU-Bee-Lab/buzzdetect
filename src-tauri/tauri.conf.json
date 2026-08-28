@@ -31,9 +31,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "binaries/buzzdetect-engine"
-    ],
     "resources": {
       "engine-payload/": "engine-payload/"
     }

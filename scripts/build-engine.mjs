@@ -9,10 +9,12 @@
  * The CUDA build bundles the NVIDIA runtime, so it needs no system CUDA -- but
  * it is roughly a gigabyte larger and is only produced for Linux and Windows.
  *
- * Outputs, both gitignored and both consumed by tauri.conf.json:
+ * Output, gitignored and consumed by tauri.conf.json as bundle.resources:
  *
- *   src-tauri/binaries/buzzdetect-<target-triple>   (bundle.externalBin)
- *   src-tauri/engine-payload/                       (bundle.resources)
+ *   src-tauri/engine-payload/
+ *     engine-bin/          the frozen engine (PyInstaller onedir: the launcher
+ *                          plus _internal/)
+ *     models/  src/  ...   the data payload
  *
  * The payload holds the parts buzzdetect reads off disk at runtime rather than
  * importing: the ONNX models and embedder (loaded by path via importlib in
@@ -20,6 +22,12 @@
  * map by listing that directory). The app runs the sidecar with the payload as
  * its working directory, which is what makes engine/src/config.py's relative
  * paths -- 'models', 'src/stream/drivers' -- resolve.
+ *
+ * onedir rather than a onefile externalBin: a onefile sidecar re-extracts its
+ * libraries to a temp dir on every launch, which measured ~25s of frozen
+ * window on the packaged app. The cost of onedir is that the frozen engine is
+ * a directory, so it rides along in the resource payload instead of being a
+ * Tauri externalBin, and src-tauri/src/lib.rs spawns engine-bin/buzzdetect-engine.
  *
  * Requires uv (https://docs.astral.sh/uv/) and a Rust toolchain on PATH.
  */
@@ -45,10 +53,9 @@ const ENGINE = join(ROOT, 'engine');
 
 const SHIPLIST = 'shipped-models.txt';
 
-// The frozen engine binary, and so the externalBin name in tauri.conf.json.
-// Not plain 'buzzdetect': Tauri drops the target triple and installs the
-// sidecar beside the app executable, which is itself named buzzdetect -- the
-// two would be the same path.
+// The frozen engine: PyInstaller's onedir output is dist/buzzdetect-engine/
+// with a launcher of the same name inside it. Not plain 'buzzdetect' so it
+// stays distinct from the app executable in logs and process lists.
 const SIDECAR = 'buzzdetect-engine';
 
 // What a shipped model directory consists of. model.onnx and model.py are
@@ -98,21 +105,13 @@ const IS_WINDOWS = process.platform === 'win32';
 const VENV_BIN = join(VENV, IS_WINDOWS ? 'Scripts' : 'bin');
 const PYTHON = join(VENV_BIN, IS_WINDOWS ? 'python.exe' : 'python3');
 
-const OUT_BIN_DIR = join(ROOT, 'src-tauri', 'binaries');
 const OUT_PAYLOAD = join(ROOT, 'src-tauri', 'engine-payload');
+// The frozen engine directory lands here, inside the payload.
+const OUT_ENGINE_BIN = join(OUT_PAYLOAD, 'engine-bin');
 
 function run(cmd, args, opts = {}) {
 	console.log(`$ ${cmd} ${args.join(' ')}`);
 	execFileSync(cmd, args, { stdio: 'inherit', ...opts });
-}
-
-/** The triple Tauri expects appended to an externalBin filename. */
-function targetTriple() {
-	if (process.env.ENGINE_TARGET_TRIPLE) return process.env.ENGINE_TARGET_TRIPLE;
-	const out = execFileSync('rustc', ['-Vv'], { encoding: 'utf8' });
-	const match = out.match(/^host:\s*(\S+)$/m);
-	if (!match) throw new Error('could not read host triple from `rustc -Vv`');
-	return match[1];
 }
 
 function setupVenv() {
@@ -122,6 +121,11 @@ function setupVenv() {
 	run('uv', ['pip', 'install', '--python', PYTHON, '-r', REQUIREMENTS, 'pyinstaller']);
 }
 
+/**
+ * Freeze the engine. Returns the path to PyInstaller's onedir output
+ * (engine/dist/buzzdetect-engine/); installEngineBin moves it into the payload
+ * after assemblePayload has rebuilt that directory.
+ */
 function freeze() {
 	rmSync(join(ENGINE, 'build'), { recursive: true, force: true });
 	rmSync(join(ENGINE, 'dist'), { recursive: true, force: true });
@@ -129,27 +133,44 @@ function freeze() {
 		cwd: ENGINE
 	});
 
-	const built = join(ENGINE, 'dist', IS_WINDOWS ? `${SIDECAR}.exe` : SIDECAR);
-	if (!existsSync(built)) throw new Error(`pyinstaller produced no binary at ${built}`);
-
-	mkdirSync(OUT_BIN_DIR, { recursive: true });
-	const dest = join(OUT_BIN_DIR, `${SIDECAR}-${targetTriple()}${IS_WINDOWS ? '.exe' : ''}`);
-	// Moved rather than copied, and PyInstaller's staging directory deleted
-	// right after: between them they were most of a CUDA build's disk
-	// footprint, and the Linux CI runner has under 14GB for the whole job.
-	rmSync(dest, { force: true });
-	renameSync(built, dest);
-	rmSync(join(ENGINE, 'build'), { recursive: true, force: true });
-	rmSync(join(ENGINE, 'dist'), { recursive: true, force: true });
-	if (!IS_WINDOWS) chmodSync(dest, 0o755);
-	console.log(`\nsidecar -> ${dest} (${humanSize(dest)})`);
-	return dest;
+	const builtDir = join(ENGINE, 'dist', SIDECAR);
+	const launcher = join(builtDir, IS_WINDOWS ? `${SIDECAR}.exe` : SIDECAR);
+	if (!existsSync(launcher)) {
+		throw new Error(`pyinstaller produced no launcher at ${launcher}`);
+	}
+	return builtDir;
 }
 
-/** Size of a file, for the build log. */
+/**
+ * Move the frozen engine directory into the payload. Separate from freeze()
+ * because assemblePayload() wipes and rebuilds OUT_PAYLOAD, so this has to run
+ * after it. PyInstaller's build/ and dist/ are deleted right after: between
+ * them they are most of a CUDA build's disk footprint and the Linux CI runner
+ * has under 14GB for the whole job.
+ */
+function installEngineBin(builtDir) {
+	rmSync(OUT_ENGINE_BIN, { recursive: true, force: true });
+	renameSync(builtDir, OUT_ENGINE_BIN);
+	if (!IS_WINDOWS) chmodSync(join(OUT_ENGINE_BIN, SIDECAR), 0o755);
+	rmSync(join(ENGINE, 'build'), { recursive: true, force: true });
+	rmSync(join(ENGINE, 'dist'), { recursive: true, force: true });
+	console.log(`\nengine -> ${OUT_ENGINE_BIN} (${humanSize(OUT_ENGINE_BIN)})`);
+}
+
+/** Size of a file or directory tree, for the build log. */
 function humanSize(path) {
-	const mb = statSync(path).size / 1024 / 1024;
+	const bytes = statSync(path).isDirectory() ? dirBytes(path) : statSync(path).size;
+	const mb = bytes / 1024 / 1024;
 	return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
+}
+
+function dirBytes(dir) {
+	let total = 0;
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const p = join(dir, entry.name);
+		total += entry.isDirectory() ? dirBytes(p) : statSync(p).size;
+	}
+	return total;
 }
 
 /**
@@ -275,6 +296,7 @@ function assemblePayload() {
 
 console.log(`building the ${CUDA ? 'CUDA' : 'CPU'} engine`);
 setupVenv();
-freeze();
+const builtDir = freeze();
 assemblePayload();
+installEngineBin(builtDir);
 console.log('\nengine build complete');

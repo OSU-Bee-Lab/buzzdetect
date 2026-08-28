@@ -18,11 +18,12 @@ struct AnalysisState(Mutex<Option<Child>>);
 // How to invoke the Python engine. Two shapes, because the app has to work
 // both as a shipped bundle and out of a checkout:
 //
-// - Bundled: a PyInstaller sidecar (see engine/buzzdetect.spec) sits next to
-//   the app executable, and the parts buzzdetect loads off disk at runtime --
-//   models, the ONNX embedder, the stream drivers -- ship as the
-//   engine-payload resource directory. Nothing on the user's machine is
-//   needed: no Python, no venv.
+// - Bundled: the PyInstaller onedir engine (see engine/buzzdetect.spec) ships
+//   inside the engine-payload resource directory at engine-bin/, alongside the
+//   parts buzzdetect loads off disk at runtime -- models, the ONNX embedder,
+//   the stream drivers. onedir rather than a single-file externalBin because a
+//   onefile binary re-extracts itself on every launch (~25s of frozen window,
+//   measured). Nothing on the user's machine is needed: no Python, no venv.
 // - Dev: no sidecar has been built, so run engine/buzzdetect_cli.py out of
 //   engine/.venv the way `buzzdetect_cli.py` is run by hand.
 //
@@ -43,25 +44,19 @@ const SIDECAR_NAME: &str = "buzzdetect-engine.exe";
 const SIDECAR_NAME: &str = "buzzdetect-engine";
 
 fn resolve_engine(app: &AppHandle) -> Result<Engine, String> {
-    // Tauri strips the target triple when it copies an externalBin into the
-    // bundle, so the sidecar lands beside the app executable under its plain
-    // name -- which is why that name is buzzdetect-engine rather than
-    // buzzdetect, the app executable's own.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let sidecar = exe_dir.join(SIDECAR_NAME);
-            if sidecar.exists() {
-                if let Ok(resources) = app.path().resource_dir() {
-                    let payload = resources.join("engine-payload");
-                    if payload.join("models").exists() {
-                        return Ok(Engine {
-                            program: sidecar,
-                            prefix_args: vec![],
-                            workdir: payload,
-                        });
-                    }
-                }
-            }
+    // Bundled: the onedir engine sits at engine-payload/engine-bin/, and the
+    // launcher inside it carries the same name the onefile sidecar used to.
+    // The payload directory itself is the working directory, so models/ and
+    // src/stream/drivers/ resolve.
+    if let Ok(resources) = app.path().resource_dir() {
+        let payload = resources.join("engine-payload");
+        let launcher = payload.join("engine-bin").join(SIDECAR_NAME);
+        if launcher.exists() {
+            return Ok(Engine {
+                program: launcher,
+                prefix_args: vec![],
+                workdir: payload,
+            });
         }
     }
 
@@ -136,8 +131,8 @@ struct GpuStatus {
 }
 
 // How long to let the probe run before giving up on it. Generous: it pays for
-// the sidecar unpacking itself and for CUDA initialising a context on a cold
-// driver. The point is only that a wedged driver can't leave the UI waiting.
+// the engine's first frozen import and for CUDA initialising a context on a
+// cold driver. The point is only that a wedged driver can't leave the UI waiting.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Whether a GPU worker would actually reach a GPU on this machine.

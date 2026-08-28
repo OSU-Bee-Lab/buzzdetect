@@ -147,13 +147,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Must run before tauri-action: it produces the sidecar binary and the
-      # engine payload that tauri.conf.json's externalBin/resources point at,
-      # and the bundle step fails outright if they're missing.
-      - name: Build the engine sidecar
+      # Must run before tauri-action: it produces the engine payload (including
+      # the frozen engine at engine-bin/) that tauri.conf.json's resources
+      # point at, and the bundle step fails outright if it's missing.
+      - name: Build the engine
         run: node scripts/build-engine.mjs ${{ matrix.engine_flags }}
-        env:
-          ENGINE_TARGET_TRIPLE: ${{ matrix.triple }}
 
       - uses: tauri-apps/tauri-action@v0
         if: matrix.portable == ''
@@ -168,9 +166,9 @@ jobs:
 
       # The portable build: tauri compiles the app but bundles nothing, so the
       # layout an installer would have produced gets assembled here. On Windows
-      # that's flat -- Tauri resolves both the sidecar and resource_dir()
-      # relative to the executable's own directory, which is exactly what
-      # resolve_engine in src-tauri/src/lib.rs expects to find.
+      # that's flat -- resource_dir() is the executable's own directory, so
+      # engine-payload/ sits beside the .exe and resolve_engine in
+      # src-tauri/src/lib.rs finds engine-payload/engine-bin/ under it.
       - name: Package the portable archive
         if: matrix.portable != ''
         shell: bash
@@ -192,8 +190,8 @@ jobs:
           if [ ! -f "$app" ]; then app=src-tauri/target/release/buzzdetect.exe; fi
           [ -f "$app" ] || { echo "no app binary in src-tauri/target/release"; exit 1; }
           cp "$app" "dist/$name/buzzdetect-cuda.exe"
-          cp "src-tauri/binaries/buzzdetect-engine-${{ matrix.triple }}.exe" \
-            "dist/$name/buzzdetect-engine.exe"
+          # The frozen engine rides along inside engine-payload/engine-bin/ now
+          # (onedir), so copying the payload carries it too.
           cp -r src-tauri/engine-payload "dist/$name/engine-payload"
 
           # 7-Zip rather than Compress-Archive, which is built on a zip writer
@@ -213,7 +211,7 @@ jobs:
         if: always() && matrix.engine_flags != ''
         shell: bash
         run: |
-          du -sh src-tauri/engine-payload src-tauri/binaries/* 2>/dev/null || true
+          du -sh src-tauri/engine-payload src-tauri/engine-payload/engine-bin 2>/dev/null || true
           find src-tauri/target/release/bundle dist -maxdepth 2 -type f \
             \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.zip' \) \
             -exec ls -lh {} + 2>/dev/null || true
