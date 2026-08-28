@@ -79,3 +79,72 @@ what the engine reported for itself — the gap between them is startup.
 `peak_rss_mb` is the engine process's high-water mark, which excludes the mp3
 helper processes (they hold one decode buffer each; the chunks that dominate
 memory are queued in the parent).
+
+## Results
+
+Run 2026-08-27 on beelab-files (GTX 1650 4GB, 23GB RAM, corpus on a local
+NTFS-via-FUSE disk): 78 files, 314 audio hours, one GPU analyzer,
+`model_general_v3`. `results.csv` is the raw data.
+
+Analysis rate (audio seconds per wall second):
+
+| streamers | 100s | 200s | 600s | 1200s |
+| --- | --- | --- | --- | --- |
+| 1 | 815x | 822x | 846x | 811x |
+| 6 | 2665x | 2726x | 2810x | 2863x |
+| 12 | 2676x | 2814x | 2781x | **2905x** |
+
+Peak RSS (MB):
+
+| streamers | 100s | 200s | 600s | 1200s |
+| --- | --- | --- | --- | --- |
+| 1 | 904 | 992 | 1149 | 1405 |
+| 6 | 1371 | 1616 | 2526 | 4014 |
+| 12 | 1787 | 2331 | 4508 | 7434 |
+
+No cell ran out of memory, including the 12 x 1200s corner that came closest at
+7.4GB.
+
+**Streamer count is the only setting that matters, and it stops mattering at
+six.** One to six is 3.3x. Six to twelve is 1%, and not monotonic — at 600s
+chunks twelve streamers are *slower* than six while using 1.8x the memory.
+There is no reading of this grid where more than six streamers pays.
+
+**Chunk length barely moves the rate and dominates memory.** Across a 12x
+range it buys 7% at six streamers, while peak RSS goes up 2.9x. The rate
+differences across a row are small enough to be within run-to-run noise; the
+memory differences are not.
+
+The one clean effect is that longer chunks and more streamers are the same
+lever: both add buffered audio. Memory tracks streamers x chunk length closely
+(12 x 1200 is 8.2x the memory of 1 x 100), which is why the two settings should
+be chosen together rather than separately.
+
+At one streamer the rate is flat at ~820x whatever the chunk length, because a
+single decoder thread is the ceiling and the GPU is idle most of the time. That
+number is worth remembering: it is what the whole analysis collapses to if the
+streamers stop running in parallel, which is exactly what the mp3 length scan
+used to do to them before the helper process landed (see
+`engine/src/stream/drivers/README.md` -- eight streamers without helpers
+measure 850x, indistinguishable from one).
+
+### What to set
+
+**Six streamers and 200s chunks** is the recommendation: 2726x, 94% of the
+best cell in the grid, for 1.6GB -- 22% of the memory the best cell needs. If
+memory is genuinely free, 6 x 600s gets 97% at 2.5GB. The 12 x 1200s corner
+wins the grid by 3% and costs 4.6x the memory to do it, which is not a trade
+worth making on a machine that might be doing anything else.
+
+The engine's current default is `n_analyzers * 8` streamers on GPU, so a
+one-analyzer GPU run gets eight. That lands in the flat region and is not
+costing anything measurable -- but it is above the knee, and on a memory-tight
+machine six would be the better default.
+
+### Caveats
+
+One run per cell, so single-digit-percent differences between adjacent cells
+are not resolvable -- `--repeat` exists for when that matters. All of it is one
+GPU analyzer on one card; the streamer knee should be expected to move with
+analyzer count, since what the streamers are feeding is what sets how fast they
+need to be.

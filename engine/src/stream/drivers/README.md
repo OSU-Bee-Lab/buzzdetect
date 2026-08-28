@@ -216,17 +216,24 @@ the old behaviour, not a failed analysis. `BUZZDETECT_MP3_HELPERS` selects
 `auto` (the default: a helper whenever another file is already open, which is
 exactly when there is contention to lose), `always`, or `never`.
 
-Measured on beelab-files, 8 threads opening 8 distinct 12.75 h files from a
-network mount and reading three 200 s chunks from each:
+Measured on beelab-files, 8 threads opening 8 distinct ~5.4 h files and reading
+three 200 s chunks from each:
 
 | | wall | slowest open | mean open |
 | --- | --- | --- | --- |
 | in-process (`never`) | 17.2 s | 16.8 s | 8.98 s |
 | helpers (`auto`) | **5.05 s** | **4.28 s** | **3.69 s** |
 
-End to end, the same eight files (102 h of audio) through a full GPU analysis
+End to end, the same eight files (43.4 h of audio) through a full GPU analysis
 with 8 streamers: **184 s in-process, 61 s with helpers** — 3.0x, and the
 per-file output is byte-identical between the two.
+
+As analysis rates those are **850x and 2565x**, which is the useful way to read
+them: the streamer-count sweep in `benchmarks/streamer-grid` measures 815–846x
+for a *single* streamer and 2665–2905x for six to twelve. So eight streamers
+without helpers perform like one streamer — which is precisely the claim that
+the length scan serialises them on the GIL — and with helpers they perform like
+the six-to-twelve-streamer plateau.
 
 ### Alternatives that were tried and rejected
 
