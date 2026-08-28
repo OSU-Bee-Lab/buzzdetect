@@ -103,7 +103,7 @@ def test_layout():
     print('layout and frame boundaries')
     for name in ('truncating.mp3', 'tagged.mp3', 'generous.mp3', 'stereo.mp3'):
         path = fixture(name)
-        layout = mp3._read_layout(path)
+        layout = mp3.read_layout(path)
         if not check(layout is not None, f'{name}: layout found'):
             continue
 

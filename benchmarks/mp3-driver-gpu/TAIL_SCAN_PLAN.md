@@ -1,5 +1,11 @@
 # Plan: scan only the tail, read the body plainly
 
+> **Done.** This is kept as the record of what was intended, not of what
+> happened. The gate passed, the work is in `engine/src/stream/drivers/mp3.py`,
+> and the result — including the two things the gate turned up that this plan
+> did not anticipate, and which changed what its first success criterion could
+> mean — is in **`STEP1_RESULT.md`**. Read that first.
+
 A worked proposal for removing the mp3 driver's ~10% remaining cost on GPU
 analyses. Read `HANDOFF.md` first for how that cost was measured and what has
 already been ruled out.

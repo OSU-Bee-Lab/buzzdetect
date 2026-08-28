@@ -142,10 +142,10 @@ if (length <= 0 && !psf->is_pipe)
 ```
 
 `mpg123_scan()` runs only when `mpg123_length()` fails, and `mpg123_length()`
-only fails when it has no file size to extrapolate from. So the driver hands
-libsndfile the file through a virtual-IO shim that **refuses to report its
-length**, which forces the scan branch and yields an exact frame count. The
-file stays seekable; everything downstream is ordinary libsndfile.
+only fails when it has no file size to extrapolate from. So handing libsndfile
+the file through a virtual-IO shim that **refuses to report its length** forces
+the scan branch and yields an exact frame count. The file stays seekable;
+everything downstream is ordinary libsndfile.
 
 No patched binary, no vendored library, no new dependency.
 
@@ -162,84 +162,124 @@ Three details are load-bearing, and all three were found by breaking them:
    and falls back to `read()` otherwise; the fallback roughly doubles scan time
    across its millions of calls.
 
-If the scan fails or returns an implausible count, the driver falls back to a
-plain `soundfile.SoundFile(path)` — a wrong length is still better than
-refusing to read the file, and the streamer's short-read handling covers it.
+That is the whole of it, and for a year it was applied to the whole file. It is
+now the driver's *fallback*, because doing it to the whole file costs far more
+than it needs to.
+
+### Only the tail is missing, so only the tail is scanned
+
+Everything libsndfile clamps away is at the end — 34 s of a 5.6 h recording,
+169 s of a 27.9 h one, 0.17% either way. The body is not in question at all, and
+a plain `soundfile.SoundFile` reads it at full C speed. So:
+
+- **The body is read plainly**, straight through libsndfile, with no Python in
+  the read path. Measured over 894,175,796 samples read the way the streamer
+  reads them: byte for byte what the scanned driver produced.
+- **The length comes from arithmetic, not a scan.** A CBR stream's frames
+  average exactly `144 * bitrate / samplerate` bytes — the padding bit is how an
+  integer frame size tracks a non-integer average — so the audio byte count
+  divided by that *is* the frame count. `_Layout` works it out and then checks
+  itself: it predicts the byte offset of frames across the file and requires a
+  real header at each, predicts the last frame and requires it to end where the
+  audio does, and predicts libsndfile's own estimate and requires that too.
+  Anything that fails takes the fallback.
+- **The tail is read through the same shim, over a fragment.** It presents the
+  file from a frame boundary a dozen frames before the clamp, so the scan it
+  forces covers a couple of megabytes instead of gigabytes.
+
+#### The seam
+
+An mp3 decode that starts partway into a file is wrong for a frame or two — the
+bit reservoir lets a frame borrow space from its predecessors — and then
+converges. Measured across the corpus: two frames, always.
+
+What is *not* always true is that it converges exactly. Of two adjacent frame
+boundaries, one reproduces the continuous decode bit for bit and the other
+leaves a residual of ~2.4e-7 that never dies away, because mpg123's synthesis
+state ends up aligned differently and sums the same window in a different order.
+Which of the two is right alternates with the start frame, with a phase that
+varies between regions of the same file, so nothing predicts it.
+
+So the driver measures it. It decodes a window the body has already produced
+through both candidates and keeps the one that comes back identical. That costs
+one extra decode of a few thousand samples, once per file, and turns a coin flip
+into a check. Four of the eight corpus files want each boundary, which is the
+best evidence that guessing was never going to do.
+
+The fragment is also only ever read a whole frame at a time, because
+libsndfile's mp3 output depends on where reads are broken: a read resumed
+anywhere but a frame boundary differs from an unbroken one by ~6e-8 and never
+converges back.
+
+`benchmarks/mp3-driver-gpu/STEP1_RESULT.md` has all of those measurements, the
+access patterns the read path is held to, and the three corners where it answers
+differently from the old one on purpose.
 
 ### What it costs
 
-The scan reads the file once, ~3.7–5.9 s per GB, because libmpg123 makes two
-I/O calls per MPEG frame (a 4-byte header read plus a body skip) and each one
-crosses back into Python — 13.7 M calls on the 1 GB fixture.
+Nothing, near enough. Opening a file is a division and a handful of small reads;
+reading it is ordinary libsndfile; the tail costs one small scan and one small
+verification at the end.
 
-It is close to free in practice, for two reasons. It only runs on files that
-need it: a Xing-tagged file opens in 0.3 ms and skips the scan entirely. And
-1 MB-buffered virtual IO reads *faster* than letting libsndfile open the path
-itself, which claws back most of the scan on files that do pay it.
+On the `Chia - Solar Eclipse` corpus — 8 files, 162.4 audio hours, 48 kbps CBR
+mono, no Xing — through a full GPU analysis at 500 s chunks, 8 streamers, buffer
+depth 8, one analyzer, `model_general_v3`. Rate is audio seconds over total wall
+seconds, two runs of each arm, one at a time, page cache warmed first
+(`benchmarks/mp3-driver-gpu/run_arms.py`):
 
-Streaming the full file in 200 s chunks, no inference:
+| read path | rate | wall |
+| --- | --- | --- |
+| **tail scan (current)** | **3506x, 3454x** | 166.8 s, 169.3 s |
+| plain soundfile, **loses 0.17%** | 3449x, 3453x | 169.2 s, 169.0 s |
+| tail scan, forced into helper processes | 3408x, 3403x | 171.6 s, 171.8 s |
+| whole-file scan (the driver before this) | 3002x, 2961x | 194.8 s, 197.5 s |
 
-| corpus | soundfile | this driver | PyAV driver |
-| --- | --- | --- | --- |
-| 49.7 h, no Xing | 57.8 s, **loses 301.7 s** | 58.8 s, complete | 77.5 s, complete |
-| 75 × 300 s, Xing | 7.29 s, complete | 7.23 s, complete | 10.47 s, complete |
+The whole-file scan cost ~15% of an analysis. The tail scan costs nothing
+measurable: it is level with the plain reader that throws the tail away, and it
+analyses more audio than that reader does. Per-file output is byte-identical
+between the whole-file scan and the tail scan, in-process or through helpers,
+on every file of that corpus.
 
-Output is bit-identical to plain `soundfile` at every offset tested, so
-adopting the driver does not shift existing results.
+### The helper process, and why it is now the exception
 
-### Why the read path runs in a helper process
+Every virtual-IO callback is a Python call, so a shim held over a whole file
+holds the GIL for as long as the file is being read. On one streamer that is
+invisible. On eight it was the whole analysis: the streamers stopped
+parallelising and crawled together, and once the ONNX fusion made the analyzer
+roughly 30x faster, a streamer stall that used to hide under TensorFlow
+inference became the runtime.
 
-Every one of those millions of virtual-IO callbacks is a Python call, so the
-scan holds the GIL for as long as it runs. On one streamer that is invisible.
-On eight it is the whole analysis: the streamers stop parallelising and crawl
-together, and since the ONNX fusion made the analyzer roughly 30x faster, a
-streamer stall that used to hide under TensorFlow inference became the runtime.
-
-The scan cannot be moved on its own. libsndfile fixes an mp3's length at open
+The scan could not be moved on its own. libsndfile fixes an mp3's length at open
 and clamps every later read and seek to it, and there is no API to inject a
-length it already knows — so a subprocess cannot compute the frame count and
-hand the number back. The shim has to stay in place for the lifetime of the
-track. What moves is therefore the whole decoder: `LocalDriver` is the
-in-process reader, and `Driver` normally runs one inside a helper process,
-answering open/read/seek/tell over a `Pipe` with sample data returned through
-shared memory (a 200 s chunk is ~35 MB, far too much to pickle through a pipe).
+length it already knows — so a subprocess could not compute the frame count and
+hand the number back. The shim had to stay for the lifetime of the track. What
+moved was therefore the whole decoder: `LocalDriver` is the in-process reader,
+and `Driver` ran one inside a helper process, answering open/read/seek/tell over
+a `Pipe` with sample data returned through shared memory (a 200 s chunk is
+~35 MB, far too much to pickle through a pipe).
 
-Streamers stay threads and the coordinator's shared state is untouched, which
-is why this shape was chosen over making the streamers themselves processes:
+Streamers stay threads and the coordinator's shared state is untouched, which is
+why this shape was chosen over making the streamers themselves processes:
 `Coordinator.assigned_chunks` is a plain dict under a `threading.Lock`, and
 `AssignFile.track` is an open file handle that cannot cross a process boundary.
+
+With the body read plainly, there is nothing left holding the GIL, and the pipe
+and the copy stop paying for themselves: 3462x in-process against 3402x through
+helpers, on the corpus above. So `auto` now sends a file to a helper only when
+that file is going to need the whole-file scan — a VBR stream, a file whose
+layout will not validate — and reads everything else in-process.
+`BUZZDETECT_MP3_HELPERS` still selects `always` or `never` outright.
 
 A helper is leased for the lifetime of one open file and returned to a pool. A
 helper that dies or stops answering is not fatal — the file reopens in-process,
 seeks back to where it was, and the read is retried once — so the worst case is
-the old behaviour, not a failed analysis. `BUZZDETECT_MP3_HELPERS` selects
-`auto` (the default: a helper whenever another file is already open, which is
-exactly when there is contention to lose), `always`, or `never`.
+the old behaviour, not a failed analysis.
 
-Measured on beelab-files, 8 threads opening 8 distinct ~5.4 h files and reading
-three 200 s chunks from each:
-
-| | wall | slowest open | mean open |
-| --- | --- | --- | --- |
-| in-process (`never`) | 17.2 s | 16.8 s | 8.98 s |
-| helpers (`auto`) | **5.05 s** | **4.28 s** | **3.69 s** |
-
-End to end, the same eight files (43.4 h of audio) through a full GPU analysis
-with 8 streamers: **184 s in-process, 61 s with helpers** — 3.0x, and the
-per-file output is byte-identical between the two.
-
-As analysis rates those are **850x and 2565x**, which is the useful way to read
-them: the streamer-count sweep in `benchmarks/streamer-grid` measures 815–846x
-for a *single* streamer and 2665–2905x for six to twelve. So eight streamers
-without helpers perform like one streamer — which is precisely the claim that
-the length scan serialises them on the GIL — and with helpers they perform like
-the six-to-twelve-streamer plateau.
-
-On GPU the driver's cost is no longer negligible: it is ~13% of a whole
-analysis, because the shim's per-read callbacks are what the helper process is
-working around rather than eliminating. That is measured, along with what has
-been ruled out and the fix most likely to close it, in
-`benchmarks/mp3-driver-gpu/HANDOFF.md`.
+For the record, from when the shim covered whole files: 8 threads opening 8
+distinct ~5.4 h files and reading three 200 s chunks from each took 17.2 s
+in-process against 5.05 s with helpers, and a full GPU analysis of those files
+took 184 s against 61 s. That 3x is what the helper pool was built for, and it
+is why it is still there for the files that still need it.
 
 ### Alternatives that were tried and rejected
 
@@ -266,8 +306,24 @@ been ruled out and the fix most likely to close it, in
 
 The trick depends on an interaction that upstream does not document as an API —
 it is a consequence of how `mpeg_decode.c` falls back, not a promised
-behaviour. It is guarded by the fallback described above, and is worth a
-fixture test if libsndfile is ever upgraded.
+behaviour. So does the arithmetic that replaces the scan, which assumes
+libsndfile extrapolates the length from the first frame. Both are checked at
+runtime and both fall back rather than guess, and both are covered by
+`engine/tests/test_mp3_driver.py`, which is the thing to run if libsndfile is
+ever upgraded:
+
+```
+cd engine && .venv/bin/python3 tests/test_mp3_driver.py
+```
+
+A libsndfile that measured mp3 lengths properly would fail the estimate
+prediction and put every file on the fallback: correct, and slower. If that ever
+happens, `_agrees` is the place to notice it.
+
+`BUZZDETECT_MP3_TAILSCAN=never` reads every file the old way — the whole-file
+scan and the shim over everything. It exists so the two paths can be compared on
+one corpus in one session, and as somewhere to retreat to if a file ever defeats
+the layout arithmetic in a way its own validation does not catch.
 
 Files already analyzed under the old estimate do not self-heal: their results
 are marked complete and will be skipped. Delete the corresponding

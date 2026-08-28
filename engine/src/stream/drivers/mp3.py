@@ -30,10 +30,28 @@ _BUFFER_BYTES = 1 << 20
 # somehow fails we must not present this as a real frame count.
 _SF_COUNT_MAX = 0x7FFFFFFFFFFFFFFF
 
-# Where the work runs: 'auto' (a helper process whenever another file is
-# already open -- i.e. whenever there is contention to lose), 'always', or
-# 'never' for the pre-2.0.1 in-process behaviour.
+# Where the work runs: 'auto' (a helper process only for a file that needs the
+# whole-file scan, and only when another file is already open -- i.e. when there
+# is contention to lose), 'always', or 'never'.
 ENV_HELPERS = 'BUZZDETECT_MP3_HELPERS'
+
+# Set to 'never' to read every file the way the driver did before it learned to
+# read the body plainly: mpg123's whole-file length scan, and every read through
+# the shim. Correct, and much slower. It exists so the two paths can be compared
+# on the same corpus in the same session, and as somewhere to retreat to if a
+# file ever turns out to defeat the layout arithmetic in a way its own
+# validation does not catch.
+ENV_TAILSCAN = 'BUZZDETECT_MP3_TAILSCAN'
+
+
+# Tells LocalDriver to work the layout out for itself, as distinct from being
+# handed None, which means there isn't one.
+_DISCOVER = object()
+
+
+def _tailscan_allowed():
+    mode = os.environ.get(ENV_TAILSCAN, 'auto').strip().lower()
+    return mode not in ('0', 'off', 'no', 'false', 'never')
 
 # A helper is leased for the lifetime of one open file and returned to the
 # pool, so this only ever binds if something opens more files concurrently
@@ -201,7 +219,7 @@ class _Layout:
     lets the driver find the one frame boundary it needs near the end of the
     file without reading the rest of it.
 
-    Built by `_read_layout`, which validates it and returns None if the file is
+    Built by `read_layout`, which validates it and returns None if the file is
     not the shape this assumes.
     """
 
@@ -271,13 +289,18 @@ class _Layout:
         return offset
 
 
-def _read_layout(path):
+def read_layout(path):
     """The CBR layout of `path`, or None if it does not have one.
+
+    Cheap -- a handful of small reads, no decoding -- which is what lets `Driver`
+    ask, before it opens anything, whether this file is going to need the scan.
 
     Everything the fast read path assumes is checked here, so a file that is
     VBR, free-format, oddly framed, or simply not what it looks like drops back
     to the scan rather than being read wrongly.
     """
+    if not _tailscan_allowed():
+        return None
     size = os.path.getsize(path)
     with open(path, 'rb') as f:
         skip = _id3v2_size(f)
@@ -441,7 +464,7 @@ class LocalDriver:
     scanned driver over the tail. `Driver` is what the driver map hands out.
     """
 
-    def __init__(self, path):
+    def __init__(self, path, layout=_DISCOVER):
         self.path_audio = path
         self._layout = None
         self._plain = None
@@ -457,12 +480,13 @@ class LocalDriver:
         self._carry = None          # fragment samples decoded but not yet handed out
         self._seek_target = 0       # where the body track was last positioned
 
-        self._open(path)
+        self._open(path, layout)
 
     # Opening
     #
-    def _open(self, path):
-        layout = _read_layout(path)
+    def _open(self, path, layout):
+        if layout is _DISCOVER:
+            layout = read_layout(path)
         if layout is not None:
             try:
                 plain = sf.SoundFile(path)
@@ -1173,19 +1197,24 @@ _live_lock = threading.Lock()
 _live_open = 0
 
 
-def _want_helper(contended):
+def _want_helper(contended, needs_scan):
     """Whether this open should go to a helper.
 
     `contended` is whether another file was already open when this one started
     opening -- read before the caller counts itself, or every open looks
-    contended.
+    contended. `needs_scan` is whether this file will fall back to the
+    whole-file scan, which is the only thing left that holds the GIL long
+    enough to be worth a process boundary: a file on the tail-scan path decodes
+    through libsndfile's own C, which releases it, and moving that into a helper
+    only adds a pipe and a copy. Measured on the Solar Eclipse corpus, 8
+    streamers, 500s chunks: 3462x in-process against 3402x through helpers.
     """
     mode = os.environ.get(ENV_HELPERS, 'auto').strip().lower()
     if mode in ('0', 'off', 'no', 'false', 'never'):
         return False
     if mode in ('1', 'on', 'yes', 'true', 'always'):
         return True
-    return contended
+    return contended and needs_scan
 
 
 class Driver:
@@ -1214,10 +1243,11 @@ class Driver:
         self._counted = True
 
         try:
-            if _want_helper(was_contended):
+            layout = read_layout(path)
+            if _want_helper(was_contended, layout is None):
                 self._open_helper(path)
             if self._helper is None:
-                self._open_local(path)
+                self._open_local(path, layout)
         except Exception:
             self._uncount()
             raise
@@ -1240,8 +1270,8 @@ class Driver:
             return
         self._helper = helper
 
-    def _open_local(self, path):
-        self._local = LocalDriver(path)
+    def _open_local(self, path, layout=_DISCOVER):
+        self._local = LocalDriver(path, layout)
         self.samplerate = self._local.samplerate
         self.channels = self._local.channels
         self.frames = self._local.frames
