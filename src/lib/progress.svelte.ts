@@ -3,7 +3,9 @@
 // engine/src/pipeline/progress_json.py). Event types: manifest (one file
 // discovered), manifest_done (discovery walk finished), file_start,
 // file_skip, chunk_done (which carries chunk_start/chunk_end as absolute
-// offsets within the file, not a done-so-far position).
+// offsets within the file, not a done-so-far position), and stage --
+// startup progress, plus the 'stopping' report, which is not a startup stage
+// at all but the engine saying it has begun winding down.
 
 export type FileStatus = 'pending' | 'running' | 'done' | 'skipped';
 
@@ -488,6 +490,14 @@ class AnalysisRun {
 	handleEvent(payload: any) {
 		switch (payload.event) {
 			case 'stage': {
+				// Not a startup stage: the engine has begun winding down, which
+				// it reports whether the stop came from this app's button, a
+				// Ctrl-C in a terminal, or a signal from elsewhere. Only the
+				// first of those has already flipped `stopping` locally.
+				if (payload.name === 'stopping') {
+					this.beginStop();
+					break;
+				}
 				const next = payload.name as Stage;
 				const rank = STAGE_ORDER.indexOf(next);
 				if (rank > STAGE_ORDER.indexOf(this.stage)) this.stage = next;

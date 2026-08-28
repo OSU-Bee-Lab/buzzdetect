@@ -24,3 +24,12 @@ if DIR_ENGINE not in sys.path:
 
 def fixture(name):
     return os.path.join(DIR_FIXTURES, name)
+
+
+def engine_sources():
+    """Every .py file in the engine's own source tree (not the legacy GUI)."""
+    for root, dirs, files in os.walk(os.path.join(DIR_ENGINE, 'src')):
+        dirs[:] = [d for d in dirs if d not in ('__pycache__', 'gui')]
+        for name in files:
+            if name.endswith('.py'):
+                yield os.path.join(root, name)
