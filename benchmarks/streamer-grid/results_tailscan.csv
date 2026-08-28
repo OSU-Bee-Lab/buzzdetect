@@ -1,0 +1,5 @@
+timestamp,streamers,chunklength,status,rate_x,audio_s,wall_s,engine_s,peak_rss_mb,files_started,files_expected,processor,analyzers,model,corpus_files,corpus_hours_est,note,log
+2026-08-28T05:27:28+00:00,12,1200.0,ok,3316.0,1130508.3,340.9,340.22,5482.9,75,78,gpu,1,model_general_v3,78,314.0,,work/logs/s12_c1200_0.log
+2026-08-28T05:33:11+00:00,6,1200.0,ok,3289.0,1130508.3,343.7,343.08,3639.6,75,78,gpu,1,model_general_v3,78,314.0,,work/logs/s6_c1200_0.log
+2026-08-28T05:39:15+00:00,12,200.0,ok,3109.7,1130508.3,363.5,362.87,2030.1,75,78,gpu,1,model_general_v3,78,314.0,,work/logs/s12_c200_0.log
+2026-08-28T05:45:22+00:00,6,200.0,ok,3079.9,1130508.3,367.1,366.4,1530.3,75,78,gpu,1,model_general_v3,78,314.0,,work/logs/s6_c200_0.log

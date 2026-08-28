@@ -2,7 +2,7 @@
 
 See README.md in this directory for the full account: why libsndfile loses the
 tail of a long mp3, which files are affected, the benchmarks, the alternatives
-that were tried and rejected, and why the read path runs in a helper process.
+that were tried and rejected, and what the helper process is still for.
 
 The body of a file is read through an ordinary `soundfile.SoundFile`, at full C
 speed; only the tail libsndfile refuses to reach is decoded through a shim, and
@@ -52,6 +52,7 @@ _DISCOVER = object()
 def _tailscan_allowed():
     mode = os.environ.get(ENV_TAILSCAN, 'auto').strip().lower()
     return mode not in ('0', 'off', 'no', 'false', 'never')
+
 
 # A helper is leased for the lifetime of one open file and returned to the
 # pool, so this only ever binds if something opens more files concurrently
@@ -460,8 +461,18 @@ class LocalDriver:
     libsndfile opened through a shim that withholds the file's length, which
     forces mpg123's exact scan. Correct, slower, and rare.
 
-    Reads are bit-identical to a plain soundfile open over the body, and to the
-    scanned driver over the tail. `Driver` is what the driver map hands out.
+    Reads are bit-identical to what the scanned driver produced, for the way the
+    streamer reads -- seek to a chunk's start, one read of the chunk's length --
+    and for any single read that crosses the seam, and for any read after a
+    seek. That qualification is not hedging: libsndfile's own mp3 output depends
+    on where the caller seeks and on where it breaks its reads, so "identical"
+    only means anything against a stated access pattern. The three corners where
+    this driver deliberately answers differently, all of them by <=2.4e-7 and
+    none of them reachable from the streamer, are in
+    benchmarks/mp3-driver-gpu/STEP1_RESULT.md and asserted as bounds in
+    tests/test_mp3_driver.py.
+
+    `Driver` is what the driver map hands out.
     """
 
     def __init__(self, path, layout=_DISCOVER):
@@ -1220,11 +1231,16 @@ def _want_helper(contended, needs_scan):
 class Driver:
     """The mp3 reader the driver map hands out.
 
-    Presents the driver contract (README.md) over a LocalDriver that normally
-    lives in a helper process. Everything about the decode is identical --
-    same libsndfile, same shim, same bytes out -- but the scan's few million
-    Python-level virtual-IO callbacks happen in an interpreter that isn't
-    holding up seven other streamers and an analyzer.
+    Presents the driver contract (README.md) over a LocalDriver, which usually
+    lives right here: a file on the tail-scan path decodes through libsndfile's
+    own C, which releases the GIL, so there is nothing to gain by moving it and
+    a pipe and a copy to lose.
+
+    A file that cannot take that path is a different matter. It falls back to
+    the whole-file scan, whose virtual IO crosses into Python a few million
+    times and holds the GIL against every other streamer for as long as it runs,
+    and *that* is what the helper process is for. `read_layout` answers which
+    kind of file this is before anything is opened, cheaply.
 
     A helper that dies or stops answering is not fatal: the file reopens
     in-process, seeks back to where it was, and the read is retried once.

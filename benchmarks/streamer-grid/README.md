@@ -128,6 +128,31 @@ used to do to them before the helper process landed (see
 `engine/src/stream/drivers/README.md` -- eight streamers without helpers
 measure 850x, indistinguishable from one).
 
+### After the tail-scan read path (2026-08-28)
+
+The grid above was run with the mp3 driver forcing libsndfile to scan every
+file in full and reading it through a Python shim for the rest of its life.
+That is gone: the driver now reads the body plainly and shims only the tail
+(`engine/src/stream/drivers/README.md`). Re-running the two cells the grid
+recommends and the two it says are best, same corpus, same machine
+(`results_tailscan.csv`):
+
+| cell | whole-file scan | tail scan |
+| --- | --- | --- |
+| 12 streamers, 1200 s | 2905x | **3316x** |
+| 6 streamers, 1200 s | 2863x | **3289x** |
+| 12 streamers, 200 s | 2814x | **3110x** |
+| 6 streamers, 200 s | 2726x | **3080x** |
+
+10-15% everywhere, on a corpus of 78 files where opening is a much larger share
+of the work than it is on the eight long files of `Chia - Solar Eclipse`. That
+is the shape of corpus the whole-file scan hurt most, since its cost was paid
+once per file regardless of how much of the file was read.
+
+The conclusions above are unchanged: the shape of the grid is the same, six
+streamers is still the knee, and chunk length still buys little for a lot of
+memory. Only the whole surface moved up.
+
 ### What to set
 
 **Six streamers and 200s chunks** is the recommendation: 2726x, 94% of the
