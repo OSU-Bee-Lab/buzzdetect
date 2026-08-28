@@ -13,14 +13,13 @@ class ArgValid:
 def validate_modelname(modelname: str):
     modelname = str(modelname)
 
-    if not os.path.exists(os.path.join(cfg.DIR_MODELS, modelname)):
+    try:
+        model_dir = cfg.resolve_model_dir(modelname)
+    except FileNotFoundError:
         return ArgValid(False, f'Model folder does not exist for model "{modelname}"')
 
-    if not os.path.exists(os.path.join(cfg.DIR_MODELS, modelname, 'config_model.json')):
-        return ArgValid(False, f'Config file does not exist for model "{modelname}"')
-
-    if not os.path.exists(os.path.join(cfg.DIR_MODELS, modelname, 'model.py')):
-        return ArgValid(False, f'model.py not found for model "{modelname}"')
+    if not os.path.exists(os.path.join(model_dir, 'config_model.json')):
+        return ArgValid(False, f'config_model.json does not exist for model "{modelname}"')
 
     return ArgValid(True, None)
 

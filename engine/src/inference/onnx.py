@@ -201,8 +201,11 @@ def _probe_model():
     """The ONNX file to build the probe session on."""
     from src import config as cfg
 
-    found = sorted(glob.glob(os.path.join(cfg.DIR_MODELS, '*', 'model.onnx')))
-    return found[0] if found else None
+    for root in cfg.model_roots():
+        found = sorted(glob.glob(os.path.join(root, '*', 'model.onnx')))
+        if found:
+            return found[0]
+    return None
 
 
 def _run_probe(session):

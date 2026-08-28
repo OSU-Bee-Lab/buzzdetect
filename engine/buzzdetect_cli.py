@@ -21,7 +21,7 @@ def _resolve_dir_out(dir_out, modelname):
     from src import config as cfg
     if dir_out is not None:
         return dir_out
-    return os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_OUTPUT)
+    return os.path.join(cfg.resolve_model_dir(modelname, must_exist=False), cfg.SUBDIR_OUTPUT)
 
 
 def _resolve_classes_out(modelname, classes_out):
@@ -29,7 +29,7 @@ def _resolve_classes_out(modelname, classes_out):
     if classes_out != 'all':
         return classes_out
     from src import config as cfg
-    config_path = os.path.join(cfg.DIR_MODELS, modelname, 'config_model.json')
+    config_path = os.path.join(cfg.resolve_model_dir(modelname, must_exist=False), 'config_model.json')
     with open(config_path) as f:
         return json.load(f)['classes']
 

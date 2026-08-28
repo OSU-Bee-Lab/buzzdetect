@@ -11,10 +11,11 @@ to sit next to the binary.
 Three things this build deliberately does NOT contain:
 
 - TensorFlow. Only the ONNX models ship; see requirements-onnx.txt.
-- models/. buzzdetect loads each model by reading its model.py off disk at
-  runtime (importlib.util.spec_from_file_location in src/inference/models.py),
-  so freezing them in would be pointless -- they're shipped as a Tauri resource
-  directory instead, and the app runs the binary with that as its cwd.
+- models/. A model is just model.onnx plus config_model.json, read off disk at
+  runtime (src/inference/models.py), so freezing them in would be pointless --
+  they're shipped as a Tauri resource directory instead, and the app runs the
+  binary with that as its cwd. User-imported models live outside the bundle
+  entirely (BUZZDETECT_MODELS_PATH).
 - The NVIDIA runtime, on the CUDA build. See strip_nvidia() below.
 """
 
@@ -63,7 +64,7 @@ def strip_nvidia(binaries):
 # importing each module by name, which no static analysis can see.
 hidden = collect_submodules('src.stream.drivers')
 
-# Reached only from model.py files loaded off disk at runtime, so likewise
+# Imported lazily inside src/inference/onnx.py (make_session), so it is
 # invisible to the import graph. Without it the app raises ImportError on the
 # first chunk it tries to analyse.
 hidden += ['onnxruntime']

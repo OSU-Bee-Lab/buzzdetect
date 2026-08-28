@@ -10,11 +10,10 @@
 # a model you test with is the same directory that ships. This file is the only
 # thing that separates the two.
 #
-# A shipped model must be an ONNX build: it needs a model.onnx, and its
-# model.py must not import TensorFlow, which the frozen sidecar does not carry
-# (see engine/buzzdetect.spec's excludes). The build fails rather than ships if
-# a name here does not meet that. Convert a TensorFlow model first --
-# buzzdetect-training's tools/export_onnx.py does it, checking the ONNX build
-# against the TensorFlow original and refusing to write a mismatch.
+# A shipped model must be an ONNX build: it needs a model.onnx and a
+# config_model.json (the class list and framing parameters). The build fails
+# rather than ships if a name here lacks either. Convert a TensorFlow model
+# first -- buzzdetect-training's tools/export_onnx.py does it, checking the
+# ONNX build against the TensorFlow original and refusing to write a mismatch.
 
 model_general_v3

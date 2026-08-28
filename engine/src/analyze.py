@@ -123,7 +123,7 @@ class Analyzer:
         self.timer_total = Timer()
 
         if self.dir_out is None:
-            self.dir_out = os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_OUTPUT)
+            self.dir_out = os.path.join(self.model.model_dir, cfg.SUBDIR_OUTPUT)
 
         self.a_stream_list = []
 

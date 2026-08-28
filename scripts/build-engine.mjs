@@ -58,16 +58,15 @@ const SHIPLIST = 'shipped-models.txt';
 // stays distinct from the app executable in logs and process lists.
 const SIDECAR = 'buzzdetect-engine';
 
-// What a shipped model directory consists of. model.onnx and model.py are
-// required (checked below); the CSVs are carried for whoever reads the results
-// and are copied when present. Notably absent: the TensorFlow weights, which
-// the sidecar has no TensorFlow to run.
+// What a shipped model directory consists of. model.onnx and config_model.json
+// are required (checked below); the CSVs are carried for whoever reads the
+// results and are copied when present. Notably absent: the TensorFlow weights,
+// which the sidecar has no TensorFlow to run.
 const MODEL_FILES = [
 	'model.onnx',
 	// Optional: the reduced-precision sibling, used only when a run asks for it
 	// (BUZZDETECT_GPU_FP16) on a provider that can act on it.
 	'model.fp16.onnx',
-	'model.py',
 	'config_model.json',
 	'translation.csv',
 	'weights.csv'
@@ -248,6 +247,13 @@ function assemblePayload() {
 				`${SHIPLIST} names '${name}', which has no model.onnx. Only ONNX ` +
 					`builds can ship; convert it with buzzdetect-training's ` +
 					`tools/export_onnx.py.`
+			);
+		}
+		if (!existsSync(join(dir, 'config_model.json'))) {
+			throw new Error(
+				`${SHIPLIST} names '${name}', which has no config_model.json ` +
+					`(the class list and framing parameters). Re-export it with ` +
+					`buzzdetect-training's tools/export_onnx.py.`
 			);
 		}
 		// An allowlist, not the directory. engine/models/ is a working

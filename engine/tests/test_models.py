@@ -7,7 +7,9 @@ the oracle: the last class of tests builds a session at a given input length
 and checks the row count the graph actually returns.
 """
 
+import os
 import unittest
+import unittest.mock
 
 import numpy as np
 
@@ -23,12 +25,14 @@ def model(framehop_prop=1):
 
 
 class TestConstruction(unittest.TestCase):
-    def test_loads_the_class_defined_in_the_models_own_model_py(self):
-        # Not the OnnxModel it imports to subclass, which sorts first in dir().
+    def test_loads_from_config_model_json(self):
         m = model()
         self.assertIsInstance(m, OnnxModel)
-        self.assertIsNot(type(m), OnnxModel)
         self.assertEqual(m.modelname, MODEL)
+        # Framing parameters come off the JSON, not a code file.
+        self.assertEqual(m.samplerate, 16000)
+        self.assertEqual(m.samples_hop, 15360)
+        self.assertEqual(m.samples_min, 15600)
 
     def test_reads_its_class_list(self):
         self.assertIn('ins_buzz', model().config['classes'])
@@ -37,6 +41,24 @@ class TestConstruction(unittest.TestCase):
         with self.assertRaises(ValueError) as e:
             load_model('no_such_model', framehop_prop=1, initialize=False)
         self.assertIn('no_such_model', str(e.exception))
+
+    def test_config_missing_required_key_is_refused(self):
+        import json
+        import tempfile
+        from src import config as cfg
+        with tempfile.TemporaryDirectory() as tmp:
+            d = os.path.join(tmp, 'stripped')
+            os.makedirs(d)
+            with open(os.path.join(cfg.DIR_MODELS, MODEL, 'config_model.json')) as f:
+                good = json.load(f)
+            del good['samples_hop']
+            with open(os.path.join(d, 'config_model.json'), 'w') as f:
+                json.dump(good, f)
+            with unittest.mock.patch.dict(
+                    os.environ, {cfg.ENV_MODELS_PATH: tmp}):
+                with self.assertRaises(ValueError) as e:
+                    load_model('stripped', framehop_prop=1, initialize=False)
+        self.assertIn('samples_hop', str(e.exception))
 
     def test_overlapping_frames_are_refused_not_ignored(self):
         # The patch hop is welded into the exported graph, so an overlapping

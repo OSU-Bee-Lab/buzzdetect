@@ -27,7 +27,7 @@ def sx(results_join, precision_requested):
 
 
 def calculate_threshold(modelname, precision_requested, tolerance=0.01):
-    dir_tests = os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_TESTS)
+    dir_tests = os.path.join(cfg.resolve_model_dir(modelname, must_exist=False), cfg.SUBDIR_TESTS)
 
     try:
         metrics = pd.read_csv(os.path.join(dir_tests, cfg.FNAME_METRICS))

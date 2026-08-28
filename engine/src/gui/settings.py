@@ -291,7 +291,7 @@ class AnalysisSettings(ctk.CTk):
 
     def _load_available_models(self):
         """Populates the model dropdown with available model directories."""
-        self.available_models = [d for d in os.listdir(cfg.DIR_MODELS) if os.path.exists(os.path.join(cfg.DIR_MODELS, d, 'model.py'))]
+        self.available_models = cfg.list_model_names()
         if not self.available_models:
             self._display_error(f"No valid models found in {cfg.DIR_MODELS}")
             self.model_optionmenu.dropdown.configure(values=[""])
@@ -305,7 +305,7 @@ class AnalysisSettings(ctk.CTk):
             return
 
         self._load_neurons()
-        self.vars_tkinter['dir_out'].set(os.path.join(cfg.DIR_MODELS, modelname, cfg.SUBDIR_OUTPUT))
+        self.vars_tkinter['dir_out'].set(os.path.join(cfg.resolve_model_dir(modelname, must_exist=False), cfg.SUBDIR_OUTPUT))
 
     def _load_neurons(self):
         """Loads classes from config_model.json for the selected model and updates checkboxes."""
@@ -323,7 +323,7 @@ class AnalysisSettings(ctk.CTk):
         if modelname == '':
             return
 
-        config_path = os.path.join(cfg.DIR_MODELS, modelname, "config_model.json")
+        config_path = os.path.join(cfg.resolve_model_dir(modelname, must_exist=False), "config_model.json")
         if not os.path.exists(config_path):
             self._display_error(f"config_model.json not found for model: {modelname}")
             return

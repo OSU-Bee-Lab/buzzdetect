@@ -14,5 +14,10 @@
     "bird_goose",
     "human"
   ],
-  "digits_results": 2
+  "samplerate": 16000,
+  "framelength_s": 0.96,
+  "digits_time": 2,
+  "digits_results": 2,
+  "samples_hop": 15360,
+  "samples_min": 15600
 }
