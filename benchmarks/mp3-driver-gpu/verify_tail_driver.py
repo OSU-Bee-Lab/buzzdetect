@@ -218,32 +218,37 @@ def seeks(path, clamp, frames, failures):
         oracle = Oracle(path)
         got = LocalDriver(path)
         # consecutive pairs, so backwards seeks out of the tail are covered
-        been_in_tail = False
+        been_past_clamp = False
+        history = False
         for step in (target, targets[(i + 2) % len(targets)]):
             pa, pb = oracle.seek(step), got.seek(step)
             a, b = oracle.read(window), got.read(window)
-            if pa == pb and same(a, b):
-                been_in_tail = been_in_tail or step >= clamp
+            if pa != pb or a.shape != b.shape:
+                bad += 1
+                if bad == 1:
+                    failures.check(False, 'seek matrix',
+                                   f'seek({step:,}) -> {pa:,} vs {pb:,}, '
+                                   f'shapes {a.shape} vs {b.shape}')
                 continue
-            worst = (np.abs(a - b).max()
-                     if a.shape == b.shape and a.shape[0] else float('inf'))
-            if pa == pb and been_in_tail and step < clamp and worst <= 1e-6:
-                # Documented: reading the tail advances the old driver's one
-                # decoder and not this one's body track, so a seek back into the
-                # body afterwards starts from a different decode history -- and
-                # what a seek returns depends on that history (step1_seek.py).
-                # The streamer reads a file's chunks in order and never goes
-                # back over the seam.
+            worst = float(np.abs(a - b).max()) if a.shape[0] else 0.0
+            # The rule tests/test_mp3_driver.py holds the driver to: a seek from
+            # a reader that has decoded nothing must be exact; once it has, a
+            # seek near the seam or after a visit to the tail need only be
+            # close, because the two readers are then no longer carrying the
+            # same decode history, and what a seek returns depends on it.
+            near_seam = step >= clamp - 2 * 1152
+            bound = 1e-6 if (history and (near_seam or been_past_clamp)) else 0.0
+            if worst > bound:
+                bad += 1
+                if bad == 1:
+                    failures.check(False, 'seek matrix',
+                                   f'seek({step:,}): {detail(a, b)}')
+            elif worst:
                 failures.note('seek matrix',
-                              f'seek({step:,}) after reading the tail: '
-                              f'{detail(a, b)} (within the documented 1e-06)')
-                been_in_tail = been_in_tail or step >= clamp
-                continue
-            bad += 1
-            if bad == 1:
-                failures.check(False, 'seek matrix',
-                               f'seek({step:,}) -> {pa:,} vs {pb:,}; '
-                               f'{detail(a, b) if a.shape == b.shape else f"shapes {a.shape} {b.shape}"}')
+                              f'seek({step:,}) with history: {detail(a, b)} '
+                              f'(within the documented {bound:.0e})')
+            been_past_clamp = been_past_clamp or step >= clamp
+            history = True
         oracle.close()
         got.close()
     if bad == 0:
