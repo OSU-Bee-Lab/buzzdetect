@@ -27,6 +27,8 @@ npm run check            # svelte-kit sync + svelte-check
 npx tauri dev            # run the full desktop app in dev mode
 npx tauri build           # produce a bundled desktop app
 npm run build:engine       # freeze the engine into a sidecar (see Releases)
+npm test                    # vitest: the frontend stores
+npm run test:engine          # the engine's Python suite (see below)
 ```
 
 Engine (run from `engine/`, using its own venv):
@@ -34,12 +36,56 @@ Engine (run from `engine/`, using its own venv):
 uv venv --python 3.13 .venv && uv pip install -r requirements.txt   # one-time setup
 .venv/bin/python3 buzzdetect_cli.py --modelname <name> --dir_audio <dir> --dir_out <dir>
 ```
-The only test suite is `engine/tests/test_mp3_driver.py` — a plain script, no
-runner, run it with `cd engine && .venv/bin/python3 tests/test_mp3_driver.py`.
-It covers the mp3 driver against small committed fixtures and needs no corpus.
-Nothing else here is tested. The closest thing outside it lives in the other
-repo: buzzdetect-training's `tools/export_onnx.py` re-exports a model's graph
-and refuses to write it if it stops matching the Keras model it came from.
+## Tests
+
+Three suites, one per language, each runnable on its own. None of them needs a
+corpus, a GPU, or the network; the whole lot takes well under a minute.
+
+```
+cd engine && .venv/bin/python3 tests/run_tests.py     # the engine, ~25s
+npx vitest run                                         # the frontend stores, ~2s
+cd src-tauri && cargo test                              # the subprocess boundary
+```
+
+- **Engine** (`engine/tests/`). Standard-library `unittest`, no runner
+  dependency — that is deliberate, so don't add pytest. `tests/run_tests.py`
+  runs the `unittest` files *and* `test_mp3_driver.py`, which predates them and
+  is a plain script with its own oracle and its own reporting (see its
+  docstring). `tests/_context.py` chdirs to `engine/` on import, which every
+  test module imports first, because `src/config.py` addresses `models/` and
+  `src/stream/drivers/` by relative path.
+  `tests/test_cli.py` is the one that matters most: it runs `buzzdetect_cli.py`
+  as a subprocess over seconds-long audio and asserts on both the result files
+  and the BDPROGRESS stream, so it covers resuming, skipping, the manifest
+  prompt and the real ONNX model end to end.
+- **Frontend** (`src/lib/*.svelte.test.ts`). vitest, configured in
+  `vitest.config.js` rather than in `vite.config.js`, which is tailored to
+  Tauri's dev server. The stores are `.svelte.ts`, so runes have to go through
+  the Svelte compiler; that is what the `.svelte.test.ts` naming is for. There
+  is no component rendering here — the tests replay engine events into the
+  `run` store and check what the UI would be drawing.
+- **Rust** (`src-tauri/src/lib.rs`, `mod tests`). Only the pure edges:
+  `engine_args`, `classify_line`, `read_manifest`, and the settings defaults.
+  `cargo test` runs tauri's build script first, which insists the sidecar named
+  in `tauri.conf.json`'s `externalBin` exists — so in a checkout without one,
+  either run `npm run build:engine` or drop an empty file at
+  `src-tauri/binaries/buzzdetect-engine-<target-triple>` (that directory is
+  gitignored; delete the placeholder afterwards, or `resolve_engine` will
+  prefer it over `engine/.venv`).
+
+One invariant spans the boundary and is checked from both sides on purpose:
+the progress wire format. `test_progress_json.py` scans the engine for
+`emit_progress` calls and compares every event kind and stage name against what
+the frontend store handles; `progress.svelte.test.ts` replays those same events
+into the store; the Rust tests check the marker and what an unparseable line
+does. The manifest lock is the other duplicated rule, but only two of its three
+implementations are covered — Python's in `test_manifest.py`/`test_cli.py` and
+Rust's `read_manifest`. `checkManifest()` lives in `+page.svelte` and no
+component is rendered in these tests.
+
+Outside this repo, buzzdetect-training's `tools/export_onnx.py` re-exports a
+model's graph and refuses to write it if it stops matching the Keras model it
+came from.
 
 ## Releases
 
