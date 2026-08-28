@@ -158,6 +158,9 @@ def seam(path, clamp, frames, failures):
     checked directly, as the last case below.
     """
     approach = max(0, clamp - (1 << 20))
+    if frames <= clamp:
+        # libsndfile already reaches the end of this one; there is no seam.
+        return
     for first in (clamp - approach - 1, clamp - approach, clamp - approach + 1,
                   (clamp + frames) // 2 - approach):
         second = frames - approach - first
@@ -175,14 +178,19 @@ def seam(path, clamp, frames, failures):
         a, b = oracle.read(second), got.read(second)
         failures.check(a.shape == b.shape, f'remainder after a break at {first:,} '
                        f'is the right length', f'{b.shape} vs {a.shape}')
-        worst = np.abs(a - b).max() if a.shape == b.shape and a.shape[0] else float('inf')
+        if a.shape != b.shape:
+            worst = float('inf')
+        else:
+            worst = float(np.abs(a - b).max()) if a.shape[0] else 0.0
         if worst == 0.0:
             failures.check(True, f'remainder after a break at {first:,}')
         elif worst <= 1e-6:
             failures.note(f'remainder after a break at {first:,}',
                           f'{detail(a, b)} (within the documented 1e-06)')
         else:
-            failures.check(False, f'remainder after a break at {first:,}', detail(a, b))
+            failures.check(False, f'remainder after a break at {first:,}',
+                           detail(a, b) if a.shape == b.shape
+                           else f'shapes {a.shape} vs {b.shape}')
         oracle.close()
         got.close()
 

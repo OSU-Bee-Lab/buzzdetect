@@ -493,8 +493,6 @@ class LocalDriver:
         self._position = 0
         self._carry = None          # fragment samples decoded but not yet handed out
         self._seek_target = 0       # where the body track was last positioned
-        self._recent = None         # the last few thousand body samples handed out
-        self._recent_end = -1       # the position they end at
 
         self._open(path, layout)
 
@@ -588,11 +586,6 @@ class LocalDriver:
 
     # The tail
     #
-    def _forget(self):
-        """Drop the rolling window; whatever follows is a different decode."""
-        self._recent = None
-        self._recent_end = -1
-
     def _close_tail(self):
         if self._tail is not None:
             self._tail.close()
@@ -634,29 +627,6 @@ class LocalDriver:
             return None
         return shim, track, first_frame * per_frame
 
-    def _remember(self, data):
-        """Roll the last few thousand body samples forward, for the seam's sake.
-
-        A read that stops exactly at the clamp leaves the next read with no body
-        of its own to check the seam against, and no cheap way to get one --
-        replaying the decode from the last seek could mean decoding the whole
-        file. Keeping the tail end of each body read costs a copy of a few
-        thousand floats and covers it.
-
-Only ever one read's worth, never stitched across two. libsndfile's
-        mp3 output depends on where reads are broken, so samples from either
-        side of a break are not what one unbroken decode would have produced,
-        and a window spanning a break would fail to match a fragment that is
-        right -- sending a perfectly good file to the slow path.
-        """
-        if data.shape[0] == 0:
-            return
-        window = _VERIFY_FRAMES * self._layout.samples_per_frame
-        # A copy, not a view: with out= the caller owns that buffer and will
-        # write over it.
-        self._recent = np.array(data[max(0, data.shape[0] - window):])
-        self._recent_end = self._position
-
     def _reference(self, body):
         """The samples just before the clamp, as the body decoded them.
 
@@ -677,10 +647,6 @@ Only ever one read's worth, never stitched across two. libsndfile's
             take = min(window, body.shape[0])
             if take >= _VERIFY_MINIMUM:
                 return body[body.shape[0] - take:]
-
-        if (self._recent is not None and self._recent_end == self._clamp
-                and self._recent.shape[0] >= _VERIFY_MINIMUM):
-            return self._recent
 
         available = self._clamp - self._seek_target
         if available < _VERIFY_MINIMUM or available > _REPLAY_LIMIT:
@@ -870,7 +836,6 @@ Only ever one read's worth, never stitched across two. libsndfile's
         if n_tail == 0:
             data = self._read_track(self._plain, n_body, dtype, out)
             self._position += data.shape[0]
-            self._remember(data)
             return data
 
         if n_body < _VERIFY_MINIMUM and self._position == self._seek_target:
@@ -910,7 +875,6 @@ Only ever one read's worth, never stitched across two. libsndfile's
         body = self._read_track(self._plain, n_body, dtype,
                                 None if out is None else out[:n_body])
         self._position += body.shape[0]
-        self._remember(body)
         if body.shape[0] < n_body:
             # libsndfile stopped short of its own clamp; there is no seam to
             # cross and nothing sensible to stitch on.
@@ -971,7 +935,6 @@ Only ever one read's worth, never stitched across two. libsndfile's
 
         body_end = min(self._clamp, self.frames)
         self._seek_target = target
-        self._forget()
         if target <= body_end:
             self._plain.seek(target)
             # The boundary that continues a decode depends on the decode it is

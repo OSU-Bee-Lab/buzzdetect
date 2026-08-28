@@ -31,9 +31,11 @@ from a boundary N frames before the clamp (`step1_tail.py`):
 | even (6, 8, 32, 128, 512) | **exact** | **exact** | 2.4e-7 | **exact** | 1.2e-7 | 2.4e-7 | 1.8e-7 | 2.4e-7 |
 | odd (7, 9, 33, 129, 513) | 2.4e-7 | 1.2e-7 | **exact** | 1.2e-7 | **exact** | **exact** | **exact** | **exact** |
 
-Four files want each parity. Depth beyond ~6 frames changes nothing; at 2 frames
-the decoder's own warm-up leaks into the comparison, which is why the driver
-uses 12. **Exactly one of any two adjacent boundaries is right, always.**
+Four files want each parity. Depth beyond ~6 frames changes nothing, and at 2
+frames the decoder's own warm-up leaks into the comparison. The driver starts 12
+frames back so that the two frames of warm-up and the four frames it compares
+both fit before the clamp with room to spare. **Exactly one of any two adjacent
+boundaries is right, always.**
 
 So the design is not to predict the boundary but to measure it: decode a window
 the body has already produced through both candidates and keep the one that
@@ -117,3 +119,11 @@ are MPEG1 48 kbps 44.1 kHz mono from an ICD-PX370 with no Xing header — the
 at-risk shape. Six are 128/192 kbps stereo (`Luke - Audio Fidelity Test`,
 `Luke - Wooster Apple`). Eleven are macOS `._` resource forks or 2–4 KB
 fragments of dead recordings, which have no MPEG frame at all and fall back.
+
+## What it bought
+
+The tail scan is level with a plain `soundfile` open that throws the tail away
+(3506x and 3454x against 3449x and 3453x), against 3002x and 2961x for the
+whole-file scan it replaces — `HANDOFF.md` has that table and how it was taken.
+On `benchmarks/streamer-grid`'s corpus, which is 78 files rather than 8 and so
+pays far more per-file cost, the four cells re-run gained 10–15%.
