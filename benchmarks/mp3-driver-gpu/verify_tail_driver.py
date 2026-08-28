@@ -150,42 +150,63 @@ def seam(path, clamp, frames, failures):
     file's start: the seek goes to both readers, so the samples compared are the
     ones a whole-file read would compare, without decoding the hours in front of
     them.
+
+    The rules here are the ones tests/test_mp3_driver.py holds the driver to.
+    The first half of each split must be identical. The remainder need only be
+    close, because a caller that breaks a read at the clamp gets the unbroken
+    decode from this driver and the broken one from libsndfile -- which is then
+    checked directly, as the last case below.
     """
     approach = max(0, clamp - (1 << 20))
-    cases = [
-        ('read exactly to the clamp, then the rest', clamp - approach, frames - clamp),
-        ('read one short of the clamp, then across', clamp - approach - 1, frames - clamp + 1),
-        ('read one past the clamp, then the rest', clamp - approach + 1, frames - clamp - 1),
-        ('one read over the whole seam', frames - approach, 0),
-    ]
-    for label, first, second in cases:
+    for first in (clamp - approach - 1, clamp - approach, clamp - approach + 1,
+                  (clamp + frames) // 2 - approach):
+        second = frames - approach - first
         oracle = Oracle(path)
         got = LocalDriver(path)
         oracle.seek(approach)
         got.seek(approach)
-        a1, b1 = oracle.read(first), got.read(first)
-        ok = failures.check(same(a1, b1), label + ' (first)', detail(a1, b1) if not same(a1, b1) else f'{a1.shape[0]:,} samples')
-        if second and ok:
-            # Compared against an oracle that read the whole range in one call,
-            # not one that broke it where this case does. libsndfile's mp3
-            # output depends on where reads are broken (step1_segmentation.py),
-            # and the driver deliberately answers a read broken at the clamp as
-            # though it had not been broken -- see mp3.py's _read_fragment.
-            whole = Oracle(path)
-            whole.seek(approach)
-            a2 = whole.read(first + second)[first:]
-            whole.close()
-            b2 = got.read(second)
-            failures.check(same(a2, b2), label + ' (second)',
-                           detail(a2, b2) if not same(a2, b2) else f'{a2.shape[0]:,} samples')
+        a, b = oracle.read(first), got.read(first)
+        if not failures.check(same(a, b), f'read of {first:,} up to the seam',
+                              detail(a, b) if not same(a, b) else f'{a.shape[0]:,} samples'):
+            oracle.close()
+            got.close()
+            continue
+
+        a, b = oracle.read(second), got.read(second)
+        failures.check(a.shape == b.shape, f'remainder after a break at {first:,} '
+                       f'is the right length', f'{b.shape} vs {a.shape}')
+        worst = np.abs(a - b).max() if a.shape == b.shape and a.shape[0] else float('inf')
+        if worst == 0.0:
+            failures.check(True, f'remainder after a break at {first:,}')
+        elif worst <= 1e-6:
+            failures.note(f'remainder after a break at {first:,}',
+                          f'{detail(a, b)} (within the documented 1e-06)')
+        else:
+            failures.check(False, f'remainder after a break at {first:,}', detail(a, b))
         oracle.close()
         got.close()
+
+    # The documented behaviour of a break at the clamp itself.
+    unbroken = Oracle(path)
+    unbroken.seek(approach)
+    expected = unbroken.read(frames - approach)
+    unbroken.close()
+    got = LocalDriver(path)
+    got.seek(approach)
+    joined = np.concatenate((got.read(clamp - approach), got.read(frames - clamp)))
+    got.close()
+    failures.check(same(expected, joined), 'a break at the clamp reads as though unbroken',
+                   detail(expected, joined) if not same(expected, joined) else
+                   f'{joined.shape[0]:,} samples')
 
 
 def seeks(path, clamp, frames, failures):
     sr = sf.info(path).samplerate
-    targets = [0, sr, clamp // 2, clamp - sr, clamp - 1, clamp, clamp + 1,
-               (clamp + frames) // 2, frames - sr, frames - 1, frames]
+    # Fewer targets than tests/test_mp3_driver.py sweeps on the fixtures,
+    # because each case here opens a fresh Oracle and every Oracle is a full
+    # mpg123 scan of a gigabyte-sized file. The fixtures cover the matrix; this
+    # confirms it on the real thing.
+    targets = [0, clamp - 1, clamp, clamp + 1, (clamp + frames) // 2, frames - 1]
     targets = [t for t in targets if 0 <= t <= frames]
     window = 1 << 16
     bad = 0
@@ -198,7 +219,7 @@ def seeks(path, clamp, frames, failures):
         got = LocalDriver(path)
         # consecutive pairs, so backwards seeks out of the tail are covered
         been_in_tail = False
-        for step in (target, targets[(i + 3) % len(targets)]):
+        for step in (target, targets[(i + 2) % len(targets)]):
             pa, pb = oracle.seek(step), got.seek(step)
             a, b = oracle.read(window), got.read(window)
             if pa == pb and same(a, b):
