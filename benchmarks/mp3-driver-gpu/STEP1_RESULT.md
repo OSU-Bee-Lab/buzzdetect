@@ -107,10 +107,24 @@ The scan can go entirely. A CBR stream's frames average exactly
 `144 * bitrate / samplerate` bytes — the padding bit is how an integer frame
 size tracks a non-integer average — so the audio byte count divided by that
 gives the frame count, and `mpg123_scan()`'s whole job collapses into a
-division. `step2_arith.py` checks it against the scan: exact on 48 kbps mono and
-on 128 kbps stereo, with predicted frame offsets landing within 2 bytes of a
-real header across the file. `_read_layout` validates the layout at five points
-plus the last frame and refuses the fast path if any of it fails.
+division.
+
+`read_layout` never takes that on trust. It predicts the byte offset of frames
+at 5%, 25%, 50%, 75% and 95% of the file and requires a validated frame header
+at each; requires the predicted last frame to *end* exactly where the audio
+ends; and requires libsndfile's own estimate — the first frame's size
+extrapolated over the whole file — to come out to the sample. A file that fails
+any of it takes the whole-file scan instead, so the failure mode is slower, not
+wrong.
+
+`verify_layout_corpus.py` over `/media/server storage/experiments`: **5,344
+files accepted** onto the fast path, in three shapes — 48 kbps mono, 128 kbps
+stereo and 192 kbps stereo, all MPEG1 at 44.1 kHz. 33 declined and read the old
+way: 22 under 8 KB, being recordings that died as they started, and 11 macOS
+`._` resource forks with no MPEG frame in them at all. Of the accepted files,
+**585 were checked against a real mpg123 scan** — every file under 25 MB, plus
+one per directory up to 400 MB — and **none disagreed by a single frame**.
+`step2_arith.py` is the same check written out long-hand for one file at a time.
 
 ## What the corpus actually contains
 
