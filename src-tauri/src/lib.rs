@@ -385,6 +385,44 @@ struct EngineExit {
     code: Option<i32>,
 }
 
+// The command line for one analysis, in the order buzzdetect_cli.py's argparse
+// wants it: --classes_out takes any number of values, so nothing bare may
+// follow it -- only another flag.
+fn engine_args(settings: &AnalysisSettings) -> Vec<String> {
+    let mut args = vec![
+        "--modelname".into(),
+        settings.modelname.clone(),
+        "--dir_audio".into(),
+        settings.dir_audio.clone(),
+        "--dir_out".into(),
+        settings.dir_out.clone(),
+        "--chunklength".into(),
+        settings.chunklength.to_string(),
+        "--analyzers_cpu".into(),
+        settings.analyzers_cpu.to_string(),
+        "--analyzers_gpu".into(),
+        settings.analyzers_gpu.to_string(),
+        "--verbosity_print".into(),
+        settings.verbosity_print.clone(),
+        "--verbosity_log".into(),
+        settings.verbosity_log.clone(),
+        "--log_progress".into(),
+        settings.log_progress.to_string(),
+        "--classes_out".into(),
+    ];
+    args.extend(settings.classes_out.iter().cloned());
+
+    if let Some(n) = settings.n_streamers {
+        args.push("--n_streamers".into());
+        args.push(n.to_string());
+    }
+    if let Some(n) = settings.stream_buffer_depth {
+        args.push("--stream_buffer_depth".into());
+        args.push(n.to_string());
+    }
+    args
+}
+
 #[tauri::command]
 fn start_analysis(
     app: AppHandle,
@@ -411,26 +449,7 @@ fn start_analysis(
     let mut cmd = Command::new(&engine.program);
     cmd.current_dir(&engine.workdir)
         .args(&engine.prefix_args)
-        .arg("--modelname")
-        .arg(&settings.modelname)
-        .arg("--dir_audio")
-        .arg(&settings.dir_audio)
-        .arg("--dir_out")
-        .arg(&settings.dir_out)
-        .arg("--chunklength")
-        .arg(settings.chunklength.to_string())
-        .arg("--analyzers_cpu")
-        .arg(settings.analyzers_cpu.to_string())
-        .arg("--analyzers_gpu")
-        .arg(settings.analyzers_gpu.to_string())
-        .arg("--verbosity_print")
-        .arg(&settings.verbosity_print)
-        .arg("--verbosity_log")
-        .arg(&settings.verbosity_log)
-        .arg("--log_progress")
-        .arg(settings.log_progress.to_string())
-        .arg("--classes_out")
-        .args(&settings.classes_out)
+        .args(engine_args(&settings))
         // Unbuffer Python's stdout so BDPROGRESS lines arrive as they're
         // printed rather than sitting in a pipe buffer until it fills.
         .env("PYTHONUNBUFFERED", "1")
@@ -441,13 +460,6 @@ fn start_analysis(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
-    if let Some(n) = settings.n_streamers {
-        cmd.arg("--n_streamers").arg(n.to_string());
-    }
-    if let Some(n) = settings.stream_buffer_depth {
-        cmd.arg("--stream_buffer_depth").arg(n.to_string());
-    }
 
     // The CUDA build's NVIDIA runtime ships as loose libraries in the payload
     // rather than frozen into the sidecar -- 2.5GB in one file is more than
@@ -562,22 +574,39 @@ fn engine_quiet_for() -> Duration {
         .unwrap_or_default()
 }
 
+// What one line of the engine's output turns into. A marked line that doesn't
+// parse is not an error: it becomes an ordinary log line, so a stray
+// BDPROGRESS in someone's print output can't take the run down.
+#[derive(Debug, PartialEq)]
+enum EngineLine {
+    Progress(serde_json::Value),
+    Log(String),
+}
+
+fn classify_line(line: String) -> EngineLine {
+    if let Some(json_str) = line.strip_prefix(PROGRESS_MARKER) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str) {
+            return EngineLine::Progress(value);
+        }
+    }
+    EngineLine::Log(line)
+}
+
 fn spawn_line_reader<R: std::io::Read + Send + 'static>(app: AppHandle, reader: R, is_stderr: bool) {
     std::thread::spawn(move || {
         let buf = BufReader::new(reader);
         for line in buf.lines() {
             let Ok(line) = line else { break };
             note_engine_output();
-            if let Some(json_str) = line.strip_prefix(PROGRESS_MARKER) {
-                match serde_json::from_str::<serde_json::Value>(json_str) {
-                    Ok(value) => {
-                        let _ = app.emit("engine-progress", value);
-                        continue;
-                    }
-                    Err(_) => { /* fall through to plain log line */ }
+            match classify_line(line) {
+                EngineLine::Progress(value) => {
+                    let _ = app.emit("engine-progress", value);
+                }
+                EngineLine::Log(line) => {
+                    let _ = app
+                        .emit("engine-log", serde_json::json!({ "line": line, "stderr": is_stderr }));
                 }
             }
-            let _ = app.emit("engine-log", serde_json::json!({ "line": line, "stderr": is_stderr }));
         }
     });
 }
@@ -743,4 +772,191 @@ pub fn run() {
                 kill_engine_on_exit(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    // The engine is a subprocess with a text protocol, so what's testable on
+    // this side is the two edges of that: the command line the child is given,
+    // and what its output turns into. See engine/tests/test_cli.py for the
+    // same protocol asserted from the engine's end.
+    use super::*;
+
+    fn settings(json: serde_json::Value) -> AnalysisSettings {
+        serde_json::from_value(json).expect("settings")
+    }
+
+    fn minimal() -> AnalysisSettings {
+        settings(serde_json::json!({
+            "modelname": "model_general_v3",
+            "dir_audio": "/data/audio",
+            "dir_out": "/data/out",
+            "classes_out": ["ins_buzz"],
+        }))
+    }
+
+    fn value_after(args: &[String], flag: &str) -> Option<String> {
+        args.iter().position(|a| a == flag).map(|i| args[i + 1].clone())
+    }
+
+    #[test]
+    fn settings_fall_back_to_the_defaults_the_ui_shows() {
+        let s = minimal();
+        assert_eq!(s.chunklength, 200.0);
+        assert_eq!(s.analyzers_cpu, 2);
+        assert_eq!(s.analyzers_gpu, 0);
+        assert_eq!(s.verbosity_print, "PROGRESS");
+        assert_eq!(s.verbosity_log, "DEBUG");
+        assert!(!s.gpu_fp16);
+        assert!(!s.log_progress);
+        assert!(s.n_streamers.is_none());
+        assert!(s.stream_buffer_depth.is_none());
+    }
+
+    #[test]
+    fn every_setting_reaches_the_engine() {
+        let args = engine_args(&settings(serde_json::json!({
+            "modelname": "m",
+            "dir_audio": "/a",
+            "dir_out": "/o",
+            "classes_out": ["ins_buzz", "frog"],
+            "chunklength": 50.5,
+            "analyzers_cpu": 4,
+            "analyzers_gpu": 1,
+            "verbosity_print": "DEBUG",
+            "verbosity_log": "INFO",
+            "log_progress": true,
+            "n_streamers": 3,
+            "stream_buffer_depth": 7,
+        })));
+        assert_eq!(value_after(&args, "--modelname").as_deref(), Some("m"));
+        assert_eq!(value_after(&args, "--dir_audio").as_deref(), Some("/a"));
+        assert_eq!(value_after(&args, "--dir_out").as_deref(), Some("/o"));
+        assert_eq!(value_after(&args, "--chunklength").as_deref(), Some("50.5"));
+        assert_eq!(value_after(&args, "--analyzers_cpu").as_deref(), Some("4"));
+        assert_eq!(value_after(&args, "--analyzers_gpu").as_deref(), Some("1"));
+        assert_eq!(value_after(&args, "--verbosity_print").as_deref(), Some("DEBUG"));
+        assert_eq!(value_after(&args, "--verbosity_log").as_deref(), Some("INFO"));
+        assert_eq!(value_after(&args, "--log_progress").as_deref(), Some("true"));
+        assert_eq!(value_after(&args, "--n_streamers").as_deref(), Some("3"));
+        assert_eq!(value_after(&args, "--stream_buffer_depth").as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn unset_streamer_settings_are_left_to_the_engine_to_work_out() {
+        let args = engine_args(&minimal());
+        assert!(!args.iter().any(|a| a == "--n_streamers"));
+        assert!(!args.iter().any(|a| a == "--stream_buffer_depth"));
+    }
+
+    #[test]
+    fn every_selected_class_is_passed_and_nothing_bare_follows_them() {
+        // --classes_out takes any number of values, so a bare argument after
+        // it would be swallowed as another class.
+        let args = engine_args(&settings(serde_json::json!({
+            "modelname": "m",
+            "dir_audio": "/a",
+            "dir_out": "/o",
+            "classes_out": ["ins_buzz", "frog", "human"],
+            "n_streamers": 3,
+        })));
+        let at = args.iter().position(|a| a == "--classes_out").unwrap();
+        assert_eq!(&args[at + 1..at + 4], ["ins_buzz", "frog", "human"]);
+        assert!(args[at + 4..].chunks(2).all(|pair| pair[0].starts_with("--")));
+    }
+
+    #[test]
+    fn a_path_with_spaces_stays_one_argument() {
+        let args = engine_args(&settings(serde_json::json!({
+            "modelname": "m",
+            "dir_audio": "/data/my recordings",
+            "dir_out": "/o",
+            "classes_out": ["ins_buzz"],
+        })));
+        assert_eq!(value_after(&args, "--dir_audio").as_deref(), Some("/data/my recordings"));
+    }
+
+    #[test]
+    fn a_marked_line_becomes_a_progress_event() {
+        let line = format!("{PROGRESS_MARKER}{{\"event\": \"chunk_done\", \"done\": true}}");
+        match classify_line(line) {
+            EngineLine::Progress(value) => {
+                assert_eq!(value["event"], "chunk_done");
+                assert_eq!(value["done"], true);
+            }
+            other => panic!("expected a progress event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_ordinary_log_line_is_left_alone() {
+        let line = "2026-05-18 10:00:00 [INFO] streamer 0: launching".to_string();
+        assert_eq!(classify_line(line.clone()), EngineLine::Log(line));
+    }
+
+    #[test]
+    fn a_marked_line_that_does_not_parse_is_logged_rather_than_dropped() {
+        let line = format!("{PROGRESS_MARKER}not json");
+        assert_eq!(classify_line(line.clone()), EngineLine::Log(line));
+    }
+
+    #[test]
+    fn the_marker_has_to_start_the_line() {
+        let line = format!("some prefix {PROGRESS_MARKER}{{}}");
+        assert!(matches!(classify_line(line), EngineLine::Log(_)));
+    }
+
+    #[test]
+    fn the_marker_is_the_one_the_engine_writes() {
+        // engine/src/pipeline/progress_json.py's MARKER, trailing space included.
+        assert_eq!(PROGRESS_MARKER, "BDPROGRESS ");
+    }
+
+    #[test]
+    fn an_output_folder_with_no_manifest_reads_as_nothing_to_match() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-no-manifest");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(dir.join("buzzdetect_manifest.json"));
+        assert!(read_manifest(dir.to_string_lossy().into()).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_manifest_is_read_for_the_two_fields_the_ui_locks_on() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-manifest");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("buzzdetect_manifest.json"),
+            r#"{"modelname": "model_general_v3", "output_mode": "activations",
+                "classes_out": ["frog", "ins_buzz"], "precision": null, "framehop_prop": 1}"#,
+        )
+        .unwrap();
+        let manifest = read_manifest(dir.to_string_lossy().into()).unwrap().unwrap();
+        assert_eq!(manifest.modelname, "model_general_v3");
+        assert_eq!(manifest.classes_out.unwrap(), ["frog", "ins_buzz"]);
+    }
+
+    #[test]
+    fn a_detections_manifest_locks_no_classes() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-manifest-detections");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("buzzdetect_manifest.json"),
+            r#"{"modelname": "m", "output_mode": "detections", "classes_out": null,
+                "precision": 0.95, "framehop_prop": 1}"#,
+        )
+        .unwrap();
+        let manifest = read_manifest(dir.to_string_lossy().into()).unwrap().unwrap();
+        assert!(manifest.classes_out.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_manifest_is_an_error_rather_than_a_wrong_answer() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-manifest-bad");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("buzzdetect_manifest.json"), "{ not json").unwrap();
+        assert!(read_manifest(dir.to_string_lossy().into()).is_err());
+
+        std::fs::write(dir.join("buzzdetect_manifest.json"), r#"{"precision": null}"#).unwrap();
+        assert!(read_manifest(dir.to_string_lossy().into()).is_err());
+    }
 }
