@@ -21,11 +21,15 @@ def melt_coverage(cover_df, framelength=None):
 
 def get_gaps(range_in, coverage_in):
     coverage_in = sorted(coverage_in)
+
+    if not coverage_in:  # nothing analyzed yet: the whole range is one gap
+        return [tuple(range_in)]
+
     gaps = []
 
     # gap between range start and coverage start
     if coverage_in[0][0] > range_in[0]:  # if the first coverage starts after the range starts
-        gaps.append((0, coverage_in[0][0]))
+        gaps.append((range_in[0], coverage_in[0][0]))
 
     # gaps between coverages
     for i in range(0, len(coverage_in) - 1):
