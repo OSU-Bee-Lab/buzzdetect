@@ -299,6 +299,7 @@ describe('stages', () => {
 	it('advances through startup', () => {
 		expect(run.stage).toBe('launching');
 		run.handleEvent({ event: 'stage', name: 'starting' });
+		expect(run.stageLabel).toBe('Loading engine components…');
 		run.handleEvent({ event: 'stage', name: 'scanning' });
 		expect(run.stageLabel).toBe('Finding audio files…');
 	});

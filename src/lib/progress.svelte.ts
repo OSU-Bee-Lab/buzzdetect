@@ -19,9 +19,15 @@ export type Stage = 'launching' | 'starting' | 'scanning' | 'loading' | 'analyzi
 
 const STAGE_ORDER: Stage[] = ['launching', 'starting', 'scanning', 'loading', 'analyzing'];
 
+// 'launching' covers the subprocess spawn and the frozen sidecar unpacking
+// itself; 'starting' is then the engine's import of numpy/pandas/the audio
+// stack, which frozen is the single longest stretch of startup (~25s), so it
+// gets a label that says something is still loading rather than repeating
+// 'engine'. onnxruntime is not in that import — it loads later, per worker,
+// under 'loading'.
 const STAGE_LABELS: Record<Stage, string> = {
 	launching: 'Launching engine…',
-	starting: 'Starting engine…',
+	starting: 'Loading engine components…',
 	scanning: 'Finding audio files…',
 	loading: 'Loading model…',
 	analyzing: 'Analyzing…'

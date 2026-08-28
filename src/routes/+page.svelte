@@ -633,13 +633,20 @@ Can produce very large log files."
 	<section class="run">
 		<div class="header">
 			<h2>
-				{run.stopping
-					? 'Stopping…'
-					: run.running
-						? run.stageLabel
-						: run.stopped
-							? 'Stopped'
-							: 'Ready'}
+				{#if run.stopping}
+					Stopping<span class="ellipsis" aria-hidden="true"></span>
+				{:else if run.running}
+					<!-- The startup stages can each sit for many seconds (see
+					     progress.svelte.ts); the animated dots are what says the
+					     app hasn't hung while a stage that can't report finer
+					     progress runs. -->
+					{run.stageLabel.replace(/…$/, '')}<span class="ellipsis" aria-hidden="true"
+					></span>
+				{:else if run.stopped}
+					Stopped
+				{:else}
+					Ready
+				{/if}
 			</h2>
 		</div>
 		{#if hasStarted}
@@ -1061,6 +1068,38 @@ Can produce very large log files."
 		display: flex;
 		align-items: baseline;
 		gap: 0.75rem;
+	}
+
+	/* Reveals "..." one dot at a time by widening a clipped box, so it animates
+	   without JS and without a timer in the store. steps(4, jump-none) walks
+	   0 -> 1 across four frames: 0, 1, 2, 3 dots. */
+	.ellipsis {
+		display: inline-block;
+		width: 1.5ch;
+		overflow: hidden;
+		vertical-align: bottom;
+		white-space: pre;
+		animation: ellipsis 1.6s steps(4, jump-none) infinite;
+	}
+
+	.ellipsis::after {
+		content: '...';
+	}
+
+	@keyframes ellipsis {
+		from {
+			width: 0;
+		}
+		to {
+			width: 1.5ch;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.ellipsis {
+			animation: none;
+			width: 1.5ch;
+		}
 	}
 
 	.stats {
