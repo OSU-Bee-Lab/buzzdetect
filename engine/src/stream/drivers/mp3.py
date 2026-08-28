@@ -159,8 +159,16 @@ class LocalDriver:
             self._shim.close()
             self._shim = None
 
-    def read(self, n_samples, dtype='float32'):
-        return self._track.read(n_samples, dtype=dtype)
+    def read(self, n_samples, dtype='float32', out=None):
+        """Decode n_samples, optionally straight into a caller's buffer.
+
+        `out` is what lets the helper decode directly into shared memory
+        instead of into a fresh array it then copies -- one 88MB allocation
+        and one 88MB memcpy saved per chunk at a 500s chunk length.
+        """
+        if out is None:
+            return self._track.read(n_samples, dtype=dtype)
+        return self._track.read(n_samples, dtype=dtype, out=out)
 
     def seek(self, sample_index):
         return self._track.seek(sample_index)
@@ -231,11 +239,17 @@ def _helper_main(conn):
                             shm.close()
                         shm = _attach_shm(name)
                         shm_name = name
-                    data = track.read(n_samples, dtype=dtype)
-                    view = np.ndarray(data.shape, dtype=data.dtype, buffer=shm.buf)
-                    view[...] = data
-                    del view
-                    conn.send(('ok', data.shape[0]))
+                    # Decode straight into the shared segment. soundfile fills
+                    # `out` in place and hands back a view of just the frames it
+                    # actually read, so a short read at EOF still reports its
+                    # true length without a second buffer.
+                    channels = track.channels
+                    shape = (n_samples,) if channels == 1 else (n_samples, channels)
+                    view = np.ndarray(shape, dtype=np.dtype(dtype), buffer=shm.buf)
+                    data = track.read(n_samples, dtype=dtype, out=view)
+                    frames = data.shape[0]
+                    del view, data
+                    conn.send(('ok', frames))
 
                 elif op == 'seek':
                     conn.send(('ok', track.seek(message[1])))
