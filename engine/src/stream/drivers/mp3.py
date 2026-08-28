@@ -205,7 +205,7 @@ class _Layout:
     not the shape this assumes.
     """
 
-    def __init__(self, audio_start, header, bytes_per_frame, n_frames):
+    def __init__(self, path, audio_start, header, bytes_per_frame, n_frames):
         self.audio_start = audio_start
         self.samplerate = header['samplerate']
         self.channels = header['channels']
@@ -213,6 +213,11 @@ class _Layout:
         self.bytes_per_frame = bytes_per_frame
         self.n_frames = n_frames
         self.frames = n_frames * header['samples']
+        # What libsndfile will say the file's length is: it extrapolates from
+        # the first frame and counts the whole file, tag included. Predicting it
+        # is how the driver confirms libsndfile is doing what it assumes -- see
+        # LocalDriver._agrees.
+        self.estimate = os.path.getsize(path) * header['samples'] // header['size']
 
     def _search_window(self, index):
         guess = self.audio_start + int(index * self.bytes_per_frame)
@@ -296,7 +301,7 @@ def _read_layout(path):
     if n_frames < 2:
         return None
 
-    layout = _Layout(audio_start, header, bytes_per_frame, n_frames)
+    layout = _Layout(path, audio_start, header, bytes_per_frame, n_frames)
 
     # Validate. A VBR file's frames drift away from the average immediately, so
     # probing offsets across the file is what rules it out; the last frame is
@@ -479,16 +484,21 @@ class LocalDriver:
     def _agrees(plain, layout):
         """Do libsndfile and the arithmetic describe the same file?
 
-        They are allowed to disagree about the length -- that disagreement is
-        the whole point -- but only by the fraction of a percent the padding
-        bit can account for. A larger gap means one of the two is describing
-        something else, and guessing which would be worse than scanning.
+        They are meant to disagree about the length -- that disagreement is the
+        whole point -- but not arbitrarily: libsndfile's answer is the first
+        frame's size extrapolated over the file, and the layout can predict that
+        exactly (measured to the sample on every corpus file and fixture). So
+        this is not a tolerance, it is a check that libsndfile is behaving the
+        way the driver believes it does. A libsndfile that stopped extrapolating
+        would fail it and get the scan, which is correct, just slower.
         """
         if plain.samplerate != layout.samplerate or plain.channels != layout.channels:
             return False
         if plain.frames <= 0 or layout.frames <= 0:
             return False
-        return abs(plain.frames - layout.frames) / layout.frames < 0.01
+        if plain.frames == layout.frames:
+            return True     # a libsndfile that measured it properly
+        return abs(plain.frames - layout.estimate) <= layout.samples_per_frame
 
     def _open_scanned(self, path):
         """The original driver: force mpg123's scan and read through the shim."""
