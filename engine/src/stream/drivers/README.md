@@ -235,6 +235,12 @@ without helpers perform like one streamer — which is precisely the claim that
 the length scan serialises them on the GIL — and with helpers they perform like
 the six-to-twelve-streamer plateau.
 
+On GPU the driver's cost is no longer negligible: it is ~13% of a whole
+analysis, because the shim's per-read callbacks are what the helper process is
+working around rather than eliminating. That is measured, along with what has
+been ruled out and the fix most likely to close it, in
+`benchmarks/mp3-driver-gpu/HANDOFF.md`.
+
 ### Alternatives that were tried and rejected
 
 - **A PyAV/ffmpeg driver.** Correct, and it reports the length to within 3
