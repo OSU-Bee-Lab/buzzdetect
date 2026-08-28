@@ -212,15 +212,19 @@
 		await onModelChange();
 	}
 
-	// Import a model folder (model.onnx + config_model.json) into the per-user
-	// store, outside the app bundle, so it survives updates and needs no admin
-	// rights. The engine picks it up by name on the next run.
+	// Import a model (a .zip of a folder holding model.onnx + config_model.json,
+	// or the folder itself) into the per-user store, outside the app bundle, so
+	// it survives updates and needs no admin rights. The engine picks it up by
+	// name on the next run.
 	async function importModel() {
 		modelActionError = null;
-		const dir = await open({ directory: true, title: 'Select a model folder' });
-		if (typeof dir !== 'string') return;
+		const picked = await open({
+			title: 'Select a model .zip',
+			filters: [{ name: 'Model bundle', extensions: ['zip'] }]
+		});
+		if (typeof picked !== 'string') return;
 		try {
-			const info = await invoke<ModelInfo>('import_model', { src: dir });
+			const info = await invoke<ModelInfo>('import_model', { src: picked });
 			await reloadModels(info.name);
 		} catch (e) {
 			modelActionError = String(e);
@@ -434,7 +438,7 @@
 				{/each}
 			</select>
 			<span class="model-actions">
-				<button type="button" onclick={importModel}>Import model…</button>
+				<button type="button" onclick={importModel}>Import model (.zip)…</button>
 				{#if currentModelRemovable}
 					<button type="button" onclick={removeCurrentModel}>Remove</button>
 				{/if}

@@ -227,72 +227,114 @@ fn validate_model_dir(dir: &std::path::Path) -> Result<serde_json::Value, String
     Ok(config)
 }
 
-/// Copy an imported model directory into the per-user store. `src` is a folder
-/// the user picked; its name becomes the model name. Refuses a name that
-/// collides with an existing model (bundled or already imported).
+/// Extract a .zip to a fresh scratch directory the caller is responsible for
+/// removing. zip's `extract` uses enclosed_name(), so entries can't escape.
+fn unzip_to_scratch(zip_path: &std::path::Path) -> Result<PathBuf, String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("not a readable .zip: {e}"))?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let scratch = std::env::temp_dir().join(format!("buzzdetect-import-{nanos}"));
+    std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+    if let Err(e) = archive.extract(&scratch) {
+        let _ = std::fs::remove_dir_all(&scratch);
+        return Err(format!("couldn't unpack the .zip: {e}"));
+    }
+    Ok(scratch)
+}
+
+/// The directory holding config_model.json within an extracted zip: either the
+/// root itself or a single wrapper folder one level down.
+fn find_model_root(extracted: &std::path::Path) -> Option<PathBuf> {
+    if extracted.join(MODEL_MARKER).is_file() {
+        return Some(extracted.to_path_buf());
+    }
+    for entry in std::fs::read_dir(extracted).ok()?.flatten() {
+        let path = entry.path();
+        if path.join(MODEL_MARKER).is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Copy an imported model into the per-user store. `src` is either a folder the
+/// user picked or a .zip of one; the folder name (or the .zip's filename)
+/// becomes the model name. Refuses a name that collides with an existing model.
 #[tauri::command]
 fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
     let src = PathBuf::from(&src);
+    let is_zip = src
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false);
+
+    // For a zip, the name is its filename stem; for a folder, the folder name.
     let name = src
-        .file_name()
+        .file_stem()
+        .filter(|_| is_zip || src.is_dir())
         .and_then(|n| n.to_str())
-        .ok_or("couldn't read that folder's name")?
+        .ok_or("pick a model folder or a .zip file")?
         .to_string();
-    if name.starts_with('.') || name.contains(std::path::MAIN_SEPARATOR) {
+    if name.starts_with('.') || name.contains(['/', '\\']) {
         return Err(format!("'{name}' is not a usable model name"));
     }
 
-    validate_model_dir(&src)?;
-
-    if model_dir(&app, &name).is_some() {
-        return Err(format!(
-            "a model named '{name}' already exists. Rename the folder and try again."
-        ));
-    }
-
-    let dest = user_models_dir(&app)
-        .ok_or("couldn't resolve the app data directory")?
-        .join(&name);
-    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-
-    let copy_into = |dest: &std::path::Path| -> std::io::Result<()> {
-        for file in IMPORT_FILES {
-            let from = src.join(file);
-            if from.is_file() {
-                std::fs::copy(&from, dest.join(file))?;
-            }
-        }
-        // The tests/ dir carries metrics.csv, which precision-mode runs need.
-        let tests_src = src.join("tests");
-        if tests_src.is_dir() {
-            copy_dir_recursive(&tests_src, &dest.join("tests"))?;
-        }
-        Ok(())
+    // Resolve the folder to copy from, unpacking a zip into scratch first.
+    let scratch = if is_zip {
+        Some(unzip_to_scratch(&src)?)
+    } else if src.is_dir() {
+        None
+    } else {
+        return Err("pick a model folder or a .zip file".into());
     };
-    if let Err(e) = copy_into(&dest) {
-        let _ = std::fs::remove_dir_all(&dest);
-        return Err(format!("failed to copy the model in: {e}"));
-    }
+    let result = (|| {
+        let model_src = match &scratch {
+            Some(dir) => find_model_root(dir)
+                .ok_or_else(|| "that .zip has no config_model.json in it".to_string())?,
+            None => src.clone(),
+        };
 
-    Ok(ModelInfo {
-        name,
-        removable: true,
-    })
-}
+        validate_model_dir(&model_src)?;
 
-fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let path = entry.path();
-        let target = to.join(entry.file_name());
-        if path.is_dir() {
-            copy_dir_recursive(&path, &target)?;
-        } else {
-            std::fs::copy(&path, &target)?;
+        if model_dir(&app, &name).is_some() {
+            return Err(format!(
+                "a model named '{name}' already exists. Rename it and try again."
+            ));
         }
+
+        let dest = user_models_dir(&app)
+            .ok_or("couldn't resolve the app data directory")?
+            .join(&name);
+        std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+
+        let copied = (|| -> std::io::Result<()> {
+            for file in IMPORT_FILES {
+                let from = model_src.join(file);
+                if from.is_file() {
+                    std::fs::copy(&from, dest.join(file))?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = copied {
+            let _ = std::fs::remove_dir_all(&dest);
+            return Err(format!("failed to copy the model in: {e}"));
+        }
+
+        Ok(ModelInfo {
+            name: name.clone(),
+            removable: true,
+        })
+    })();
+
+    if let Some(dir) = scratch {
+        let _ = std::fs::remove_dir_all(dir);
     }
-    Ok(())
+    result
 }
 
 /// Delete a user-imported model. Bundled models aren't in the user store and
@@ -1191,6 +1233,26 @@ mod tests {
 
         let err = validate_model_dir(&dir).unwrap_err();
         assert!(err.contains("samples_hop"), "{err}");
+    }
+
+    #[test]
+    fn a_zip_wrapping_the_model_in_a_folder_is_found_and_unpacked() {
+        use std::io::Write;
+        let zip_path = std::env::temp_dir().join("buzzdetect-test-bundle.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut w = zip::ZipWriter::new(file);
+        let opts: zip::write::SimpleFileOptions = Default::default();
+        w.start_file("redwood/config_model.json", opts).unwrap();
+        w.write_all(good_config().as_bytes()).unwrap();
+        w.start_file("redwood/model.onnx", opts).unwrap();
+        w.write_all(b"graph").unwrap();
+        w.finish().unwrap();
+
+        let scratch = unzip_to_scratch(&zip_path).unwrap();
+        let root = find_model_root(&scratch).expect("model root");
+        assert_eq!(root.file_name().unwrap(), "redwood");
+        assert!(validate_model_dir(&root).is_ok());
+        std::fs::remove_dir_all(&scratch).unwrap();
     }
 
     #[test]
