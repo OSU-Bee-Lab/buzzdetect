@@ -77,30 +77,105 @@ fn resolve_engine(app: &AppHandle) -> Result<Engine, String> {
     })
 }
 
+// A model is just model.onnx + config_model.json in a folder. buzzdetect ships
+// some in the bundle (engine-payload/models, read-only); users import their own
+// into app-local data, which is where import_model writes and where the engine
+// is pointed via BUZZDETECT_MODELS_PATH. Kept out of the bundle deliberately:
+// writing into a signed .app or Program Files needs privileges and breaks the
+// signature (engine/src/inference/models.py has the engine end of this).
+const MODEL_MARKER: &str = "config_model.json";
+
+// The framing parameters export_onnx.py writes alongside the class list. A dir
+// missing any of these isn't a model this engine can run -- reject it at import
+// rather than mid-analysis.
+const REQUIRED_CONFIG_KEYS: [&str; 7] = [
+    "classes",
+    "samplerate",
+    "framelength_s",
+    "digits_time",
+    "digits_results",
+    "samples_hop",
+    "samples_min",
+];
+
+// Files copied out of an imported model directory. Everything else there
+// (TensorFlow weights, training history, analysis output) the engine can't use.
+const IMPORT_FILES: [&str; 5] = [
+    "model.onnx",
+    "model.fp16.onnx",
+    "config_model.json",
+    "translation.csv",
+    "weights.csv",
+];
+
+/// Per-user model store, outside the app bundle. `None` if the platform data
+/// dir can't be resolved (shouldn't happen in practice).
+fn user_models_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_local_data_dir().ok().map(|d| d.join("models"))
+}
+
+/// Every model root the engine will search, highest priority first: the
+/// bundled dir, then the user store.
+fn model_roots(app: &AppHandle) -> Vec<PathBuf> {
+    let mut roots = vec![resolve_engine(app)
+        .map(|e| e.workdir.join("models"))
+        .unwrap_or_default()];
+    if let Some(user) = user_models_dir(app) {
+        roots.push(user);
+    }
+    roots
+}
+
+fn model_dir(app: &AppHandle, modelname: &str) -> Option<PathBuf> {
+    model_roots(app)
+        .into_iter()
+        .map(|r| r.join(modelname))
+        .find(|p| p.join(MODEL_MARKER).is_file())
+}
+
+#[derive(Serialize)]
+struct ModelInfo {
+    name: String,
+    /// A user-imported model, so remove_model can delete it. Bundled models are
+    /// part of the install and can't be removed here.
+    removable: bool,
+}
+
 #[tauri::command]
-fn list_models(app: AppHandle) -> Result<Vec<String>, String> {
-    let models_dir = resolve_engine(&app)?.workdir.join("models");
-    let mut out = vec![];
-    if let Ok(entries) = std::fs::read_dir(&models_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.join("model.py").exists() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    out.push(name.to_string());
+fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
+    let roots = model_roots(&app);
+    let mut out: Vec<ModelInfo> = vec![];
+    for (i, root) in roots.iter().enumerate() {
+        let removable = i > 0; // root 0 is the bundled dir
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.join(MODEL_MARKER).is_file() {
+                    continue;
                 }
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                // Earlier root wins a name collision: a bundled model shadows
+                // an imported one, matching the engine's resolution order.
+                if out.iter().any(|m| m.name == name) {
+                    continue;
+                }
+                out.push(ModelInfo {
+                    name: name.to_string(),
+                    removable,
+                });
             }
         }
     }
-    out.sort();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
 
 #[tauri::command]
 fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, String> {
-    let config_path = resolve_engine(&app)?
-        .workdir
-        .join("models")
-        .join(&modelname)
+    let config_path = model_dir(&app, &modelname)
+        .ok_or_else(|| format!("model '{modelname}' not found"))?
         .join("config_model.json");
     let text = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
@@ -114,6 +189,125 @@ fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, S
         .collect();
     out.sort();
     Ok(out)
+}
+
+/// Validate that `dir` holds a model this engine can run, and return its
+/// config_model.json parsed. Mirrors engine/src/inference/models.py's
+/// _validate_config so the failure shows up at import, not mid-analysis.
+fn validate_model_dir(dir: &std::path::Path) -> Result<serde_json::Value, String> {
+    if !dir.join("model.onnx").is_file() {
+        return Err("that folder has no model.onnx".into());
+    }
+    let config_path = dir.join("config_model.json");
+    let text = std::fs::read_to_string(&config_path)
+        .map_err(|_| "that folder has no config_model.json".to_string())?;
+    let config: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("config_model.json is not valid JSON: {e}"))?;
+
+    let missing: Vec<&str> = REQUIRED_CONFIG_KEYS
+        .iter()
+        .copied()
+        .filter(|k| config.get(k).is_none())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "config_model.json is missing required key(s): {}. Re-export the \
+             model with buzzdetect-training's tools/export_onnx.py.",
+            missing.join(", ")
+        ));
+    }
+    let classes_ok = config
+        .get("classes")
+        .and_then(|c| c.as_array())
+        .map(|a| !a.is_empty() && a.iter().all(|c| c.is_string()))
+        .unwrap_or(false);
+    if !classes_ok {
+        return Err("config_model.json: \"classes\" must be a non-empty list of strings".into());
+    }
+    Ok(config)
+}
+
+/// Copy an imported model directory into the per-user store. `src` is a folder
+/// the user picked; its name becomes the model name. Refuses a name that
+/// collides with an existing model (bundled or already imported).
+#[tauri::command]
+fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
+    let src = PathBuf::from(&src);
+    let name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("couldn't read that folder's name")?
+        .to_string();
+    if name.starts_with('.') || name.contains(std::path::MAIN_SEPARATOR) {
+        return Err(format!("'{name}' is not a usable model name"));
+    }
+
+    validate_model_dir(&src)?;
+
+    if model_dir(&app, &name).is_some() {
+        return Err(format!(
+            "a model named '{name}' already exists. Rename the folder and try again."
+        ));
+    }
+
+    let dest = user_models_dir(&app)
+        .ok_or("couldn't resolve the app data directory")?
+        .join(&name);
+    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+
+    let copy_into = |dest: &std::path::Path| -> std::io::Result<()> {
+        for file in IMPORT_FILES {
+            let from = src.join(file);
+            if from.is_file() {
+                std::fs::copy(&from, dest.join(file))?;
+            }
+        }
+        // The tests/ dir carries metrics.csv, which precision-mode runs need.
+        let tests_src = src.join("tests");
+        if tests_src.is_dir() {
+            copy_dir_recursive(&tests_src, &dest.join("tests"))?;
+        }
+        Ok(())
+    };
+    if let Err(e) = copy_into(&dest) {
+        let _ = std::fs::remove_dir_all(&dest);
+        return Err(format!("failed to copy the model in: {e}"));
+    }
+
+    Ok(ModelInfo {
+        name,
+        removable: true,
+    })
+}
+
+fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = to.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_recursive(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Delete a user-imported model. Bundled models aren't in the user store and
+/// can't be removed here.
+#[tauri::command]
+fn remove_model(app: AppHandle, name: String) -> Result<(), String> {
+    let dir = user_models_dir(&app)
+        .ok_or("couldn't resolve the app data directory")?
+        .join(&name);
+    // Guard against `..` and absolute names slipping through.
+    let user_root = user_models_dir(&app).unwrap();
+    if dir.parent() != Some(user_root.as_path()) || !dir.join(MODEL_MARKER).is_file() {
+        return Err(format!("'{name}' is not an imported model"));
+    }
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
 }
 
 /// What the frontend needs to decide whether to offer the GPU controls.
@@ -456,6 +650,15 @@ fn start_analysis(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    // Point the engine at the per-user model store (outside the app bundle) so
+    // an imported model resolves by name just like a bundled one. The bundled
+    // dir is found via the child's cwd; this is the extra root.
+    if let Some(user_models) = user_models_dir(&app) {
+        if user_models.is_dir() {
+            cmd.env("BUZZDETECT_MODELS_PATH", &user_models);
+        }
+    }
+
     // The CUDA build's NVIDIA runtime ships as loose libraries in the payload
     // rather than frozen into the sidecar -- 2.5GB in one file is more than
     // makensis will bundle (see engine/buzzdetect.spec's strip_nvidia).
@@ -757,6 +960,8 @@ pub fn run() {
             cancel_analysis,
             list_models,
             get_model_classes,
+            import_model,
+            remove_model,
             gpu_status,
             read_manifest
         ])
@@ -953,5 +1158,52 @@ mod tests {
 
         std::fs::write(dir.join("buzzdetect_manifest.json"), r#"{"precision": null}"#).unwrap();
         assert!(read_manifest(dir.to_string_lossy().into()).is_err());
+    }
+
+    fn good_config() -> &'static str {
+        r#"{"classes": ["a", "b"], "samplerate": 16000, "framelength_s": 0.96,
+            "digits_time": 2, "digits_results": 2, "samples_hop": 15360,
+            "samples_min": 15600}"#
+    }
+
+    #[test]
+    fn a_model_dir_needs_the_onnx_and_a_complete_config() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-import-ok");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // No model.onnx yet.
+        std::fs::write(dir.join("config_model.json"), good_config()).unwrap();
+        assert!(validate_model_dir(&dir).is_err());
+
+        std::fs::write(dir.join("model.onnx"), b"not really a graph").unwrap();
+        assert!(validate_model_dir(&dir).is_ok());
+    }
+
+    #[test]
+    fn a_config_missing_a_framing_key_is_rejected_by_name() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-import-missing");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("model.onnx"), b"x").unwrap();
+        let stripped = good_config().replace(r#""samples_hop": 15360,"#, "");
+        std::fs::write(dir.join("config_model.json"), stripped).unwrap();
+
+        let err = validate_model_dir(&dir).unwrap_err();
+        assert!(err.contains("samples_hop"), "{err}");
+    }
+
+    #[test]
+    fn empty_class_list_is_rejected() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-import-noclasses");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("model.onnx"), b"x").unwrap();
+        std::fs::write(
+            dir.join("config_model.json"),
+            good_config().replace(r#"["a", "b"]"#, "[]"),
+        )
+        .unwrap();
+        assert!(validate_model_dir(&dir).is_err());
     }
 }

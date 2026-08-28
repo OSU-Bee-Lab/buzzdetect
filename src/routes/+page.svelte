@@ -14,7 +14,13 @@
 		classes_out: string[] | null;
 	}
 
-	let models = $state<string[]>([]);
+	interface ModelInfo {
+		name: string;
+		removable: boolean;
+	}
+
+	let models = $state<ModelInfo[]>([]);
+	let modelActionError = $state<string | null>(null);
 	let availableClasses = $state<string[]>([]);
 	let startError = $state<string | null>(null);
 	let settingsWidth = $state(300);
@@ -81,10 +87,10 @@
 				};
 			});
 
-		invoke<string[]>('list_models').then((list) => {
+		invoke<ModelInfo[]>('list_models').then((list) => {
 			models = list;
-			if (!settings.value.modelname || !list.includes(settings.value.modelname)) {
-				settings.value.modelname = list[0] ?? '';
+			if (!settings.value.modelname || !list.some((m) => m.name === settings.value.modelname)) {
+				settings.value.modelname = list[0]?.name ?? '';
 			}
 			onModelChange();
 		});
@@ -190,6 +196,47 @@
 			availableClasses = [];
 		}
 		settings.save();
+	}
+
+	let currentModelRemovable = $derived(
+		models.find((m) => m.name === settings.value.modelname)?.removable ?? false
+	);
+
+	async function reloadModels(select?: string) {
+		models = await invoke<ModelInfo[]>('list_models');
+		if (select && models.some((m) => m.name === select)) {
+			settings.value.modelname = select;
+		} else if (!models.some((m) => m.name === settings.value.modelname)) {
+			settings.value.modelname = models[0]?.name ?? '';
+		}
+		await onModelChange();
+	}
+
+	// Import a model folder (model.onnx + config_model.json) into the per-user
+	// store, outside the app bundle, so it survives updates and needs no admin
+	// rights. The engine picks it up by name on the next run.
+	async function importModel() {
+		modelActionError = null;
+		const dir = await open({ directory: true, title: 'Select a model folder' });
+		if (typeof dir !== 'string') return;
+		try {
+			const info = await invoke<ModelInfo>('import_model', { src: dir });
+			await reloadModels(info.name);
+		} catch (e) {
+			modelActionError = String(e);
+		}
+	}
+
+	async function removeCurrentModel() {
+		modelActionError = null;
+		const name = settings.value.modelname;
+		if (!confirm(`Remove the imported model "${name}"? Its files will be deleted.`)) return;
+		try {
+			await invoke('remove_model', { name });
+			await reloadModels();
+		} catch (e) {
+			modelActionError = String(e);
+		}
 	}
 
 	function onDirOutInput() {
@@ -383,9 +430,18 @@
 				}}
 			>
 				{#each models as m}
-					<option value={m}>{m}</option>
+					<option value={m.name}>{m.name}</option>
 				{/each}
 			</select>
+			<span class="model-actions">
+				<button type="button" onclick={importModel}>Import model…</button>
+				{#if currentModelRemovable}
+					<button type="button" onclick={removeCurrentModel}>Remove</button>
+				{/if}
+			</span>
+			{#if modelActionError}
+				<span class="error">{modelActionError}</span>
+			{/if}
 		</label>
 		<label>
 			<span class="label-text">Audio directory <span class="qmark" data-tooltip="Input folder containing audio files to analyze.">?</span></span>
@@ -1005,6 +1061,17 @@ Can produce very large log files."
 
 	.error {
 		color: #d33;
+	}
+
+	.model-actions {
+		display: flex;
+		gap: 0.4rem;
+		margin-top: 0.3rem;
+	}
+
+	.model-actions button {
+		padding: 0.25rem 0.5rem;
+		font-size: 0.85rem;
 	}
 
 	.hint {
