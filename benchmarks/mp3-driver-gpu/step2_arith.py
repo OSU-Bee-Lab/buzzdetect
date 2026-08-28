@@ -88,7 +88,9 @@ def main():
                 index = int((n_frames - 2) * fraction)
                 guess = frame_offset(start, per_frame, index)
                 f.seek(max(start, guess - 64))
-                buf = f.read(512)
+                # Room for the four-frame chain find_frame() insists on:
+                # 512 bytes is not enough even for 157-byte frames.
+                buf = f.read(8192)
                 found = find_frame(buf, 0, 4)
                 if found is None:
                     print(f'    frame {index:>10,}: no header near {guess:,}')
