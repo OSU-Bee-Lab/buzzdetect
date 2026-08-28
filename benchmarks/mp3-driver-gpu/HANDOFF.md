@@ -94,6 +94,10 @@ headroom over a 3600x GPU. There is not much slack to lose.
 
 ## The promising fix: scan only the tail
 
+**A full plan with a test strategy is in `TAIL_SCAN_PLAN.md`.** The summary below
+is the idea; that document is how to execute it, including the feasibility gate
+that can kill it on day one.
+
 The scan's cost is proportional to the bytes scanned, and **only the tail is
 ever missing**. The shim already proves libsndfile will happily open a
 file-like that begins at an arbitrary MPEG frame boundary — that is exactly
