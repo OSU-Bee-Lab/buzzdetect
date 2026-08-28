@@ -1,4 +1,4 @@
-import numbers
+import math
 import os
 
 import src.config as cfg
@@ -35,6 +35,11 @@ def validate_classes_out(classes_out: list):
     if any([i.__class__ is not str for i in classes_out]):
         return ArgValid(False, 'must be a list of strings')
 
+    # An empty selection has no column to write; the desktop app blocks Start
+    # on the same condition.
+    if not classes_out:
+        return ArgValid(False, 'at least one output class must be selected')
+
     return ArgValid(True, None)
 
 def validate_precision(precision: float):
@@ -42,7 +47,9 @@ def validate_precision(precision: float):
         return ArgValid(True, None)
     try:
         precision = float(precision)
-    except ValueError:
+    except (TypeError, ValueError):
+        return ArgValid(False, "must be numeric")
+    if not math.isfinite(precision):
         return ArgValid(False, "must be numeric")
     if precision <= 0:
         return ArgValid(False, "must be > 0")
@@ -62,11 +69,13 @@ framehop_prop_warning =    ('Currently, analyses with framehop > 1 will produce 
 def validate_framehop(framehop_prop: float):
     try:
         framehop_prop = float(framehop_prop)
-    except ValueError:
+    except (TypeError, ValueError):
         return ArgValid(
             False,
             f"must be numeric"
         )
+    if not math.isfinite(framehop_prop):
+        return ArgValid(False, "must be numeric")
     if framehop_prop <= 0:
         return ArgValid(False, "must be > 0")
 
@@ -79,8 +88,11 @@ def validate_chunklength(chunklength_s: float):
     if type(chunklength_s) is not int:
         try:
             chunklength_s = float(chunklength_s)
-        except ValueError:
+        except (TypeError, ValueError):
             return ArgValid(False, f"must be numeric")
+
+    if not math.isfinite(chunklength_s):
+        return ArgValid(False, f"must be numeric")
 
     if chunklength_s <= 0:
         return ArgValid(False, "must be > 0")
@@ -95,16 +107,21 @@ def validate_int(value: int, none_ok: bool, value_min: int = None, value_max: in
             return ArgValid(False, "cannot be None")
 
     if type(value) is not int:
+        # Via float, so a fractional value is refused rather than truncated:
+        # int('3.7') raises but int(3.7) quietly answers 3, and a worker count
+        # the user has to be told about is better than one silently changed.
         try:
-            value = int(value)
-        except ValueError:
+            as_float = float(value)
+        except (TypeError, ValueError):
             return ArgValid(False, "must be an integer")
 
-    if not isinstance(value, numbers.Number):
-        return ArgValid(False, "must be numeric")
+        if not math.isfinite(as_float):
+            return ArgValid(False, "must be an integer")
 
-    if round(value) != value:
-        return ArgValid(False, "must be an integer")
+        if as_float != int(as_float):
+            return ArgValid(False, "must be an integer")
+
+        value = int(as_float)
 
     if value_min is not None and value < value_min:
         return ArgValid(False, f"must be >= {value_min}")
@@ -173,7 +190,7 @@ validate_map = {
     'framehop_prop': validate_framehop,
     'chunklength': validate_chunklength,
     'analyzers_cpu': validate_analyzers_cpu,
-    'analyzer_gpu': validate_analyzer_gpu,
+    'analyzers_gpu': validate_analyzer_gpu,
     'n_streamers': validate_n_streamers,
     'stream_buffer_depth': validate_stream_buffer_depth,
     'dir_audio': validate_dir_audio,
