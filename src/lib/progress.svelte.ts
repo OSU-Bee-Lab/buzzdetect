@@ -410,7 +410,22 @@ class AnalysisRun {
 		};
 	}
 
-	reset() {
+	// Highest `seq` applied so far. Rust stamps one counter across a run's
+	// events and log lines; a page re-attaching to a run replays a snapshot and
+	// then has to skip the live events that snapshot already covered.
+	private lastSeq = -1;
+
+	private isStale(seq: unknown): boolean {
+		if (typeof seq !== 'number') return false;
+		if (seq <= this.lastSeq) return true;
+		this.lastSeq = seq;
+		return false;
+	}
+
+	// `startedAt` is passed when re-attaching, so runtime counts from the
+	// engine's launch rather than from the page reload.
+	reset(startedAt?: number) {
+		this.lastSeq = -1;
 		this.files = new Map();
 		this.logLines = [];
 		this.error = null;
@@ -422,7 +437,7 @@ class AnalysisRun {
 		const now = Date.now();
 		this.now = now;
 		this.rateSamples = [{ t: now, doneSeconds: 0 }];
-		this.startedAt = now;
+		this.startedAt = startedAt ?? now;
 		this.lastPollTime = now;
 		this.lastPollDoneSeconds = 0;
 		this.instantaneousRate = 0;
@@ -494,6 +509,7 @@ class AnalysisRun {
 	}
 
 	handleEvent(payload: any) {
+		if (this.isStale(payload.seq)) return;
 		switch (payload.event) {
 			case 'stage': {
 				// Not a startup stage: the engine has begun winding down, which
@@ -590,7 +606,8 @@ class AnalysisRun {
 		}
 	}
 
-	handleLog(line: string) {
+	handleLog(line: string, seq?: number) {
+		if (this.isStale(seq)) return;
 		this.logLines.push(line);
 		if (this.logLines.length > 500) this.logLines.shift();
 	}

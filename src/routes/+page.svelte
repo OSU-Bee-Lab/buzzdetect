@@ -58,17 +58,54 @@
 		resizing = false;
 	}
 
+	interface RunSnapshot {
+		running: boolean;
+		started_at_ms: number;
+		events: any[];
+		logs: { line: string; seq: number }[];
+	}
+
 	onMount(() => {
-		const unlistenProgress = listen<any>('engine-progress', (e) => run.handleEvent(e.payload));
-		const unlistenLog = listen<{ line: string; stderr: boolean }>('engine-log', (e) =>
-			run.handleLog(e.payload.line)
+		// Live events are held back until the attach below has had its say, so
+		// they apply on top of the snapshot rather than before it.
+		let held: (() => void)[] | null = [];
+		const deliver = (f: () => void) => (held ? held.push(f) : f());
+
+		const unlistenProgress = listen<any>('engine-progress', (e) =>
+			deliver(() => run.handleEvent(e.payload))
 		);
-		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) => {
-			// A cancelled engine is killed, so it exits by signal (null code) or
-			// non-zero -- expected, not an error worth showing.
-			const cancelled = run.stopping;
-			run.stop(!cancelled && e.payload.code !== 0 ? `engine exited with code ${e.payload.code}` : undefined);
-		});
+		const unlistenLog = listen<{ line: string; stderr: boolean; seq: number }>('engine-log', (e) =>
+			deliver(() => run.handleLog(e.payload.line, e.payload.seq))
+		);
+		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) =>
+			deliver(() => {
+				if (!run.running) return;
+				// A cancelled engine is killed, so it exits by signal (null code) or
+				// non-zero -- expected, not an error worth showing.
+				const cancelled = run.stopping;
+				run.stop(!cancelled && e.payload.code !== 0 ? `engine exited with code ${e.payload.code}` : undefined);
+			})
+		);
+
+		// An engine can outlive the page that started it (the webview reloads,
+		// the run doesn't), so pick up whatever is already running.
+		Promise.all([unlistenProgress, unlistenLog, unlistenExit])
+			.then(() => invoke<RunSnapshot>('attach_analysis'))
+			.then((snap) => {
+				if (!snap.running) return;
+				run.reset(snap.started_at_ms);
+				hasStarted = true;
+				hasAutoExpanded = false;
+				expanded = new Set();
+				for (const l of snap.logs) run.handleLog(l.line, l.seq);
+				for (const ev of snap.events) run.handleEvent(ev);
+			})
+			.catch(() => {})
+			.finally(() => {
+				const queued = held ?? [];
+				held = null;
+				queued.forEach((f) => f());
+			});
 
 		invoke<GpuStatus>('gpu_status')
 			.then((status) => {

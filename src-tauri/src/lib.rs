@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -14,6 +15,70 @@ const PROGRESS_MARKER: &str = "BDPROGRESS ";
 
 #[derive(Default)]
 struct AnalysisState(Mutex<Option<Child>>);
+
+// Everything the current run has told the frontend, kept so a page that
+// reloads mid-run can rebuild its view (see attach_analysis). The run outlives
+// the page: the child and its reader threads belong to the Rust side, but the
+// progress store is page state, and the webview can be reloaded out from under
+// it -- by the OS reclaiming its content process, or a plain Cmd+R.
+//
+// Every emitted event and log line carries a `seq` from one counter, so a page
+// can tell which live events its snapshot already covered.
+#[derive(Default)]
+struct RunRecord {
+    started_at_ms: u64,
+    next_seq: u64,
+    // None where a chunk_done was superseded by its file's final one: the
+    // store sets a finished file's doneSeconds outright, so only in-flight
+    // files need their chunks replayed. Keeps this O(files), not O(chunks).
+    events: Vec<Option<serde_json::Value>>,
+    open_chunks: HashMap<String, Vec<usize>>,
+    logs: VecDeque<serde_json::Value>,
+}
+
+// Matches the frontend store's own cap.
+const RECORDED_LOG_LINES: usize = 500;
+
+static RUN_RECORD: Mutex<Option<RunRecord>> = Mutex::new(None);
+
+impl RunRecord {
+    fn take_seq(&mut self) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        seq
+    }
+
+    fn push_event(&mut self, mut value: serde_json::Value) -> serde_json::Value {
+        let seq = self.take_seq();
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("seq".into(), seq.into());
+        }
+        let chunk_path = (value["event"] == "chunk_done")
+            .then(|| value["path"].as_str().map(str::to_owned))
+            .flatten();
+        if let Some(path) = chunk_path {
+            if value["done"] == true {
+                for idx in self.open_chunks.remove(&path).unwrap_or_default() {
+                    self.events[idx] = None;
+                }
+            } else {
+                self.open_chunks.entry(path).or_default().push(self.events.len());
+            }
+        }
+        self.events.push(Some(value.clone()));
+        value
+    }
+
+    fn push_log(&mut self, line: String, is_stderr: bool) -> serde_json::Value {
+        let seq = self.take_seq();
+        let value = serde_json::json!({ "line": line, "stderr": is_stderr, "seq": seq });
+        self.logs.push_back(value.clone());
+        while self.logs.len() > RECORDED_LOG_LINES {
+            self.logs.pop_front();
+        }
+        value
+    }
+}
 
 // How to invoke the Python engine. Two shapes, because the app has to work
 // both as a shipped bundle and out of a checkout:
@@ -752,6 +817,16 @@ fn start_analysis(
         let _ = stdin.flush();
     }
 
+    if let Ok(mut record) = RUN_RECORD.lock() {
+        *record = Some(RunRecord {
+            started_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or_default(),
+            ..Default::default()
+        });
+    }
+
     let stdout = child.stdout.take().ok_or("failed to capture engine stdout")?;
     let stderr = child.stderr.take().ok_or("failed to capture engine stderr")?;
 
@@ -793,6 +868,32 @@ fn start_analysis(
     });
 
     Ok(())
+}
+
+#[derive(Serialize)]
+struct RunSnapshot {
+    running: bool,
+    started_at_ms: u64,
+    events: Vec<serde_json::Value>,
+    logs: Vec<serde_json::Value>,
+}
+
+/// What a freshly loaded page needs to pick up a run already in progress.
+/// The page subscribes to the live events first and asks for this second,
+/// then drops any live event whose seq the snapshot already covered.
+#[tauri::command]
+fn attach_analysis(state: State<AnalysisState>) -> Result<RunSnapshot, String> {
+    let running = state.0.lock().map_err(|e| e.to_string())?.is_some();
+    let record = RUN_RECORD.lock().map_err(|e| e.to_string())?;
+    Ok(match (running, record.as_ref()) {
+        (true, Some(r)) => RunSnapshot {
+            running,
+            started_at_ms: r.started_at_ms,
+            events: r.events.iter().flatten().cloned().collect(),
+            logs: r.logs.iter().cloned().collect(),
+        },
+        _ => RunSnapshot { running: false, started_at_ms: 0, events: vec![], logs: vec![] },
+    })
 }
 
 /// When the engine last said anything. A cancelled engine is given room to
@@ -838,13 +939,16 @@ fn spawn_line_reader<R: std::io::Read + Send + 'static>(app: AppHandle, reader: 
         for line in buf.lines() {
             let Ok(line) = line else { break };
             note_engine_output();
+            // Recorded and emitted under one lock, so a snapshot taken by
+            // attach_analysis falls cleanly between two events.
+            let Ok(mut record) = RUN_RECORD.lock() else { break };
+            let Some(record) = record.as_mut() else { continue };
             match classify_line(line) {
                 EngineLine::Progress(value) => {
-                    let _ = app.emit("engine-progress", value);
+                    let _ = app.emit("engine-progress", record.push_event(value));
                 }
                 EngineLine::Log(line) => {
-                    let _ = app
-                        .emit("engine-log", serde_json::json!({ "line": line, "stderr": is_stderr }));
+                    let _ = app.emit("engine-log", record.push_log(line, is_stderr));
                 }
             }
         }
@@ -1000,6 +1104,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_analysis,
             cancel_analysis,
+            attach_analysis,
             list_models,
             get_model_classes,
             import_model,
@@ -1116,6 +1221,27 @@ mod tests {
             "classes_out": ["ins_buzz"],
         })));
         assert_eq!(value_after(&args, "--dir_audio").as_deref(), Some("/data/my recordings"));
+    }
+
+    #[test]
+    fn a_finished_file_replays_without_its_intermediate_chunks() {
+        let mut r = RunRecord::default();
+        let chunk = |path: &str, done: bool| {
+            serde_json::json!({ "event": "chunk_done", "path": path, "chunk_start": 0, "chunk_end": 1, "done": done })
+        };
+        r.push_event(serde_json::json!({ "event": "file_start", "path": "a.wav" }));
+        r.push_event(chunk("a.wav", false));
+        r.push_event(chunk("b.wav", false));
+        r.push_log("hello".into(), false);
+        r.push_event(chunk("a.wav", false));
+        let last = r.push_event(chunk("a.wav", true));
+
+        assert_eq!(last["seq"], 5);
+        let kept: Vec<_> = r.events.iter().flatten().collect();
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[1]["path"], "b.wav");
+        assert_eq!(kept[2]["done"], true);
+        assert_eq!(r.logs[0]["seq"], 3);
     }
 
     #[test]

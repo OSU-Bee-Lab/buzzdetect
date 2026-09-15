@@ -451,3 +451,23 @@ describe('the log pane', () => {
 		expect(run.logLines[499]).toBe('line 599');
 	});
 });
+
+describe('re-attaching to a running engine', () => {
+	it('skips live events the snapshot already replayed', () => {
+		const seqd = (seq: number, ev: any) => ({ ...ev, seq });
+		// The snapshot...
+		run.handleEvent(seqd(0, { event: 'manifest', paths: ['a.wav'] }));
+		run.handleEvent(seqd(1, { event: 'file_start', path: 'a.wav', duration: 10, work_seconds: 10 }));
+		run.handleEvent(seqd(2, { event: 'chunk_done', path: 'a.wav', chunk_start: 0, chunk_end: 4, done: false }));
+		// ...then the live stream, which overlaps it by one event.
+		run.handleEvent(seqd(2, { event: 'chunk_done', path: 'a.wav', chunk_start: 0, chunk_end: 4, done: false }));
+		run.handleEvent(seqd(3, { event: 'chunk_done', path: 'a.wav', chunk_start: 4, chunk_end: 6, done: false }));
+		expect(file(run.tree, 'a.wav').doneSeconds).toBe(6);
+	});
+
+	it('counts runtime from when the engine launched', () => {
+		run.reset(Date.now() - 60_000);
+		run.stop();
+		expect(run.summary!.runtimeSeconds).toBeGreaterThanOrEqual(60);
+	});
+});
