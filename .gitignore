@@ -45,3 +45,6 @@ guisettings.json
 
 # conda env for local engine work (10GB); see engine/environment.yml to rebuild
 environment/
+
+# local Claude Code settings and worktrees
+.claude/

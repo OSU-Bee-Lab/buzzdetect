@@ -22,3 +22,6 @@ training/
 # documentation
 docs/build/
 guisettings.json
+
+# leftover embedders from before models became a single ONNX graph
+embedders/
