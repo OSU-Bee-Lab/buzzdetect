@@ -213,9 +213,12 @@ class AnalysisRun {
 	running = $state(false);
 	error = $state<string | null>(null);
 	// True once a run has stopped, whether cleanly finished, cancelled, or
-	// errored — drives the "Stopped" header without needing an error message
-	// (a user-initiated cancel has nothing to say in the error paragraph).
+	// errored — gates which of the run-finished rows below render.
 	stopped = $state(false);
+	// True if the run was stopped via beginStop() (the user's stop button)
+	// rather than running to completion or dying on its own. Distinguishes
+	// the "Stopped" header from "Analysis complete!" on a clean finish.
+	cancelled = $state(false);
 	startedAt = $state<number | null>(null);
 	summary = $state<RunSummary | null>(null);
 	// True once the engine's directory walk has reported every file it's
@@ -430,6 +433,7 @@ class AnalysisRun {
 		this.logLines = [];
 		this.error = null;
 		this.stopped = false;
+		this.cancelled = false;
 		this.stopping = false;
 		this.summary = null;
 		this.discoveryDone = false;
@@ -473,6 +477,7 @@ class AnalysisRun {
 	}
 
 	stop(error?: string) {
+		this.cancelled = this.stopping;
 		this.running = false;
 		this.stopping = false;
 		this.stopped = true;

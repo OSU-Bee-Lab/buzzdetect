@@ -740,7 +740,7 @@ Can produce very large log files."
 					{run.stageLabel.replace(/…$/, '')}<span class="ellipsis" aria-hidden="true"
 					></span>
 				{:else if run.stopped}
-					Stopped
+					{run.cancelled || run.error ? 'Stopped' : 'Analysis complete!'}
 				{:else}
 					Ready
 				{/if}
