@@ -355,6 +355,15 @@
 	}
 
 	async function cancel() {
+		// A second click, while it's already winding down, kills it outright.
+		if (run.stopping) {
+			try {
+				await invoke('kill_analysis');
+			} catch (e) {
+				run.stop(String(e));
+			}
+			return;
+		}
 		// Only marks the run as stopping. run.stop() is left to the engine-exit
 		// listener, so the UI stays locked until the engine has actually gone
 		// rather than while it's still analysing in the background.
@@ -820,8 +829,8 @@ Can produce very large log files."
 
 		{#if run.running}
 			<div class="run-actions">
-				<button class="danger" onclick={cancel} disabled={run.stopping}>
-					{run.stopping ? 'Stopping…' : 'Stop Analysis'}
+				<button class="danger" onclick={cancel}>
+					{run.stopping ? 'Force Stop' : 'Stop Analysis'}
 				</button>
 			</div>
 		{/if}

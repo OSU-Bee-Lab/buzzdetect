@@ -1046,6 +1046,25 @@ fn cancel_analysis(app: AppHandle, state: State<AnalysisState>) -> Result<(), St
     Ok(())
 }
 
+/// The stop button's second click: skip the wind-down and kill the whole
+/// engine tree now. Like cancel_analysis, it leaves AnalysisState alone for the
+/// waiter thread to reap and report as engine-exit.
+#[tauri::command]
+fn kill_analysis(state: State<AnalysisState>) -> Result<(), String> {
+    let pid = {
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        match guard.as_ref() {
+            Some(child) => child.id(),
+            None => return Ok(()),
+        }
+    };
+    #[cfg(unix)]
+    signal_engine(pid, libc::SIGKILL);
+    #[cfg(windows)]
+    signal_engine(pid, 0);
+    Ok(())
+}
+
 // How long an engine gets to wind down when the app itself is on the way out.
 // Shorter than CANCEL_GRACE: the user is closing the window, not waiting on a
 // tidy stop, and a chunk in flight is re-analysed by the next run anyway.
@@ -1104,6 +1123,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_analysis,
             cancel_analysis,
+            kill_analysis,
             attach_analysis,
             list_models,
             get_model_classes,
