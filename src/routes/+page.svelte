@@ -4,9 +4,11 @@
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { documentDir, join } from '@tauri-apps/api/path';
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { run, formatDuration, type TreeDir } from '$lib/progress.svelte';
 	import { settings, LOGLEVELS } from '$lib/settings.svelte';
 	import DirRow from '$lib/DirRow.svelte';
+	import FileRows from '$lib/FileRows.svelte';
 	import ProgressBar from '$lib/ProgressBar.svelte';
 
 	interface Manifest {
@@ -25,7 +27,9 @@
 	let startError = $state<string | null>(null);
 	let settingsWidth = $state(300);
 	let resizing = false;
-	let expanded = $state<Set<string>>(new Set());
+	// A SvelteSet, not $state(new Set()): $state doesn't proxy a Set, so the
+	// per-folder toggles' add/delete would change nothing on screen.
+	const expanded = new SvelteSet<string>();
 	let hasAutoExpanded = false;
 	let hasStarted = $state(false);
 	let manifest = $state<Manifest | null>(null);
@@ -96,7 +100,7 @@
 				run.reset(snap.started_at_ms);
 				hasStarted = true;
 				hasAutoExpanded = false;
-				expanded = new Set();
+				expanded.clear();
 				for (const l of snap.logs) run.handleLog(l.line, l.seq);
 				for (const ev of snap.events) run.handleEvent(ev);
 			})
@@ -325,7 +329,7 @@
 		run.reset();
 		hasStarted = true;
 		hasAutoExpanded = false;
-		expanded = new Set();
+		expanded.clear();
 		try {
 			await invoke('start_analysis', {
 				settings: {
@@ -375,7 +379,8 @@
 	function toggleExpandAll() {
 		const all = allDirPaths();
 		const allOpen = all.length > 0 && all.every((p) => expanded.has(p));
-		expanded = allOpen ? new Set() : new Set(all);
+		expanded.clear();
+		if (!allOpen) all.forEach((p) => expanded.add(p));
 	}
 
 	const allExpanded = $derived.by(() => {
@@ -802,25 +807,7 @@ Can produce very large log files."
 		</div>
 
 		<div class="tree">
-			{#each tree.files as f (f.path)}
-				{@const w = f.weights}
-				{@const filePct = pct(w.priorSeconds + w.doneSeconds + w.activeSeconds, w.totalSeconds)}
-				<div class="tree-row">
-					<div class="row static">
-						<span class="disclosure"></span>
-						<span class="name">{f.name}</span>
-						<ProgressBar weights={w} />
-						{#if f.status === 'done' || f.status === 'skipped'}
-							<span class="count check" class:session={f.status === 'done'}>✓</span>
-						{:else}
-							<!-- Red marks a file the run left part-analyzed. -->
-							<span class="count" class:interrupted={run.stopped && f.status === 'running'}
-								>{filePct}%</span
-							>
-						{/if}
-					</div>
-				</div>
-			{/each}
+			<FileRows files={tree.files} depth={0} {pct} />
 			{#each tree.dirs as d (d.path)}
 				<DirRow node={d} depth={0} {expanded} {pct} />
 			{/each}
@@ -1240,60 +1227,6 @@ Can produce very large log files."
 		overflow-x: hidden;
 		border: 1px solid rgba(127, 127, 127, 0.2);
 		border-radius: 6px;
-	}
-
-	.tree-row {
-		min-width: 0;
-	}
-
-	.row {
-		width: 100%;
-		display: grid;
-		grid-template-columns: 1.2em minmax(0, 1fr) 100px 3.5em;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.35rem 0.6rem;
-		border: none;
-		background: none;
-		text-align: left;
-		font-size: 0.85rem;
-		box-sizing: border-box;
-	}
-
-	.row.static {
-		cursor: default;
-	}
-
-	.disclosure {
-		opacity: 0.6;
-		text-align: center;
-	}
-
-	.row .name {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		min-width: 0;
-	}
-
-	.row .count.check {
-		opacity: 1;
-		color: #4caf50;
-	}
-
-	.row .count.check.session {
-		color: #4c8dff;
-	}
-
-	.row .count.interrupted {
-		opacity: 1;
-		color: #e05a4f;
-	}
-
-	.row .count {
-		text-align: right;
-		font-variant-numeric: tabular-nums;
-		opacity: 0.7;
 	}
 
 	.log {

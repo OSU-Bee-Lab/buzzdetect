@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { run, type TreeDir } from './progress.svelte';
+	import type { TreeDir } from './progress.svelte';
 	import Self from './DirRow.svelte';
+	import FileRows from './FileRows.svelte';
 	import ProgressBar from './ProgressBar.svelte';
 
 	let {
@@ -49,25 +50,7 @@
 	{#each node.dirs as child (child.path)}
 		<Self node={child} depth={depth + 1} {expanded} {pct} />
 	{/each}
-	{#each node.files as f (f.path)}
-		{@const w = f.weights}
-		{@const filePct = pct(w.priorSeconds + w.doneSeconds + w.activeSeconds, w.totalSeconds)}
-		<div class="tree-row" style="padding-left: {(depth + 1) * 1.25}rem">
-			<div class="row static">
-				<span class="disclosure"></span>
-				<span class="name">{f.name}</span>
-				<ProgressBar weights={w} />
-				{#if f.status === 'done' || f.status === 'skipped'}
-					<span class="count check" class:session={f.status === 'done'}>✓</span>
-				{:else}
-					<!-- Red marks a file the run left part-analyzed. -->
-					<span class="count" class:interrupted={run.stopped && f.status === 'running'}
-						>{filePct}%</span
-					>
-				{/if}
-			</div>
-		</div>
-	{/each}
+	<FileRows files={node.files} depth={depth + 1} {pct} />
 {/if}
 
 <style>
@@ -87,10 +70,6 @@
 		text-align: left;
 		font-size: 0.85rem;
 		box-sizing: border-box;
-	}
-
-	.row.static {
-		cursor: default;
 	}
 
 	button.row {
@@ -119,14 +98,5 @@
 	.count.check {
 		opacity: 1;
 		color: #4caf50;
-	}
-
-	.count.check.session {
-		color: #4c8dff;
-	}
-
-	.count.interrupted {
-		opacity: 1;
-		color: #e05a4f;
 	}
 </style>

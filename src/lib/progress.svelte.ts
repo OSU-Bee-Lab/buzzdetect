@@ -150,6 +150,10 @@ function nameOf(path: string): string {
 	return idx === -1 ? path : path.slice(idx + 1);
 }
 
+// localeCompare builds a collator per call, which dominates sorting thousands
+// of names; one shared collator orders them the same way.
+const byName = new Intl.Collator().compare;
+
 function statusRank(s: FileStatus): number {
 	return s === 'running' ? 0 : s === 'pending' ? 1 : 2;
 }
@@ -241,7 +245,20 @@ class AnalysisRun {
 	private ticker: ReturnType<typeof setInterval> | null = null;
 	private statsSnapshot = $state<Stats>(ZERO_STATS);
 
-	get tree(): TreeDir {
+	// Derived rather than a getter: the page, the auto-expand effect and the
+	// stats tick all read it, and a getter rebuilt (and re-sorted) the whole tree
+	// for each of them on every chunk.
+	tree = $derived.by(() => this.buildTree());
+
+	// FileNodes carried over from the last build. A chunk only replaces the
+	// FileProgress of the file it belongs to, so every other file keeps its node
+	// object, and Svelte's keyed each skips redrawing rows whose item is ===.
+	// Invalidated wholesale when the size->duration calibration moves, since
+	// that shifts the estimate for every unopened file.
+	private nodeCache = new WeakMap<FileProgress, FileNode>();
+	private nodeCacheKey = '';
+
+	private buildTree(): TreeDir {
 		const root: MutableNode = { path: '', name: '', dirs: new Map(), files: [] };
 		for (const f of this.files.values()) {
 			const segments = f.dir === '' ? [] : f.dir.split('/');
@@ -261,11 +278,24 @@ class AnalysisRun {
 
 		const discoveryDone = this.discoveryDone;
 		const weighting = this.weighting;
+		const key = JSON.stringify([weighting.meanDuration, [...weighting.scale]]);
+		if (key !== this.nodeCacheKey) {
+			this.nodeCache = new WeakMap();
+			this.nodeCacheKey = key;
+		}
+		const nodeFor = (f: FileProgress): FileNode => {
+			let n = this.nodeCache.get(f);
+			if (!n) {
+				n = { ...f, weights: fileWeights(f, weighting) };
+				this.nodeCache.set(f, n);
+			}
+			return n;
+		};
 		const build = (node: MutableNode): TreeDir => {
-			const dirs = [...node.dirs.values()].map(build).sort((a, b) => a.name.localeCompare(b.name));
-			const files: FileNode[] = [...node.files]
-				.sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.name.localeCompare(b.name))
-				.map((f) => ({ ...f, weights: fileWeights(f, weighting) }));
+			const dirs = [...node.dirs.values()].map(build).sort((a, b) => byName(a.name, b.name));
+			const files: FileNode[] = node.files
+				.sort((a, b) => statusRank(a.status) - statusRank(b.status) || byName(a.name, b.name))
+				.map(nodeFor);
 
 			let workSeconds = 0;
 			let totalSeconds = 0;
@@ -340,7 +370,7 @@ class AnalysisRun {
 		return { scale, meanDuration: n === 0 ? 0 : durations / n };
 	}
 
-	get totals(): { workSeconds: number; doneSeconds: number; filesDone: number; filesTotal: number } {
+	totals = $derived.by((): { workSeconds: number; doneSeconds: number; filesDone: number; filesTotal: number } => {
 		let workSeconds = 0;
 		let doneSeconds = 0;
 		let filesDone = 0;
@@ -352,7 +382,7 @@ class AnalysisRun {
 			if (f.status === 'done' || f.status === 'skipped') filesDone += 1;
 		}
 		return { workSeconds, doneSeconds, filesDone, filesTotal };
-	}
+	});
 
 	get stageLabel(): string {
 		return STAGE_LABELS[this.stage];
