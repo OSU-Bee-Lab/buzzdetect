@@ -60,7 +60,7 @@ class TestWireContract(unittest.TestCase):
     """Every event kind the engine emits, against what the frontend handles."""
 
     # src/lib/progress.svelte.ts's handleEvent switch, plus the Stage union.
-    FRONTEND_EVENTS = {'stage', 'manifest', 'manifest_done', 'file_skip', 'file_start', 'chunk_done'}
+    FRONTEND_EVENTS = {'stage', 'manifest', 'manifest_done', 'file_skip', 'file_start', 'chunk_done', 'error'}
     # 'launching' is the frontend's own and is never emitted; 'stopping' is
     # emitted but is handled outside the startup ladder.
     FRONTEND_STAGES = {'starting', 'scanning', 'loading', 'analyzing', 'stopping'}

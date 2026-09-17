@@ -51,11 +51,11 @@ def run_worker(workerclass, **kwargs):
         # analysis is ending either way, so there is nothing here to re-raise
         # into -- a worker thread has no caller to propagate to.
         traceback.print_exc()
+        message = f'{name} failed and the analysis cannot continue ({type(e).__name__}: {e})'
         coordinator = kwargs.get('coordinator')
         if coordinator is not None:
-            coordinator.q_earlyexit.put(
-                f'{name} failed and the analysis cannot continue '
-                f'({type(e).__name__}: {e})')
+            coordinator.q_earlyexit.put((message, 'failed'))
+        emit_progress('error', message=message)
         return
     print(f"DEBUG, run_worker: {worker.__class__.__name__} finished.")
 
@@ -173,7 +173,7 @@ class Analyzer:
         self.thread_logger = threading.Thread(
             target=run_worker,
             name='logger_proc',
-
+            daemon=True,
             kwargs={
                 'workerclass': WorkerLogger,
                 'path_log': path_log,
@@ -220,6 +220,7 @@ class Analyzer:
             streamer = threading.Thread(
                 target=run_worker,
                 name=f'streamer_{s}',
+                daemon=True,
                 kwargs={
                     'workerclass': WorkerStreamer,
                     'id_streamer': s,
@@ -236,6 +237,7 @@ class Analyzer:
         self.thread_writer = threading.Thread(
             target=run_worker,
             name='writer_proc',
+            daemon=True,
             kwargs={
                 'workerclass': WorkerWriter,
                 'classes_out': self.classes_out,
@@ -258,6 +260,7 @@ class Analyzer:
             analyzer = threading.Thread(
                 target=run_worker,
                 name=f"analyzer_cpu_{a}",
+                daemon=True,
                 kwargs={
                     'workerclass': WorkerInferer,
                     'id_analyzer': f'cpu {a}',
@@ -275,6 +278,7 @@ class Analyzer:
             analyzer = threading.Thread(
                 target=run_worker,
                 name=f"analyzer_gpu_{a}",
+                daemon=True,
                 kwargs={
                     'workerclass': WorkerInferer,
                     'id_analyzer': f'gpu {a}',
@@ -401,8 +405,11 @@ class Analyzer:
             except OSError:
                 pass
 
-    def run(self):
-        """Execute the complete analysis workflow."""
+    def run(self) -> bool:
+        """Execute the complete analysis workflow. Returns False only if a
+        worker died and the analysis could not continue -- a manifest
+        mismatch, an empty input folder, or a user-requested stop are all
+        ordinary, expected outcomes and still return True."""
         self._log_startup()
         self._launch_logger()
         # From here on a Ctrl-C, or a host's stop request, goes through the
@@ -417,12 +424,12 @@ class Analyzer:
         if not self._check_manifest():
             self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
             self.thread_logger.join()
-            return
+            return True
 
         if not self.queue_assignments():
             self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
             self.thread_logger.join()
-            return
+            return True
 
         # Stopped during the scan, before there are any workers for the
         # coordinator's early exit to wind down.
@@ -431,7 +438,7 @@ class Analyzer:
                 message='Analysis stopped by user', level_str='WARNING'))
             self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
             self.thread_logger.join()
-            return
+            return True
 
         # queue termination sentinels
         for _ in range(self.coordinator.streamers_total):
@@ -460,6 +467,7 @@ class Analyzer:
 
         self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
         self.thread_logger.join()
+        return self.coordinator.end_reason != 'failed'
 
 
 def analyze(
@@ -533,8 +541,11 @@ def analyze(
 
     Returns
     -------
-    None
-        Results are written to output directory as files
+    bool
+        False only if a worker died and the analysis could not continue.
+        A manifest mismatch, an empty input folder and a user-requested
+        stop are all ordinary outcomes and still return True.
+        Results are written to output directory as files regardless.
 
     Notes
     -----
@@ -567,4 +578,4 @@ def analyze(
         coordinator=coordinator
     )
 
-    analyzer.run()
+    return analyzer.run()

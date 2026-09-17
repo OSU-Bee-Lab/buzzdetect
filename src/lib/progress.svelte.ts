@@ -3,9 +3,10 @@
 // engine/src/pipeline/progress_json.py). Event types: manifest (one file
 // discovered), manifest_done (discovery walk finished), file_start,
 // file_skip, chunk_done (which carries chunk_start/chunk_end as absolute
-// offsets within the file, not a done-so-far position), and stage --
+// offsets within the file, not a done-so-far position), stage --
 // startup progress, plus the 'stopping' report, which is not a startup stage
-// at all but the engine saying it has begun winding down.
+// at all but the engine saying it has begun winding down -- and error, sent
+// when a worker thread has died and the analysis cannot continue.
 
 export type FileStatus = 'pending' | 'running' | 'done' | 'skipped';
 
@@ -636,6 +637,10 @@ class AnalysisRun {
 					this.files = files;
 				}
 				this.touchRate();
+				break;
+			}
+			case 'error': {
+				this.stop(payload.message);
 				break;
 			}
 		}

@@ -12,11 +12,13 @@ export interface Settings {
 	dirOut: string;
 	// Once the user edits dirOut by hand, model changes stop overwriting it.
 	dirOutTouched: boolean;
-	classesOut: string[]; // must be non-empty to start a run; defaults to all of the selected model's classes
+	classesOut: string[]; // must be non-empty to start a run; defaults to ["ins_buzz"] (or all classes if a model lacks it)
 	chunklength: number;
 	analyzersCpu: number;
 	analyzersGpu: number;
 	gpuFp16: boolean;
+	// Once the user flips this by hand, the CoreML-detected default stops overwriting it.
+	gpuFp16Touched: boolean;
 	nStreamers: number | null;
 	streamBufferDepth: number | null;
 	verbosityPrint: string;
@@ -37,6 +39,7 @@ function defaults(): Settings {
 		analyzersCpu: 2,
 		analyzersGpu: 0,
 		gpuFp16: false,
+		gpuFp16Touched: false,
 		nStreamers: null,
 		streamBufferDepth: null,
 		verbosityPrint: 'PROGRESS',

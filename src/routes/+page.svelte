@@ -21,7 +21,10 @@
 	let modelActionError = $state<string | null>(null);
 	let availableClasses = $state<string[]>([]);
 	let startError = $state<string | null>(null);
-	let settingsWidth = $state(300);
+	// Wide enough that the two-column class checklist doesn't clip the longest
+	// shipped class name ("ambient_background"/"mech_hum_chainsaw") — sized to
+	// that text, not to the unbounded audio/output path fields below it.
+	let settingsWidth = $state(380);
 	let resizing = false;
 	// A SvelteSet, not $state(new Set()): $state doesn't proxy a Set, so the
 	// per-folder toggles' add/delete would change nothing on screen.
@@ -112,6 +115,17 @@
 				gpu = status;
 				if (!status.usable && settings.value.analyzersGpu !== 0) {
 					settings.value.analyzersGpu = 0;
+					settings.save();
+				}
+				// fp16 only affects Apple's Neural Engine (see the setting's
+				// tooltip), so default it on for a CoreML-capable machine unless
+				// the user has already made a choice of their own.
+				if (
+					status.usable &&
+					!settings.value.gpuFp16Touched &&
+					status.providers.includes('CoreMLExecutionProvider')
+				) {
+					settings.value.gpuFp16 = true;
 					settings.save();
 				}
 			})
@@ -224,11 +238,13 @@
 			});
 			availableClasses = classes;
 			// Keep only still-valid selections from a prior model; if that
-			// leaves nothing selected (fresh model, or the prior selection no
-			// longer applies), default to everything rather than leaving the
-			// run blocked on an empty selection.
+			// leaves nothing selected (fresh install, fresh model, or the prior
+			// selection no longer applies), default to just ins_buzz rather than
+			// leaving the run blocked on an empty selection — falling back to
+			// everything only if this model has no ins_buzz class at all.
 			const kept = settings.value.classesOut.filter((c) => classes.includes(c));
-			settings.value.classesOut = kept.length > 0 ? kept : [...classes];
+			settings.value.classesOut =
+				kept.length > 0 ? kept : classes.includes('ins_buzz') ? ['ins_buzz'] : [...classes];
 		} catch {
 			availableClasses = [];
 		}
@@ -415,8 +431,6 @@
 	}
 
 	const tree = $derived(run.tree);
-	const missingDirs = $derived(!settings.value.dirAudio || !settings.value.dirOut);
-
 	// Tauri's WKWebView doesn't render native `title` tooltips on hover, so
 	// `[data-tooltip]` elements are shown via this single fixed-position
 	// tooltip instead. Fixed positioning (rather than a CSS ::after anchored
@@ -464,16 +478,9 @@
 		<div class="settings-body">
 			<fieldset class="settings-fields" disabled={run.running || run.stopping}>
 
-		{#if modelMismatch}
-			<p class="error">
-				Results have already been written to this output folder with model "{manifest?.modelname}".
-				Select that model to continue, or choose a different output folder.
-			</p>
-		{/if}
-
 		<!-- for= rather than nesting alone: the Info button is the label's first
 		     labelable descendant, so without it a click on "Model" would press it. -->
-		<label for="model-select">
+		<label class:field-error={modelMismatch} for="model-select">
 			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
 				<button
 					type="button"
@@ -503,17 +510,16 @@
 			{#if currentModel?.description}
 				<span class="model-description">{currentModel.description}</span>
 			{/if}
-			<span class="model-actions">
-				<button type="button" onclick={importModel}>Import model (.zip)…</button>
-				{#if currentModelRemovable}
-					<button type="button" onclick={removeCurrentModel}>Remove</button>
-				{/if}
-			</span>
+			{#if currentModelRemovable}
+				<span class="model-actions">
+					<button type="button" onclick={removeCurrentModel}>Delete model</button>
+				</span>
+			{/if}
 			{#if modelActionError}
 				<span class="error">{modelActionError}</span>
 			{/if}
 		</label>
-		<label>
+		<label class:field-error={!settings.value.dirAudio}>
 			<span class="label-text">Audio directory <span class="qmark" data-tooltip="Input folder containing audio files to analyze.">?</span></span>
 			<span class="path-row">
 				<input
@@ -524,7 +530,7 @@
 				<button type="button" onclick={browseDirAudio}>Browse…</button>
 			</span>
 		</label>
-		<label>
+		<label class:field-error={modelMismatch || !settings.value.dirOut}>
 			<span class="label-text">Output directory <span class="qmark" data-tooltip="Output folder for analysis results.">?</span></span>
 			<span class="path-row">
 				<input bind:value={settings.value.dirOut} oninput={onDirOutInput} />
@@ -547,12 +553,10 @@
 			{/if}
 		</label>
 
-		<details class="advanced">
-			<summary>Advanced settings</summary>
-
-			<fieldset>
-				<legend class:locked={manifestLocked}>
-					Classes to output
+		<fieldset class:field-error={settings.value.classesOut.length === 0}>
+			<legend class:locked={manifestLocked}>
+				<span class="legend-text">
+					Classes out
 					{#if manifestLocked}
 						<span class="lock-icon" data-tooltip="Locked to match existing results in this output folder">
 							<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
@@ -561,27 +565,34 @@
 							</svg>
 						</span>
 					{/if}
-				</legend>
+				</span>
 				<button
 					type="button"
 					class="toggle-all"
 					disabled={manifestLocked}
-					onclick={toggleAllClasses}>Select All/None</button
+					onclick={toggleAllClasses}
+					>{availableClasses.length > 0 && settings.value.classesOut.length === availableClasses.length
+						? 'Select None'
+						: 'Select All'}</button
 				>
-				<div class="classes">
-					{#each availableClasses as cls}
-						<label class="checkbox" class:locked={manifestLocked}>
-							<input
-								type="checkbox"
-								disabled={manifestLocked}
-								checked={settings.value.classesOut.includes(cls)}
-								onchange={() => toggleClass(cls)}
-							/>
-							{cls}
-						</label>
-					{/each}
-				</div>
-			</fieldset>
+			</legend>
+			<div class="classes">
+				{#each availableClasses as cls}
+					<label class="checkbox" class:locked={manifestLocked}>
+						<input
+							type="checkbox"
+							disabled={manifestLocked}
+							checked={settings.value.classesOut.includes(cls)}
+							onchange={() => toggleClass(cls)}
+						/>
+						{cls}
+					</label>
+				{/each}
+			</div>
+		</fieldset>
+
+		<details class="advanced">
+			<summary>Advanced settings</summary>
 
 			<label>
 				<span class="label-text">Chunk length (s) <span class="qmark" data-tooltip="The length of each chunk in seconds.">?</span></span>
@@ -635,7 +646,10 @@ If you're using GPU, you probably don't want any CPU analyzers."
 					type="checkbox"
 					disabled={!gpu.usable}
 					bind:checked={settings.value.gpuFp16}
-					onchange={() => settings.save()}
+					onchange={() => {
+						settings.value.gpuFp16Touched = true;
+						settings.save();
+					}}
 				/>
 				<span class="label-text">
 					Reduced precision (fp16)
@@ -723,14 +737,17 @@ Can produce very large log files."
 					?
 				</span>
 			</label>
+			<label>
+				<span class="label-text">Models</span>
+				<span class="model-actions">
+					<button type="button" onclick={importModel}>Import model (.zip)…</button>
+				</span>
+				{#if modelActionError}
+					<span class="error">{modelActionError}</span>
+				{/if}
+			</label>
 		</details>
 
-		{#if settings.value.classesOut.length === 0}
-			<p class="error">Select at least one class to output.</p>
-		{/if}
-		{#if startError}
-			<p class="error">{startError}</p>
-		{/if}
 		</fieldset>
 		</div>
 
@@ -743,6 +760,21 @@ Can produce very large log files."
 						settings.value.classesOut.length === 0 ||
 						modelMismatch}>Launch Analysis</button
 				>
+				{#if modelMismatch}
+					<p class="error">
+						Results have already been written to this output folder with model "{manifest?.modelname}".
+						Select that model to continue, or choose a different output folder.
+					</p>
+				{/if}
+				{#if settings.value.classesOut.length === 0}
+					<p class="error">Select at least one class to output.</p>
+				{/if}
+				{#if !settings.value.dirAudio || !settings.value.dirOut}
+					<p class="hint">Set audio and output directories to begin.</p>
+				{/if}
+				{#if startError}
+					<p class="error">{startError}</p>
+				{/if}
 			</div>
 		{/if}
 	</section>
@@ -769,7 +801,7 @@ Can produce very large log files."
 					{run.stageLabel.replace(/…$/, '')}<span class="ellipsis" aria-hidden="true"
 					></span>
 				{:else if run.stopped}
-					{run.cancelled || run.error ? 'Stopped' : 'Analysis complete!'}
+					{run.error ? 'Error — see log' : run.cancelled ? 'Stopped' : 'Analysis complete!'}
 				{:else}
 					Ready
 				{/if}
@@ -799,9 +831,6 @@ Can produce very large log files."
 					Analyzed {formatDuration(sum.audioSeconds)} of audio in {runtimeStr} ({sum.rate.toFixed(1)}x)
 				</p>
 			{/if}
-		{/if}
-		{#if !run.running && !hasStarted && missingDirs}
-			<p class="hint">Set audio and output directories to begin.</p>
 		{/if}
 		{#if run.error}
 			<p class="error">{run.error}</p>
@@ -921,6 +950,8 @@ Can produce very large log files."
 
 	.settings-actions {
 		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
 		flex-shrink: 0;
 		padding-top: 0.75rem;
 		margin-top: 0.5rem;
@@ -930,6 +961,17 @@ Can produce very large log files."
 	.settings-actions button {
 		width: 100%;
 		font-weight: 600;
+	}
+
+	.settings-actions p {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+
+	.field-error {
+		outline: 1px solid #d33;
+		outline-offset: 2px;
+		border-radius: 6px;
 	}
 
 	.run-actions {
@@ -1036,7 +1078,9 @@ Can produce very large log files."
 	}
 
 	.toggle-all {
-		margin: 0.5rem 0.75rem 0;
+		flex-shrink: 0;
+		padding: 0.15rem 0.5rem;
+		font-size: 0.75rem;
 	}
 
 	.settings label {
@@ -1075,6 +1119,14 @@ Can produce very large log files."
 	}
 
 	legend {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		width: 100%;
+	}
+
+	.legend-text {
 		display: flex;
 		align-items: center;
 		gap: 0.35rem;

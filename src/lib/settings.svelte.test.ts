@@ -44,6 +44,7 @@ describe('defaults', () => {
 		expect(settings.value.analyzersCpu).toBeGreaterThan(0);
 		expect(settings.value.analyzersGpu).toBe(0);
 		expect(settings.value.gpuFp16).toBe(false);
+		expect(settings.value.gpuFp16Touched).toBe(false);
 	});
 
 	it('name log levels the engine accepts', async () => {

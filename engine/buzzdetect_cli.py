@@ -174,7 +174,7 @@ def main():
         framehop_prop=args.framehop_prop,
     )
 
-    analyze(
+    completed = analyze(
         modelname=modelname,
         classes_out=classes_out,
         precision=precision,
@@ -190,6 +190,9 @@ def main():
         verbosity_log=args.verbosity_log,
         log_progress=args.log_progress,
     )
+
+    if not completed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

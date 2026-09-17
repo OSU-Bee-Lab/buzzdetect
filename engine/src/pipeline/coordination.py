@@ -194,8 +194,16 @@ class Coordinator:
             self.exit_analysis(ExitSignal(message='Analysis complete', level='INFO', end_reason='completed'))
 
         def watch_queue():
-            exit_message = self.q_earlyexit.get()
-            self.exit_analysis(ExitSignal(message=exit_message, level='WARNING', end_reason='interrupted'))
+            item = self.q_earlyexit.get()
+            # A plain string is a user/signal stop request (interrupt.py); a
+            # (message, end_reason) pair is a worker reporting its own death
+            # (run_worker in analyze.py), which is a distinct reason so the
+            # CLI can exit nonzero for a crash but not for an ordinary stop.
+            if isinstance(item, tuple):
+                message, end_reason = item
+            else:
+                message, end_reason = item, 'interrupted'
+            self.exit_analysis(ExitSignal(message=message, level='WARNING', end_reason=end_reason))
             # wake every worker blocked in a getter
             self._poison(self.q_stream, self.streamers_total)
             self._poison(self.q_analyze, self.analyzers_total)
