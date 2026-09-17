@@ -13,7 +13,7 @@ has already analysed.
 
 Needs an interpreter whose onnxruntime carries a GPU execution provider. On a
 machine with more than one cuDNN on the loader path, pin LD_LIBRARY_PATH or the
-run dies on its first FusedConv (engine/docs/linux-gpu.md).
+run dies on its first FusedConv (docs/linux-gpu.md).
 """
 
 import argparse
