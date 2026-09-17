@@ -248,14 +248,14 @@ function assemblePayload() {
 			throw new Error(
 				`${SHIPLIST} names '${name}', which has no model.onnx. Only ONNX ` +
 					`builds can ship; convert it with buzzdetect-training's ` +
-					`tools/export_onnx.py.`
+					`04_deploy/export_onnx.py.`
 			);
 		}
 		if (!existsSync(join(dir, 'config_model.json'))) {
 			throw new Error(
 				`${SHIPLIST} names '${name}', which has no config_model.json ` +
 					`(the class list and framing parameters). Re-export it with ` +
-					`buzzdetect-training's tools/export_onnx.py.`
+					`buzzdetect-training's 04_deploy/export_onnx.py.`
 			);
 		}
 		// An allowlist, not the directory. engine/models/ is a working

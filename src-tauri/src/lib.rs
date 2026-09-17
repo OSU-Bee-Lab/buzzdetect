@@ -95,6 +95,18 @@ impl RunRecord {
 // Either way the process runs with a working directory containing models/,
 // embedders/ and src/stream/drivers/, which is what makes the relative paths
 // in engine/src/config.py resolve.
+//
+// Picking between the two used to be "does a bundled launcher file exist on
+// disk", which is not the same question as "am I a packaged app": Cargo
+// copies tauri.conf.json's bundle.resources into target/debug/ on every
+// build, dev included, so a target/{debug,release}/engine-payload/ left over
+// from an earlier `npm run build:engine` + `tauri build` (or just a stale
+// target/ dir) made `tauri dev` silently run that frozen, possibly months-old
+// engine and its own frozen-in models/ -- never touching the checkout's
+// engine/ at all, and never seeing a model just dropped into engine/models/.
+// `tauri::is_dev()` is the real signal (set by the Tauri CLI itself, not
+// inferred from what happens to be sitting in target/), so dev always takes
+// the checkout path below and can never pick up a stale bundle.
 struct Engine {
     program: PathBuf,
     // Dev only: the CLI script to hand the interpreter. Empty when the
@@ -112,16 +124,19 @@ fn resolve_engine(app: &AppHandle) -> Result<Engine, String> {
     // Bundled: the onedir engine sits at engine-payload/engine-bin/, and the
     // launcher inside it carries the same name the onefile sidecar used to.
     // The payload directory itself is the working directory, so models/ and
-    // src/stream/drivers/ resolve.
-    if let Ok(resources) = app.path().resource_dir() {
-        let payload = resources.join("engine-payload");
-        let launcher = payload.join("engine-bin").join(SIDECAR_NAME);
-        if launcher.exists() {
-            return Ok(Engine {
-                program: launcher,
-                prefix_args: vec![],
-                workdir: payload,
-            });
+    // src/stream/drivers/ resolve. Skipped entirely in dev -- see the comment
+    // on `Engine` above for why "does the file exist" isn't a safe check.
+    if !tauri::is_dev() {
+        if let Ok(resources) = app.path().resource_dir() {
+            let payload = resources.join("engine-payload");
+            let launcher = payload.join("engine-bin").join(SIDECAR_NAME);
+            if launcher.exists() {
+                return Ok(Engine {
+                    program: launcher,
+                    prefix_args: vec![],
+                    workdir: payload,
+                });
+            }
         }
     }
 
