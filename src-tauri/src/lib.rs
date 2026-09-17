@@ -165,13 +165,16 @@ const REQUIRED_CONFIG_KEYS: [&str; 7] = [
 
 // Files copied out of an imported model directory. Everything else there
 // (TensorFlow weights, training history, analysis output) the engine can't use.
-const IMPORT_FILES: [&str; 5] = [
+const IMPORT_FILES: [&str; 6] = [
     "model.onnx",
     "model.fp16.onnx",
     "config_model.json",
     "translation.csv",
     "weights.csv",
+    "README.md",
 ];
+
+const README: &str = "README.md";
 
 /// Per-user model store, outside the app bundle. `None` if the platform data
 /// dir can't be resolved (shouldn't happen in practice).
@@ -204,6 +207,36 @@ struct ModelInfo {
     /// A user-imported model, so remove_model can delete it. Bundled models are
     /// part of the install and can't be removed here.
     removable: bool,
+    /// config_model.json's optional one-line `description`, written by hand.
+    description: Option<String>,
+    has_readme: bool,
+}
+
+impl ModelInfo {
+    fn read(dir: &std::path::Path, name: &str, removable: bool) -> ModelInfo {
+        let config = read_config(dir).unwrap_or_default();
+        ModelInfo {
+            name: name.to_string(),
+            removable,
+            description: description_of(&config),
+            has_readme: dir.join(README).is_file(),
+        }
+    }
+}
+
+fn read_config(dir: &std::path::Path) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(dir.join(MODEL_MARKER)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// A blank or non-string description is no description.
+fn description_of(config: &serde_json::Value) -> Option<String> {
+    config
+        .get("description")
+        .and_then(|d| d.as_str())
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(str::to_string)
 }
 
 #[tauri::command]
@@ -226,10 +259,7 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
                 if out.iter().any(|m| m.name == name) {
                     continue;
                 }
-                out.push(ModelInfo {
-                    name: name.to_string(),
-                    removable,
-                });
+                out.push(ModelInfo::read(&path, name, removable));
             }
         }
     }
@@ -390,16 +420,99 @@ fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
             return Err(format!("failed to copy the model in: {e}"));
         }
 
-        Ok(ModelInfo {
-            name: name.clone(),
-            removable: true,
-        })
+        Ok(ModelInfo::read(&dest, &name, true))
     })();
 
     if let Some(dir) = scratch {
         let _ = std::fs::remove_dir_all(dir);
     }
     result
+}
+
+/// Everything the model info window shows: the README, and the thresholds that
+/// buzzdetect-training wrote into config_model.json. `thresholds` is a plain
+/// {class: number} map; `threshold_stats` is how much each one rests on. Both
+/// are passed through as-is, and either may be absent.
+#[derive(Serialize)]
+struct ModelDetails {
+    name: String,
+    description: Option<String>,
+    readme: Option<String>,
+    thresholds: Option<serde_json::Value>,
+    threshold_stats: Option<serde_json::Value>,
+}
+
+fn model_details_in(dir: &std::path::Path, name: &str) -> ModelDetails {
+    let config = read_config(dir).unwrap_or_default();
+    let object = |key: &str| config.get(key).filter(|v| v.is_object()).cloned();
+    ModelDetails {
+        name: name.to_string(),
+        description: description_of(&config),
+        readme: std::fs::read_to_string(dir.join(README)).ok(),
+        thresholds: object("thresholds"),
+        threshold_stats: object("threshold_stats"),
+    }
+}
+
+#[tauri::command]
+fn model_details(app: AppHandle, modelname: String) -> Result<ModelDetails, String> {
+    let dir = model_dir(&app, &modelname).ok_or_else(|| format!("model '{modelname}' not found"))?;
+    Ok(model_details_in(&dir, &modelname))
+}
+
+const MODEL_INFO_WINDOW: &str = "model-info";
+
+fn percent_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Open the model info window on `modelname`, or point the open one at it.
+/// async because building a window from a synchronous command deadlocks on
+/// Windows.
+#[tauri::command]
+async fn open_model_info(app: AppHandle, modelname: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(MODEL_INFO_WINDOW) {
+        app.emit_to(MODEL_INFO_WINDOW, "model-info-select", &modelname)
+            .map_err(|e| e.to_string())?;
+        let _ = window.unminimize();
+        return window.set_focus().map_err(|e| e.to_string());
+    }
+    let url = format!("model-info?model={}", percent_encode(&modelname));
+    tauri::WebviewWindowBuilder::new(&app, MODEL_INFO_WINDOW, tauri::WebviewUrl::App(url.into()))
+        .title("Model info")
+        .inner_size(860.0, 640.0)
+        .min_inner_size(480.0, 320.0)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// `rel` resolved inside the model directory, or None if it names nothing
+/// there -- including anything that climbs out of it.
+fn file_in_model_dir(dir: &std::path::Path, rel: &str) -> Option<PathBuf> {
+    let root = dir.canonicalize().ok()?;
+    let path = root.join(rel).canonicalize().ok()?;
+    (path.starts_with(&root) && path.is_file()).then_some(path)
+}
+
+/// Open a file a README links to (e.g. tests/metrics.svg) with the system's
+/// default app.
+#[tauri::command]
+fn open_model_file(app: AppHandle, modelname: String, rel: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = model_dir(&app, &modelname).ok_or_else(|| format!("model '{modelname}' not found"))?;
+    let path = file_in_model_dir(&dir, &rel)
+        .ok_or_else(|| format!("{rel} isn't in this model's folder"))?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 /// Delete a user-imported model. Bundled models aren't in the user store and
@@ -1127,6 +1240,9 @@ pub fn run() {
             attach_analysis,
             list_models,
             get_model_classes,
+            model_details,
+            open_model_info,
+            open_model_file,
             import_model,
             remove_model,
             gpu_status,
@@ -1399,6 +1515,70 @@ mod tests {
         assert_eq!(root.file_name().unwrap(), "redwood");
         assert!(validate_model_dir(&root).is_ok());
         std::fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    #[test]
+    fn a_model_without_the_optional_keys_has_no_details() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-details-bare");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config_model.json"), good_config()).unwrap();
+
+        let info = ModelInfo::read(&dir, "bare", false);
+        assert_eq!(info.description, None);
+        assert!(!info.has_readme);
+        let details = model_details_in(&dir, "bare");
+        assert!(details.readme.is_none() && details.thresholds.is_none());
+    }
+
+    #[test]
+    fn description_thresholds_and_readme_are_read() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-details-full");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = good_config().replacen(
+            '{',
+            r#"{"description": "  Buzz.  ", "thresholds": {"a": -1.2},
+                "threshold_stats": {"a": {"folds": 8}},"#,
+            1,
+        );
+        std::fs::write(dir.join("config_model.json"), config).unwrap();
+        std::fs::write(dir.join("README.md"), "# hi").unwrap();
+
+        let info = ModelInfo::read(&dir, "full", true);
+        assert_eq!(info.description.as_deref(), Some("Buzz."));
+        assert!(info.has_readme);
+        let details = model_details_in(&dir, "full");
+        assert_eq!(details.readme.as_deref(), Some("# hi"));
+        assert_eq!(details.thresholds.unwrap()["a"], -1.2);
+        assert_eq!(details.threshold_stats.unwrap()["a"]["folds"], 8);
+    }
+
+    #[test]
+    fn a_blank_description_is_none() {
+        let config: serde_json::Value = serde_json::json!({"description": "   "});
+        assert_eq!(description_of(&config), None);
+        assert_eq!(description_of(&serde_json::json!({"description": 3})), None);
+    }
+
+    #[test]
+    fn a_readme_link_cannot_leave_the_model_folder() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-details-links");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(dir.join("tests").join("metrics.svg"), "<svg/>").unwrap();
+        std::fs::write(dir.parent().unwrap().join("buzzdetect-outside.txt"), "x").unwrap();
+
+        assert!(file_in_model_dir(&dir, "tests/metrics.svg").is_some());
+        assert!(file_in_model_dir(&dir, "../buzzdetect-outside.txt").is_none());
+        assert!(file_in_model_dir(&dir, "tests").is_none());
+        assert!(file_in_model_dir(&dir, "missing.svg").is_none());
+    }
+
+    #[test]
+    fn a_model_name_is_encoded_for_the_window_url() {
+        assert_eq!(percent_encode("model_general_v3"), "model_general_v3");
+        assert_eq!(percent_encode("a b&c"), "a%20b%26c");
     }
 
     #[test]

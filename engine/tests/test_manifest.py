@@ -40,6 +40,15 @@ class TestBuildManifest(unittest.TestCase):
     def test_records_every_locked_key(self):
         self.assertEqual(set(activations()), set(mf.KEYS_LOCKED) | {'output_mode'})
 
+    def test_model_facts_are_recorded_when_known(self):
+        m = mf.build_manifest('m', 1, None, ['ins_buzz'], framelength_s=0.96,
+                              thresholds={'ins_buzz': -1.2})
+        self.assertEqual(m['framelength_s'], 0.96)
+        self.assertEqual(m['thresholds'], {'ins_buzz': -1.2})
+
+    def test_a_model_without_thresholds_records_no_key(self):
+        self.assertNotIn('thresholds', mf.build_manifest('m', 1, None, ['a'], framelength_s=0.96))
+
 
 class TestReadWrite(unittest.TestCase):
     def setUp(self):
@@ -100,6 +109,13 @@ class TestDiff(unittest.TestCase):
                 current[key] = ['sentinel'] if key == 'classes_out' else 'sentinel'
                 self.assertTrue(mf.diff_manifests(activations(), current))
 
+    def test_thresholds_do_not_lock_the_folder(self):
+        # A re-exported model can change its suggestion; results already
+        # written are still the same schema.
+        old = mf.build_manifest('m', 1, None, ['a'], thresholds={'a': -1.0})
+        new = mf.build_manifest('m', 1, None, ['a'], thresholds={'a': -2.0})
+        self.assertEqual(mf.diff_manifests(old, new), [])
+
     def test_a_key_outside_the_locked_set_is_ignored(self):
         current = dict(activations())
         current['something_new'] = 'value'
@@ -125,6 +141,23 @@ class TestCheckOrWrite(unittest.TestCase):
         ok, msg = mf.check_or_write_manifest(self.dir_out, activations(['frog', 'ins_buzz']))
         self.assertTrue(ok)
         self.assertIsNone(msg)
+
+    def test_a_manifest_from_before_the_info_keys_gains_them(self):
+        mf.write_manifest(self.dir_out, activations())
+        current = mf.build_manifest('m', 1, None, ['frog', 'ins_buzz'], framelength_s=0.96,
+                                    thresholds={'ins_buzz': -1.2})
+        ok, _ = mf.check_or_write_manifest(self.dir_out, current)
+        self.assertTrue(ok)
+        written = mf.read_manifest(self.dir_out)
+        self.assertEqual(written['thresholds'], {'ins_buzz': -1.2})
+        self.assertEqual(written['framelength_s'], 0.96)
+
+    def test_existing_info_is_not_rewritten(self):
+        first = mf.build_manifest('m', 1, None, ['a'], thresholds={'a': -1.0})
+        mf.write_manifest(self.dir_out, first)
+        mf.check_or_write_manifest(
+            self.dir_out, mf.build_manifest('m', 1, None, ['a'], thresholds={'a': -2.0}))
+        self.assertEqual(mf.read_manifest(self.dir_out)['thresholds'], {'a': -1.0})
 
     def test_conflicting_settings_are_refused_and_nothing_is_overwritten(self):
         mf.check_or_write_manifest(self.dir_out, activations())

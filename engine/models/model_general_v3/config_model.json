@@ -1,4 +1,5 @@
 {
+  "description": "General insect flight buzz detector (ins_buzz), trained on soybean fields in central Ohio; mostly honey bees.",
   "classes": [
     "mech_train",
     "ins_trill",
@@ -19,5 +20,8 @@
   "digits_time": 2,
   "digits_results": 2,
   "samples_hop": 15360,
-  "samples_min": 15600
+  "samples_min": 15600,
+  "thresholds": {
+    "ins_buzz": -1.2
+  }
 }

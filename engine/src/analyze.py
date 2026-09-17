@@ -301,6 +301,8 @@ class Analyzer:
             framehop_prop=self.framehop_prop,
             precision=self.precision,
             classes_out=self.classes_out,
+            framelength_s=self.model.framelength_s,
+            thresholds=self.model.config.get('thresholds'),
         )
         ok, msg = check_or_write_manifest(self.dir_out, manifest)
         if not ok:

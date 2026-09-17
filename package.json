@@ -20,7 +20,9 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@tauri-apps/plugin-opener": "^2",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.13"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

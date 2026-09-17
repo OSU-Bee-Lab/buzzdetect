@@ -69,7 +69,9 @@ const MODEL_FILES = [
 	'model.fp16.onnx',
 	'config_model.json',
 	'translation.csv',
-	'weights.csv'
+	'weights.csv',
+	// Shown in the app's model info window.
+	'README.md'
 ];
 
 const CUDA = process.argv.includes('--cuda');

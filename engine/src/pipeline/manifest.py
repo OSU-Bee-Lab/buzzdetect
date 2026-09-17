@@ -9,9 +9,19 @@ FNAME_MANIFEST = 'buzzdetect_manifest.json'
 # fields that must match for a run to safely write into an existing output folder
 KEYS_LOCKED = ('modelname', 'output_mode', 'classes_out', 'precision', 'framehop_prop')
 
+# Recorded for whoever reads the results, never compared: both follow from the
+# model, which is locked already. `thresholds` is the model's suggested
+# per-class threshold (config_model.json, written by buzzdetect-training), so a
+# downstream tool can call detections without finding the model; absent when
+# the model suggests none. A manifest written before these existed gets them
+# added on the next run into its folder.
+KEYS_INFO = ('framelength_s', 'thresholds')
 
-def build_manifest(modelname, framehop_prop, precision, classes_out):
+
+def build_manifest(modelname, framehop_prop, precision, classes_out,
+                   framelength_s=None, thresholds=None):
     output_mode = 'detections' if precision is not None else 'activations'
+    info = {'framelength_s': framelength_s, 'thresholds': thresholds}
     return {
         'modelname': modelname,
         'output_mode': output_mode,
@@ -19,6 +29,7 @@ def build_manifest(modelname, framehop_prop, precision, classes_out):
         'classes_out': sorted(classes_out) if output_mode == 'activations' else None,
         'precision': precision,
         'framehop_prop': framehop_prop,
+        **{k: v for k, v in info.items() if v is not None},
     }
 
 
@@ -73,6 +84,10 @@ def check_or_write_manifest(dir_out, manifest):
         return True, None
 
     conflicts = diff_manifests(existing, manifest)
+    if not conflicts:
+        missing = {k: manifest[k] for k in KEYS_INFO if k in manifest and k not in existing}
+        if missing:
+            write_manifest(dir_out, {**existing, **missing})
     if conflicts:
         msg = (
             f"Results have already been written to '{dir_out}' using different settings, so new "

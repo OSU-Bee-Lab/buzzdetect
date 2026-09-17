@@ -10,15 +10,11 @@
 	import DirRow from '$lib/DirRow.svelte';
 	import FileRows from '$lib/FileRows.svelte';
 	import ProgressBar from '$lib/ProgressBar.svelte';
+	import type { ModelInfo } from '$lib/modelInfo';
 
 	interface Manifest {
 		modelname: string;
 		classes_out: string[] | null;
-	}
-
-	interface ModelInfo {
-		name: string;
-		removable: boolean;
 	}
 
 	let models = $state<ModelInfo[]>([]);
@@ -239,9 +235,15 @@
 		settings.save();
 	}
 
-	let currentModelRemovable = $derived(
-		models.find((m) => m.name === settings.value.modelname)?.removable ?? false
-	);
+	const currentModel = $derived(models.find((m) => m.name === settings.value.modelname));
+	let currentModelRemovable = $derived(currentModel?.removable ?? false);
+
+	function openModelInfo() {
+		modelActionError = null;
+		invoke('open_model_info', { modelname: settings.value.modelname }).catch(
+			(e) => (modelActionError = String(e))
+		);
+	}
 
 	async function reloadModels(select?: string) {
 		models = await invoke<ModelInfo[]>('list_models');
@@ -469,9 +471,19 @@
 			</p>
 		{/if}
 
-		<label>
-			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span></span>
+		<!-- for= rather than nesting alone: the Info button is the label's first
+		     labelable descendant, so without it a click on "Model" would press it. -->
+		<label for="model-select">
+			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
+				<button
+					type="button"
+					class="info-btn"
+					disabled={!currentModel?.has_readme}
+					data-tooltip={currentModel?.has_readme ? undefined : 'This model has no README.'}
+					onclick={openModelInfo}>Info</button
+				></span>
 			<select
+				id="model-select"
 				bind:value={settings.value.modelname}
 				onchange={() => {
 					if (manifest) {
@@ -488,6 +500,9 @@
 					<option value={m.name}>{m.name}</option>
 				{/each}
 			</select>
+			{#if currentModel?.description}
+				<span class="model-description">{currentModel.description}</span>
+			{/if}
 			<span class="model-actions">
 				<button type="button" onclick={importModel}>Import model (.zip)…</button>
 				{#if currentModelRemovable}
@@ -1098,6 +1113,25 @@ Can produce very large log files."
 
 	.error {
 		color: #d33;
+	}
+
+	.info-btn {
+		margin-left: auto;
+		padding: 0.05rem 0.45rem;
+		font-size: 0.75rem;
+	}
+
+	.info-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+
+	.model-description {
+		display: block;
+		margin-top: 0.3rem;
+		font-size: 0.8rem;
+		opacity: 0.7;
+		line-height: 1.3;
 	}
 
 	.model-actions {
