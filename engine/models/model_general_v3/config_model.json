@@ -1,5 +1,5 @@
 {
-  "description": "General insect flight buzz detector (ins_buzz), trained on soybean fields in central Ohio; mostly honey bees.",
+  "description": "A general buzz-detector. The same model used in the original buzzdetect publication. Only the ins_buzz neuron is reliable.",
   "classes": [
     "mech_train",
     "ins_trill",
