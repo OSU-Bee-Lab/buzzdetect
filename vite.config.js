@@ -26,7 +26,7 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri` and `engine` (venvs blow past inotify watch limits)
-      ignored: ["**/src-tauri/**", "**/engine/**"],
+      ignored: ["**/src-tauri/**", "**/engine/**", "**/.venv*/**"],
     },
   },
 }));
