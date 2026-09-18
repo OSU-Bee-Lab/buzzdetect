@@ -1,0 +1,28 @@
+{
+  "classes": [
+    "ambient_background",
+    "ambient_music",
+    "ambient_noise",
+    "ambient_rain",
+    "ambient_ringing",
+    "animal",
+    "human",
+    "ins_buzz",
+    "ins_trill",
+    "mech_ac",
+    "mech_auto",
+    "mech_beep",
+    "mech_hum",
+    "mech_hum_chainsaw",
+    "mech_plane",
+    "mech_tool",
+    "static"
+  ],
+  "samplerate": 16000,
+  "framelength_s": 0.96,
+  "digits_time": 2,
+  "digits_results": 8,
+  "samples_hop": 15360,
+  "samples_min": 15600,
+  "description": "An experimental model shipping with buzzdetect v2.0."
+}

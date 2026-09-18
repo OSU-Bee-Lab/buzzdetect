@@ -4,6 +4,7 @@
 
 # Unignore these shared models
 !model_general_v3/
+!yamnet_large_general/
 
 # Within unignored directories, ignore output* and tests/results*
 */output*
