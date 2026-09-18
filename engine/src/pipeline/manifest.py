@@ -17,11 +17,21 @@ KEYS_LOCKED = ('modelname', 'output_mode', 'classes_out', 'precision', 'framehop
 # added on the next run into its folder.
 KEYS_INFO = ('framelength_s', 'thresholds')
 
+# Also informational, but describing the most recent run rather than the model,
+# so a later run into the folder overwrites them instead of back-filling. The
+# app's run history is built from these.
+KEYS_LATEST = ('dir_audio', 'dir_out')
+
 
 def build_manifest(modelname, framehop_prop, precision, classes_out,
-                   framelength_s=None, thresholds=None):
+                   framelength_s=None, thresholds=None, dir_audio=None, dir_out=None):
     output_mode = 'detections' if precision is not None else 'activations'
-    info = {'framelength_s': framelength_s, 'thresholds': thresholds}
+    info = {
+        'framelength_s': framelength_s,
+        'thresholds': thresholds,
+        'dir_audio': os.path.abspath(dir_audio) if dir_audio else None,
+        'dir_out': os.path.abspath(dir_out) if dir_out else None,
+    }
     return {
         'modelname': modelname,
         'output_mode': output_mode,
@@ -85,9 +95,11 @@ def check_or_write_manifest(dir_out, manifest):
 
     conflicts = diff_manifests(existing, manifest)
     if not conflicts:
-        missing = {k: manifest[k] for k in KEYS_INFO if k in manifest and k not in existing}
-        if missing:
-            write_manifest(dir_out, {**existing, **missing})
+        update = {k: manifest[k] for k in KEYS_INFO if k in manifest and k not in existing}
+        update.update({k: manifest[k] for k in KEYS_LATEST
+                       if k in manifest and existing.get(k) != manifest[k]})
+        if update:
+            write_manifest(dir_out, {**existing, **update})
     if conflicts:
         msg = (
             f"Results have already been written to '{dir_out}' using different settings, so new "

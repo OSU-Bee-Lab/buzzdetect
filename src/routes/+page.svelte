@@ -17,7 +17,19 @@
 		classes_out: string[] | null;
 	}
 
+	interface HistoryEntry {
+		started_at: number; // unix seconds
+		status: 'running' | 'completed' | 'stopped' | 'errored' | 'interrupted';
+		manifest: {
+			modelname: string;
+			dir_audio?: string;
+			dir_out?: string;
+			classes_out: string[] | null;
+		};
+	}
+
 	let models = $state<ModelInfo[]>([]);
+	let history = $state<HistoryEntry[]>([]);
 	let modelActionError = $state<string | null>(null);
 	let availableClasses = $state<string[]>([]);
 	let startError = $state<string | null>(null);
@@ -80,8 +92,11 @@
 		const unlistenLog = listen<{ line: string; stderr: boolean; seq: number }>('engine-log', (e) =>
 			deliver(() => run.handleLog(e.payload.line, e.payload.seq))
 		);
+		loadHistory();
 		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) =>
 			deliver(() => {
+				// The backend records the outcome before it emits this.
+				loadHistory();
 				if (!run.running) return;
 				// A cancelled engine is killed, so it exits by signal (null code) or
 				// non-zero -- expected, not an error worth showing.
@@ -338,6 +353,33 @@
 		settings.save();
 	}
 
+	async function loadHistory() {
+		try {
+			history = await invoke<HistoryEntry[]>('list_history');
+		} catch {
+			history = [];
+		}
+	}
+
+	async function clearHistory() {
+		await invoke('clear_history');
+		history = [];
+	}
+
+	// Refill the settings from a past run. dirOut counts as touched so the
+	// model change below doesn't swap it for the per-model default.
+	async function useHistoryEntry(m: HistoryEntry['manifest']) {
+		settings.value.modelname = m.modelname;
+		if (m.dir_audio) settings.value.dirAudio = m.dir_audio;
+		if (m.dir_out) {
+			settings.value.dirOut = m.dir_out;
+			settings.value.dirOutTouched = true;
+		}
+		if (m.classes_out) settings.value.classesOut = m.classes_out;
+		settings.save();
+		await onModelChange();
+	}
+
 	async function start() {
 		startError = null;
 		if (settings.value.classesOut.length === 0) {
@@ -370,6 +412,7 @@
 			startError = String(e);
 			run.stop(startError);
 		}
+		loadHistory();
 	}
 
 	async function cancel() {
@@ -866,6 +909,27 @@ Can produce very large log files."
 			{/each}
 		</div>
 
+		<details class="history">
+			<summary>Past runs ({history.length})</summary>
+			{#if history.length}
+				<ul>
+					{#each history as h (h.started_at + (h.manifest.dir_out ?? ''))}
+						<li>
+							<div>
+								{new Date(h.started_at * 1000).toLocaleString()} · {h.manifest.modelname} · {h.status}
+							</div>
+							<div class="history-path">{h.manifest.dir_audio ?? '?'} → {h.manifest.dir_out ?? '?'}</div>
+							<button
+								disabled={run.running || run.stopping}
+								onclick={() => useHistoryEntry(h.manifest)}>Use these settings</button
+							>
+						</li>
+					{/each}
+				</ul>
+				<button onclick={clearHistory}>Clear history</button>
+			{/if}
+		</details>
+
 		<details class="log" bind:this={logDetails} ontoggle={scrollLogToBottom}>
 			<summary>Log ({run.logLines.length})</summary>
 			<pre bind:this={logPre} onscroll={onLogScroll}>{run.logLines.join('\n')}</pre>
@@ -1327,6 +1391,29 @@ Can produce very large log files."
 	.log {
 		font-size: 0.8rem;
 		flex-shrink: 0;
+	}
+
+	.history {
+		font-size: 0.8rem;
+		flex-shrink: 0;
+	}
+
+	.history ul {
+		list-style: none;
+		margin: 0.25rem 0;
+		padding: 0;
+		max-height: 200px;
+		overflow: auto;
+	}
+
+	.history li {
+		padding: 0.35rem 0;
+		border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+	}
+
+	.history-path {
+		opacity: 0.7;
+		word-break: break-all;
 	}
 
 	.log pre {

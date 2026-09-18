@@ -307,6 +307,8 @@ class Analyzer:
             classes_out=self.classes_out,
             framelength_s=self.model.framelength_s,
             thresholds=self.model.config.get('thresholds'),
+            dir_audio=self.dir_audio,
+            dir_out=self.dir_out,
         )
         ok, msg = check_or_write_manifest(self.dir_out, manifest)
         if not ok:

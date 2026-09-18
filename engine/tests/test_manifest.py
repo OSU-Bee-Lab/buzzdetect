@@ -40,6 +40,11 @@ class TestBuildManifest(unittest.TestCase):
     def test_records_every_locked_key(self):
         self.assertEqual(set(activations()), set(mf.KEYS_LOCKED) | {'output_mode'})
 
+    def test_paths_are_recorded_absolute_when_given(self):
+        m = mf.build_manifest('m', 1, None, ['a'], dir_audio='in', dir_out='out')
+        self.assertEqual(m['dir_audio'], os.path.abspath('in'))
+        self.assertEqual(m['dir_out'], os.path.abspath('out'))
+
     def test_model_facts_are_recorded_when_known(self):
         m = mf.build_manifest('m', 1, None, ['ins_buzz'], framelength_s=0.96,
                               thresholds={'ins_buzz': -1.2})
@@ -158,6 +163,14 @@ class TestCheckOrWrite(unittest.TestCase):
         mf.check_or_write_manifest(
             self.dir_out, mf.build_manifest('m', 1, None, ['a'], thresholds={'a': -2.0}))
         self.assertEqual(mf.read_manifest(self.dir_out)['thresholds'], {'a': -1.0})
+
+    def test_paths_follow_the_latest_run(self):
+        def run(dir_audio):
+            return mf.build_manifest('m', 1, None, ['a'], dir_audio=dir_audio, dir_out=self.dir_out)
+        mf.check_or_write_manifest(self.dir_out, run('/audio/one'))
+        ok, _ = mf.check_or_write_manifest(self.dir_out, run('/audio/two'))
+        self.assertTrue(ok)
+        self.assertEqual(mf.read_manifest(self.dir_out)['dir_audio'], os.path.abspath('/audio/two'))
 
     def test_conflicting_settings_are_refused_and_nothing_is_overwritten(self):
         mf.check_or_write_manifest(self.dir_out, activations())

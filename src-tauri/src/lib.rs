@@ -729,6 +729,122 @@ fn kill_pid(pid: u32) {
         .status();
 }
 
+// Set when the user asks for a stop, so the run's history entry can say
+// "stopped" rather than "errored" for the non-zero exit that follows.
+static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+const HISTORY_FILE: &str = "run_history.json";
+const HISTORY_MAX: usize = 200;
+
+fn history_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_local_data_dir().ok().map(|d| d.join(HISTORY_FILE))
+}
+
+fn read_history_file(path: &std::path::Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// One history entry, written when a run is launched. It carries the keys of
+/// the manifest the engine is about to write (engine/src/pipeline/manifest.py)
+/// for the ones the app knows, so it reads like one, but it is built from the
+/// launch settings: the engine writes the real file some seconds later, after
+/// it has loaded the model, and a run that dies or is refused before then
+/// should still be on record.
+fn history_entry(settings: &AnalysisSettings, started_at: u64) -> serde_json::Value {
+    let mut classes = settings.classes_out.clone();
+    classes.sort();
+    serde_json::json!({
+        "started_at": started_at,
+        // "running" until the waiter thread sees the child go; see finish_history.
+        "status": "running",
+        "manifest": {
+            "modelname": settings.modelname,
+            "classes_out": classes,
+            "dir_audio": settings.dir_audio,
+            "dir_out": settings.dir_out,
+        },
+    })
+}
+
+fn write_history_file(path: &std::path::Path, entries: &[serde_json::Value]) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string_pretty(entries) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Appends the entry and returns its `started_at`, which finish_history uses
+/// to find it again (only one run is ever live, so it is unique).
+fn record_history(app: &AppHandle, settings: &AnalysisSettings) -> u64 {
+    let now = unix_now();
+    let Some(path) = history_path(app) else { return now };
+    let mut entries = read_history_file(&path);
+    entries.push(history_entry(settings, now));
+    if entries.len() > HISTORY_MAX {
+        entries.drain(..entries.len() - HISTORY_MAX);
+    }
+    write_history_file(&path, &entries);
+    now
+}
+
+/// How a run ended, from what the Rust side can see: whether a stop was asked
+/// for, and the exit code. A run the engine itself refuses (a manifest
+/// mismatch, no audio files) is an ordinary exit and reads as "completed";
+/// the run view has the reason.
+fn run_status(stop_requested: bool, code: Option<i32>) -> &'static str {
+    if stop_requested {
+        "stopped"
+    } else if code == Some(0) {
+        "completed"
+    } else {
+        "errored"
+    }
+}
+
+fn finish_history(app: &AppHandle, started_at: u64, status: &str) {
+    let Some(path) = history_path(app) else { return };
+    let mut entries = read_history_file(&path);
+    if let Some(entry) = entries.iter_mut().rev().find(|e| e["started_at"] == started_at) {
+        entry["status"] = status.into();
+        write_history_file(&path, &entries);
+    }
+}
+
+/// Past runs, newest first.
+#[tauri::command]
+fn list_history(app: AppHandle, state: State<AnalysisState>) -> Vec<serde_json::Value> {
+    let mut entries = history_path(&app).map(|p| read_history_file(&p)).unwrap_or_default();
+    // "running" with nothing running means the app went away mid-run.
+    let live = state.0.lock().map(|g| g.is_some()).unwrap_or(false);
+    let newest = entries.len().saturating_sub(1);
+    for (i, e) in entries.iter_mut().enumerate() {
+        if e["status"] == "running" && !(live && i == newest) {
+            e["status"] = "interrupted".into();
+        }
+    }
+    entries.reverse();
+    entries
+}
+
+#[tauri::command]
+fn clear_history(app: AppHandle) {
+    if let Some(path) = history_path(&app) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct Manifest {
     modelname: String,
@@ -966,6 +1082,8 @@ fn start_analysis(
     // polls it to know when to emit engine-exit.
     *guard = Some(child);
     drop(guard);
+    STOP_REQUESTED.store(false, Ordering::SeqCst);
+    let started_at = record_history(&app, &settings);
 
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -977,6 +1095,11 @@ fn start_analysis(
         if let Some(child) = guard.as_mut() {
             match child.try_wait() {
                 Ok(Some(status)) => {
+                    finish_history(
+                        &app_for_wait,
+                        started_at,
+                        run_status(STOP_REQUESTED.load(Ordering::SeqCst), status.code()),
+                    );
                     let _ = app_for_wait.emit(
                         "engine-exit",
                         EngineExit {
@@ -1114,6 +1237,7 @@ fn signal_engine(pid: u32, _signal: i32) {
 
 #[tauri::command]
 fn cancel_analysis(app: AppHandle, state: State<AnalysisState>) -> Result<(), String> {
+    STOP_REQUESTED.store(true, Ordering::SeqCst);
     let pid = {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         match guard.as_ref() {
@@ -1261,7 +1385,9 @@ pub fn run() {
             import_model,
             remove_model,
             gpu_status,
-            read_manifest
+            read_manifest,
+            list_history,
+            clear_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1608,5 +1734,24 @@ mod tests {
         )
         .unwrap();
         assert!(validate_model_dir(&dir).is_err());
+    }
+
+    #[test]
+    fn a_launch_becomes_a_manifest_shaped_history_entry() {
+        let entry = history_entry(&minimal(), 1000);
+        assert_eq!(entry["started_at"], 1000);
+        assert_eq!(entry["manifest"]["modelname"], "model_general_v3");
+        assert_eq!(entry["manifest"]["dir_audio"], "/data/audio");
+        assert!(entry["manifest"]["classes_out"].is_array());
+        assert_eq!(entry["status"], "running");
+    }
+
+    #[test]
+    fn a_runs_status_follows_the_stop_request_before_the_exit_code() {
+        assert_eq!(run_status(false, Some(0)), "completed");
+        assert_eq!(run_status(false, Some(1)), "errored");
+        assert_eq!(run_status(false, None), "errored");
+        assert_eq!(run_status(true, None), "stopped");
+        assert_eq!(run_status(true, Some(0)), "stopped");
     }
 }
