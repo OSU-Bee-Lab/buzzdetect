@@ -75,6 +75,14 @@ class Coordinator:
 
         self.end_reason = None
 
+        # Run tally for the closing summary. files_queued is filled by the
+        # analysis before workers start; the rest is counted as chunks reach
+        # the writer.
+        self.files_queued: set[str] = set()
+        self.files_touched: set[str] = set()
+        self.files_complete: set[str] = set()
+        self.audio_seconds = 0.0
+
     def log(self, msg, level_str):
         self.q_log.put(AssignLog(message=f'coordinator: {msg}', level_str=level_str))
 
@@ -129,6 +137,10 @@ class Coordinator:
         with self._lock:
             self.assigned_chunks[a_chunk.file.ident].chunks_streamed.remove(a_chunk.chunk)
             fully_analyzed = self._ident_fully_analyzed(a_chunk.file.ident)
+            self.audio_seconds += a_chunk.chunk[1] - a_chunk.chunk[0]
+            self.files_touched.add(a_chunk.file.ident)
+            if fully_analyzed:
+                self.files_complete.add(a_chunk.file.ident)
 
         return a_chunk, fully_analyzed
 

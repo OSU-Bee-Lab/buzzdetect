@@ -385,6 +385,7 @@ class Analyzer:
             return False
 
         for a_file in assignments_unfinished:
+            self.coordinator.files_queued.add(a_file.ident)
             self.coordinator.q_stream.put(a_file)
         return True
 
@@ -406,6 +407,31 @@ class Analyzer:
                 os.remove(p)
             except OSError:
                 pass
+
+    _END_STATUS = {
+        'completed': 'Analysis finished normally.',
+        'interrupted': 'Analysis was stopped before finishing.',
+        'failed': 'Analysis failed: a worker crashed.',
+    }
+
+    def _summary(self) -> str:
+        c = self.coordinator
+        n_done = len(c.files_complete)
+        n_partial = len(c.files_touched - c.files_complete)
+        n_unstarted = len(c.files_queued - c.files_touched)
+
+        counts = [f'{n} files {label}' for n, label in
+                  ((n_done, 'analyzed'), (n_partial, 'partly analyzed'), (n_unstarted, 'not yet started'))
+                  if n > 0]
+
+        elapsed = self.timer_total.get_total()
+        lines = ['']
+        if counts:
+            lines.append('; '.join(counts))
+        rate = f' (rate: {c.audio_seconds / elapsed:.1f})' if elapsed > 0 else ''
+        lines.append(f'{c.audio_seconds:,.1f}s of audio analyzed in {elapsed:,.1f}s{rate}')
+        lines.append(self._END_STATUS.get(c.end_reason, f'Analysis ended: {c.end_reason}.'))
+        return '\n'.join(lines)
 
     def run(self) -> bool:
         """Execute the complete analysis workflow. Returns False only if a
@@ -463,9 +489,7 @@ class Analyzer:
 
 
         self.timer_total.stop()
-        if self.coordinator.end_reason == 'completed':
-            analysis_time = self.timer_total.get_total()
-            self.coordinator.q_log.put(AssignLog(message=f'\nAll files analyzed and cleaned.\nTotal analysis time: {analysis_time.__format__(",")}s', level_str='INFO', terminate=False))
+        self.coordinator.q_log.put(AssignLog(message=self._summary(), level_str='INFO', terminate=False))
 
         self.coordinator.q_log.put(AssignLog(message='', level_str='INFO', terminate=True))
         self.thread_logger.join()
