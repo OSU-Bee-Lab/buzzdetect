@@ -1,2 +1,2 @@
-yamnet_moderate
+yamnet_large_general
 model_general_v3
