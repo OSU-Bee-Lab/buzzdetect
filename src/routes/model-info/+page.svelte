@@ -25,7 +25,9 @@
 
 	const rows = $derived(details ? thresholdRows(details) : []);
 	const target = $derived(details ? fprTarget(details) : null);
-	const hasStats = $derived(rows.some((r) => r.ci95 || r.folds || r.events !== null));
+	const hasStats = $derived(
+		rows.some((r) => r.sensitivity !== null || r.sensitivityExclQuiet !== null || r.folds || r.events !== null)
+	);
 	// README content comes from model folders, including ones a collaborator
 	// sent, and this webview can invoke app commands -- so it's sanitized.
 	const html = $derived(
@@ -107,9 +109,9 @@
 							<th>Class</th>
 							<th>Threshold</th>
 							{#if hasStats}
-								<th>95% CI</th>
-								<th>SD</th>
-								<th>Deployments</th>
+								<th>Sensitivity (all buzzes)</th>
+								<th>Sensitivity (excluding quiet)</th>
+								<th>Deployments tested</th>
 								<th>Events</th>
 							{/if}
 						</tr>
@@ -120,8 +122,8 @@
 								<td>{r.cls}</td>
 								<td class="num">{fmt(r.threshold)}</td>
 								{#if hasStats}
-									<td class="num">{r.ci95 ? `${fmt(r.ci95[0])} to ${fmt(r.ci95[1])}` : ''}</td>
-									<td class="num">{r.sd !== null ? fmt(r.sd) : ''}</td>
+									<td class="num">{r.sensitivity !== null ? fmt(r.sensitivity) : ''}</td>
+									<td class="num">{r.sensitivityExclQuiet !== null ? fmt(r.sensitivityExclQuiet) : ''}</td>
 									<td class="num">{r.folds ?? ''}</td>
 									<td class="num">{r.events ?? ''}</td>
 								{/if}

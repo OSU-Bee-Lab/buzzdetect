@@ -19,7 +19,14 @@ describe('thresholdRows', () => {
 
 	it('shows a bare threshold with no stats', () => {
 		expect(thresholdRows(details({ thresholds: { ins_buzz: -1.2 } }))).toEqual([
-			{ cls: 'ins_buzz', threshold: -1.2, ci95: null, sd: null, folds: null, events: null }
+			{
+				cls: 'ins_buzz',
+				threshold: -1.2,
+				sensitivity: null,
+				sensitivityExclQuiet: null,
+				folds: null,
+				events: null
+			}
 		]);
 	});
 
@@ -28,14 +35,19 @@ describe('thresholdRows', () => {
 			details({
 				thresholds: { frog: 0.1, ins_buzz: -0.6 },
 				threshold_stats: {
-					ins_buzz: { ci95_low: -1, ci95_high: -0.2, sd: 0.3, folds: 7, folds_total: 8, events: 400 },
+					ins_buzz: { sensitivity: 0.4, sensitivity_exclquiet: 0.5, folds: 7, folds_total: 8, events: 400 },
 					frog: { folds: 2, events: 5 }
 				}
 			})
 		);
 		expect(rows.map((r) => r.cls)).toEqual(['ins_buzz', 'frog']);
-		expect(rows[0]).toMatchObject({ ci95: [-1, -0.2], sd: 0.3, folds: '7/8', events: 400 });
-		expect(rows[1]).toMatchObject({ ci95: null, folds: '2', events: 5 });
+		expect(rows[0]).toMatchObject({
+			sensitivity: 0.4,
+			sensitivityExclQuiet: 0.5,
+			folds: '7/8',
+			events: 400
+		});
+		expect(rows[1]).toMatchObject({ sensitivity: null, sensitivityExclQuiet: null, folds: '2', events: 5 });
 	});
 
 	it('skips a class whose threshold is not a number', () => {

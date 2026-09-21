@@ -2,7 +2,9 @@
 // `model_details` returns, and the rows of the thresholds table built from
 // them. `thresholds` and `threshold_stats` are written by buzzdetect-training's
 // 03_train/thresholds.py; a model exported before that, or by hand, may carry
-// thresholds with no stats, or neither.
+// thresholds with no stats, or neither. config_model.json is the only place
+// this table lives -- there used to be a duplicate rendering of it in the
+// model's README, which 03_train/thresholds.py no longer generates.
 
 export interface ModelInfo {
 	name: string;
@@ -17,9 +19,8 @@ export interface ThresholdStat {
 	folds_total?: number;
 	events?: number;
 	frames?: number;
-	sd?: number;
-	ci95_low?: number;
-	ci95_high?: number;
+	sensitivity?: number;
+	sensitivity_exclquiet?: number;
 }
 
 export interface ModelDetails {
@@ -33,8 +34,8 @@ export interface ModelDetails {
 export interface ThresholdRow {
 	cls: string;
 	threshold: number;
-	ci95: [number, number] | null;
-	sd: number | null;
+	sensitivity: number | null;
+	sensitivityExclQuiet: number | null;
 	folds: string | null;
 	events: number | null;
 }
@@ -51,8 +52,8 @@ export function thresholdRows(details: ModelDetails): ThresholdRow[] {
 			return {
 				cls,
 				threshold,
-				ci95: num(s.ci95_low) && num(s.ci95_high) ? [s.ci95_low, s.ci95_high] : null,
-				sd: num(s.sd) ? s.sd : null,
+				sensitivity: num(s.sensitivity) ? s.sensitivity : null,
+				sensitivityExclQuiet: num(s.sensitivity_exclquiet) ? s.sensitivity_exclquiet : null,
 				folds: num(s.folds)
 					? num(s.folds_total)
 						? `${s.folds}/${s.folds_total}`
