@@ -187,7 +187,11 @@ jobs:
       # NVIDIA runtime, which the plain build deliberately doesn't carry (see
       # probe_gpu: Linux GPU users bring their own). linuxdeploy treats those
       # unresolved deps as fatal ("Could not find dependency: libcublas.so.12"),
-      # and tauri gives us no way to pass it --exclude-library, so wrap it.
+      # and --exclude-library doesn't help: that failure comes while resolving
+      # dependencies, before exclusions apply. tauri gives no hook between
+      # linuxdeploy and packaging, so this replaces the linuxdeploy it runs with
+      # a wrapper that hides the two providers from linuxdeploy, puts them back,
+      # then runs the AppImage output plugin itself.
       - name: Let linuxdeploy skip the NVIDIA runtime
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
@@ -197,23 +201,33 @@ jobs:
           curl -fsSL -o "$dir/linuxdeploy-real.AppImage" \
             https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
           chmod +x "$dir/linuxdeploy-real.AppImage"
-          # Extract once so the wrapper needs neither FUSE nor a nested AppImage.
-          (cd "$dir" && ./linuxdeploy-real.AppImage --appimage-extract >/dev/null)
-          mv "$dir/squashfs-root" "$dir/linuxdeploy-root"
-          args=""
-          for l in 'libcublas*' 'libcublasLt*' 'libcudart*' 'libcudnn*' 'libcufft*' \
-                   'libcurand*' 'libcusparse*' 'libcusolver*' 'libnvrtc*' 'libnvinfer*' \
-                   'libnvonnxparser*' 'libnvJitLink*' 'libnccl*'; do
-            args="$args --exclude-library '$l'"
-          done
-          # tauri passes --appimage-extract-and-run, which only an AppImage
-          # runtime understands; the bare binary rejects it, so drop it. And
-          # the extracted linuxdeploy looks for plugins on PATH and beside its
-          # own binary, not beside this wrapper where tauri downloads them.
-          cat > "$dir/linuxdeploy-x86_64.AppImage" <<WRAP
+          # The real AppImage sits in the same directory as the wrapper, so it
+          # finds the plugins tauri downloads there. tauri sets OUTPUT, ARCH
+          # and APPIMAGE_EXTRACT_AND_RUN, which both halves read from the env.
+          cat > "$dir/linuxdeploy-x86_64.AppImage" <<'WRAP'
           #!/bin/sh
-          for a; do shift; [ "\$a" = --appimage-extract-and-run ] || set -- "\$@" "\$a"; done
-          PATH="$dir:\$PATH" exec "$dir/linuxdeploy-root/AppRun" $args "\$@"
+          set -eu
+          dir=$(dirname "$0")
+          appdir=; prev=; out=
+          for a; do
+            shift
+            [ "$prev" = --appdir ] && appdir=$a
+            prev=$a
+            if [ "$out" = 1 ]; then out=; continue; fi
+            if [ "$a" = --output ]; then out=1; continue; fi
+            set -- "$@" "$a"
+          done
+          [ -n "$appdir" ] || { echo "linuxdeploy wrapper: no --appdir" >&2; exit 1; }
+          stash=$(mktemp -d)
+          i=0
+          find "$appdir" \( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \) > "$stash/found"
+          while read -r f; do
+            i=$((i + 1)); mv "$f" "$stash/$i"; printf '%s %s\n' "$i" "$f" >> "$stash/map"
+            echo "linuxdeploy wrapper: hiding $f"
+          done < "$stash/found"
+          "$dir/linuxdeploy-real.AppImage" "$@"
+          [ -f "$stash/map" ] && while read -r i f; do mv "$stash/$i" "$f"; done < "$stash/map"
+          exec "$dir/linuxdeploy-plugin-appimage.AppImage" --appdir "$appdir"
           WRAP
           # Read-only on purpose: before running linuxdeploy, tauri dd's zeros
           # over bytes 8-10 to hide the AppImage magic, which on this script
