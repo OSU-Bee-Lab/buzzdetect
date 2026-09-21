@@ -56,7 +56,7 @@
 	<nav>
 		{#each entries as e (e.started_at)}
 			<button class="run" class:active={e.started_at === selectedId} onclick={() => (selectedId = e.started_at)}>
-				<span class="time">{formatRunTime(e.started_at)}</span>
+				<span class="time {e.status}">{formatRunTime(e.started_at)}</span>
 				<span class="detail">{e.manifest.modelname}</span>
 				<span class="detail">in: {baseName(e.manifest.dir_audio ?? '?')}</span>
 				<span class="detail">out: {baseName(e.manifest.dir_out ?? '?')}</span>
@@ -131,6 +131,18 @@
 	.time {
 		font-weight: 600;
 		font-size: 0.85rem;
+	}
+
+	.time.completed {
+		color: light-dark(#2f6fe0, #4c8dff);
+	}
+
+	.time.interrupted {
+		color: light-dark(#c0392b, #e5695c);
+	}
+
+	.time.errored {
+		color: light-dark(#b26a00, #e0a030);
 	}
 
 	.detail {
