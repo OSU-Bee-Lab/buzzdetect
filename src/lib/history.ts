@@ -26,6 +26,8 @@ export interface HistoryEntry {
 		dir_out?: string;
 		classes_out: string[] | null;
 	};
+	// What the run got done; absent while it runs, or if it ended before analyzing anything.
+	result?: { audio_seconds: number; runtime_seconds: number; rate: number };
 	// Absent on runs recorded before the full settings were kept.
 	settings?: HistorySettings;
 }
@@ -38,12 +40,26 @@ export function formatRunTime(unixSeconds: number, locale = 'en-US'): string {
 	return `${day} ${time}`;
 }
 
+/** "30x realtime", or null when the run recorded no rate. */
+export function formatRate(e: HistoryEntry): string | null {
+	const r = e.result?.rate;
+	if (!r || r <= 0) return null;
+	return `${r >= 100 ? Math.round(r) : r.toFixed(1)}x realtime`;
+}
+
 /** The settings to preview: the full record if there is one, else what the manifest kept. */
 export function previewSettings(e: HistoryEntry): [string, string][] {
 	const s = e.settings;
 	const m = e.manifest;
 	const rows: [string, string][] = [
 		['Status', e.status],
+		...(e.result
+			? ([
+					['Analysis rate', formatRate(e) ?? '?'],
+					['Audio analyzed (s)', String(Math.round(e.result.audio_seconds))],
+					['Run time (s)', String(Math.round(e.result.runtime_seconds))]
+				] as [string, string][])
+			: []),
 		['Model', s?.modelname ?? m.modelname],
 		['Audio directory', s?.dir_audio ?? m.dir_audio ?? '?'],
 		['Output directory', s?.dir_out ?? m.dir_out ?? '?'],

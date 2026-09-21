@@ -3,14 +3,17 @@
 	// (open_history). Left: one row per run. Right: the settings that run used.
 	import { invoke } from '@tauri-apps/api/core';
 	import { emit, listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount } from 'svelte';
 	import { baseName } from '$lib/paths';
-	import { formatRunTime, previewSettings, type HistoryEntry } from '$lib/history';
+	import { formatRate, formatRunTime, previewSettings, type HistoryEntry } from '$lib/history';
 
 	let entries = $state<HistoryEntry[]>([]);
 	let selectedId = $state<number | null>(null);
 
 	const selected = $derived(entries.find((e) => e.started_at === selectedId) ?? null);
+	// list_history only leaves "running" on the newest entry while a run is live.
+	const runLive = $derived(entries[0]?.status === 'running');
 	const rows = $derived(selected ? previewSettings(selected) : []);
 
 	async function load() {
@@ -28,17 +31,20 @@
 		await load();
 	}
 
-	// The main window owns the settings, so this hands them over.
-	function useSettings(e: HistoryEntry) {
-		emit('history-use', e.settings ?? { ...e.manifest });
+	// The main window owns the settings, so this hands them over, then closes.
+	async function useSettings(e: HistoryEntry) {
+		await emit('history-use', e.settings ?? { ...e.manifest });
+		await getCurrentWindow().close();
 	}
 
 	onMount(() => {
 		load();
 		const unlisten = listen('engine-exit', load);
+		const unlistenUpdated = listen('history-updated', load);
 		window.addEventListener('focus', load);
 		return () => {
 			unlisten.then((f) => f());
+			unlistenUpdated.then((f) => f());
 			window.removeEventListener('focus', load);
 		};
 	});
@@ -54,9 +60,10 @@
 				<span class="detail">{e.manifest.modelname}</span>
 				<span class="detail">in: {baseName(e.manifest.dir_audio ?? '?')}</span>
 				<span class="detail">out: {baseName(e.manifest.dir_out ?? '?')}</span>
+				{#if formatRate(e)}<span class="detail">{formatRate(e)}</span>{/if}
 			</button>
 		{:else}
-			<p class="empty">No runs yet.</p>
+			<p class="empty">No runs in history.</p>
 		{/each}
 		{#if entries.length}
 			<button class="clear" onclick={clear}>Clear history</button>
@@ -71,7 +78,10 @@
 					<dd>{v}</dd>
 				{/each}
 			</dl>
-			<button class="use" onclick={() => useSettings(selected)}>Use these settings</button>
+			<div class="use-wrap">
+				<button class="use" disabled={runLive} onclick={() => useSettings(selected)}>Use these settings</button>
+				{#if runLive}<span class="use-note">Run in progress</span>{/if}
+			</div>
 		{:else if entries.length}
 			<p class="empty">Select a run to see its settings.</p>
 		{/if}
@@ -140,6 +150,8 @@
 	}
 
 	section {
+		display: flex;
+		flex-direction: column;
 		overflow-y: auto;
 		padding: 1rem 1.25rem;
 	}
@@ -159,6 +171,21 @@
 	dd {
 		margin: 0;
 		word-break: break-all;
+	}
+
+	.use-wrap {
+		margin-top: auto;
+		align-self: flex-start;
+		position: sticky;
+		bottom: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.use-note {
+		font-size: 0.75rem;
+		opacity: 0.6;
 	}
 
 	.use {

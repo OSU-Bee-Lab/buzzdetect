@@ -799,6 +799,7 @@ fn record_history(app: &AppHandle, settings: &AnalysisSettings) -> u64 {
         entries.drain(..entries.len() - HISTORY_MAX);
     }
     write_history_file(&path, &entries);
+    let _ = app.emit("history-updated", ());
     now
 }
 
@@ -823,6 +824,29 @@ fn finish_history(app: &AppHandle, started_at: u64, status: &str) {
         entry["status"] = status.into();
         write_history_file(&path, &entries);
     }
+}
+
+/// The frontend measures how much audio a run got through, so it reports that
+/// back once the run has ended; it lands on the newest entry, which is the run
+/// that just finished (only one is ever live).
+#[tauri::command]
+fn record_run_result(app: AppHandle, audio_seconds: f64, runtime_seconds: f64) {
+    let Some(path) = history_path(&app) else { return };
+    let mut entries = read_history_file(&path);
+    let Some(entry) = entries.last_mut() else { return };
+    entry["result"] = run_result(audio_seconds, runtime_seconds);
+    write_history_file(&path, &entries);
+    let _ = app.emit("history-updated", ());
+}
+
+fn run_result(audio_seconds: f64, runtime_seconds: f64) -> serde_json::Value {
+    let rate = if runtime_seconds > 0.0 { audio_seconds / runtime_seconds } else { 0.0 };
+    serde_json::json!({
+        "audio_seconds": audio_seconds,
+        "runtime_seconds": runtime_seconds,
+        // Audio seconds analyzed per wall-clock second.
+        "rate": rate,
+    })
 }
 
 /// Past runs, newest first.
@@ -1417,6 +1441,7 @@ pub fn run() {
             read_manifest,
             list_history,
             clear_history,
+            record_run_result,
             open_history,
             dir_exists
         ])
@@ -1777,6 +1802,13 @@ mod tests {
         assert_eq!(entry["status"], "running");
         assert_eq!(entry["settings"]["chunklength"], 200.0);
         assert_eq!(entry["settings"]["dir_out"], entry["manifest"]["dir_out"]);
+    }
+
+    #[test]
+    fn a_result_carries_the_analysis_rate() {
+        let r = run_result(600.0, 20.0);
+        assert_eq!(r["rate"], 30.0);
+        assert_eq!(run_result(0.0, 0.0)["rate"], 0.0);
     }
 
     #[test]

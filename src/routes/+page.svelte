@@ -120,6 +120,13 @@
 				// non-zero -- expected, not an error worth showing.
 				const cancelled = run.stopping;
 				run.stop(!cancelled && e.payload.code !== 0 ? `engine exited with code ${e.payload.code}` : undefined);
+				const sum = run.summary;
+				if (sum && sum.audioSeconds > 0) {
+					invoke('record_run_result', {
+						audioSeconds: sum.audioSeconds,
+						runtimeSeconds: sum.runtimeSeconds
+					}).catch(() => {});
+				}
 			})
 		);
 
@@ -624,7 +631,7 @@
 			{#if settings.value.dirOut && !dirOutExists}
 				<span class="found-hint">Output directory does not exist yet. It will be created upon analysis.</span>
 			{:else if manifest && !modelMismatch}
-				<span class="found-hint">Using settings from previous run.</span>
+				<span class="found-hint">Previous settings found in output folder</span>
 			{/if}
 		</label>
 
@@ -827,18 +834,23 @@ Can produce very large log files."
 		</div>
 
 		<div class="settings-actions">
-			{#if run.running || run.stopping}
-				<button class="danger" onclick={cancel}>
-					{run.stopping ? 'Force Stop' : 'Stop Analysis'}
-				</button>
-			{:else}
-				<button
-					onclick={start}
-					disabled={!settings.value.dirAudio ||
-						!settings.value.modelname ||
-						settings.value.classesOut.length === 0 ||
-						modelMismatch}>{canRestart ? 'Restart Analysis' : 'Launch Analysis'}</button
-				>
+			<div class="action-row">
+				<button type="button" class="history-btn" onclick={openHistory}>History</button>
+				{#if run.running || run.stopping}
+					<button class="danger" onclick={cancel}>
+						{run.stopping ? 'Force Stop' : 'Stop Analysis'}
+					</button>
+				{:else}
+					<button
+						onclick={start}
+						disabled={!settings.value.dirAudio ||
+							!settings.value.modelname ||
+							settings.value.classesOut.length === 0 ||
+							modelMismatch}>{canRestart ? 'Restart Analysis' : 'Launch Analysis'}</button
+					>
+				{/if}
+			</div>
+			{#if !(run.running || run.stopping)}
 				{#if modelMismatch}
 					<p class="error">
 						Results have already been written to this output folder with model "{manifest?.modelname}".
@@ -855,7 +867,6 @@ Can produce very large log files."
 					<p class="error">{startError}</p>
 				{/if}
 			{/if}
-			<button type="button" class="history-btn" onclick={openHistory}>History</button>
 		</div>
 	</section>
 
@@ -1030,8 +1041,14 @@ Can produce very large log files."
 		border-top: 1px solid rgba(127, 127, 127, 0.2);
 	}
 
+	.action-row {
+		display: flex;
+		gap: 0.4rem;
+		align-items: stretch;
+	}
+
 	.settings-actions button {
-		width: 100%;
+		flex: 1;
 		font-weight: 600;
 	}
 
@@ -1273,9 +1290,7 @@ Can produce very large log files."
 	}
 
 	.settings-actions .history-btn {
-		align-self: flex-start;
-		width: auto;
-		padding: 0.2rem 0.5rem;
+		flex: 0 0 auto;
 		font-size: 0.8rem;
 		font-weight: 400;
 	}

@@ -5,6 +5,7 @@
   "windows": ["main", "model-info", "history"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
     "opener:default",
     "dialog:default"
   ]
