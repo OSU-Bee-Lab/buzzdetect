@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
+	import { getVersion } from '@tauri-apps/api/app';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { documentDir, join } from '@tauri-apps/api/path';
 	import { onMount } from 'svelte';
@@ -92,6 +93,9 @@
 		pending = [];
 		run.handleOutput(items);
 	}
+
+	let appVersion = $state('');
+	getVersion().then((v) => (appVersion = v)).catch(() => {});
 
 	onMount(() => {
 		// Live events are held back until the attach below has had its say, so
@@ -957,10 +961,13 @@ Can produce very large log files."
 			{/each}
 		</div>
 
-		<details class="log" bind:this={logDetails} ontoggle={scrollLogToBottom}>
-			<summary>Log ({run.logLines.length})</summary>
-			<pre bind:this={logPre} onscroll={onLogScroll}>{run.logLines.join('\n')}</pre>
-		</details>
+		<div class="log-wrap">
+			<details class="log" bind:this={logDetails} ontoggle={scrollLogToBottom}>
+				<summary>Log ({run.logLines.length})</summary>
+				<pre bind:this={logPre} onscroll={onLogScroll}>{run.logLines.join('\n')}</pre>
+			</details>
+			{#if appVersion}<span class="version">v{appVersion}</span>{/if}
+		</div>
 	</section>
 </div>
 </main>
@@ -1427,9 +1434,22 @@ Can produce very large log files."
 		border-radius: 6px;
 	}
 
+	.log-wrap {
+		position: relative;
+		flex-shrink: 0;
+	}
+
+	.version {
+		position: absolute;
+		top: 0;
+		right: 0;
+		font-size: 0.75rem;
+		opacity: 0.4;
+		user-select: none;
+	}
+
 	.log {
 		font-size: 0.8rem;
-		flex-shrink: 0;
 	}
 
 	.log pre {
