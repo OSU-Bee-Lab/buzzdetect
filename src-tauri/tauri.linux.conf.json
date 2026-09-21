@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "icon": [
+      "icons-tight/32x32.png",
+      "icons-tight/128x128.png",
+      "icons-tight/128x128@2x.png"
+    ]
+  }
+}
