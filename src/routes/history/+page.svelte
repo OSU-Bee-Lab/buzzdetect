@@ -137,11 +137,11 @@
 		color: light-dark(#2f6fe0, #4c8dff);
 	}
 
-	.time.interrupted {
+	.time.errored {
 		color: light-dark(#c0392b, #e5695c);
 	}
 
-	.time.errored {
+	.time.interrupted {
 		color: light-dark(#b26a00, #e0a030);
 	}
 
