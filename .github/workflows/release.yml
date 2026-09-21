@@ -176,11 +176,20 @@ jobs:
                    'libnvonnxparser*' 'libnvJitLink*' 'libnccl*'; do
             args="$args --exclude-library '$l'"
           done
+          # tauri passes --appimage-extract-and-run, which only an AppImage
+          # runtime understands; the bare binary rejects it, so drop it. And
+          # the extracted linuxdeploy looks for plugins on PATH and beside its
+          # own binary, not beside this wrapper where tauri downloads them.
           cat > "$dir/linuxdeploy-x86_64.AppImage" <<WRAP
           #!/bin/sh
-          exec "$dir/linuxdeploy-root/AppRun" $args "\$@"
+          for a; do shift; [ "\$a" = --appimage-extract-and-run ] || set -- "\$@" "\$a"; done
+          PATH="$dir:\$PATH" exec "$dir/linuxdeploy-root/AppRun" $args "\$@"
           WRAP
-          chmod +x "$dir/linuxdeploy-x86_64.AppImage"
+          # Read-only on purpose: before running linuxdeploy, tauri dd's zeros
+          # over bytes 8-10 to hide the AppImage magic, which on this script
+          # turns "#!/bin/sh" into "#!/bin/s" and the spawn fails with ENOENT.
+          # tauri ignores dd's exit status, so a refused write is harmless.
+          chmod 555 "$dir/linuxdeploy-x86_64.AppImage"
 
       - uses: tauri-apps/tauri-action@v0
         if: matrix.portable == ''
