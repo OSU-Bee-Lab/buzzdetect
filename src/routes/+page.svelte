@@ -10,6 +10,8 @@
 	import DirRow from '$lib/DirRow.svelte';
 	import FileRows from '$lib/FileRows.svelte';
 	import ProgressBar from '$lib/ProgressBar.svelte';
+	import PathField from '$lib/PathField.svelte';
+	import type { HistorySettings } from '$lib/history';
 	import type { ModelInfo } from '$lib/modelInfo';
 
 	interface Manifest {
@@ -17,19 +19,7 @@
 		classes_out: string[] | null;
 	}
 
-	interface HistoryEntry {
-		started_at: number; // unix seconds
-		status: 'running' | 'completed' | 'stopped' | 'errored' | 'interrupted';
-		manifest: {
-			modelname: string;
-			dir_audio?: string;
-			dir_out?: string;
-			classes_out: string[] | null;
-		};
-	}
-
 	let models = $state<ModelInfo[]>([]);
-	let history = $state<HistoryEntry[]>([]);
 	let modelActionError = $state<string | null>(null);
 	let availableClasses = $state<string[]>([]);
 	let startError = $state<string | null>(null);
@@ -44,6 +34,11 @@
 	let hasAutoExpanded = false;
 	let hasStarted = $state(false);
 	let manifest = $state<Manifest | null>(null);
+	// Assumed true until checked, so a valid folder doesn't flash the warning.
+	let dirOutExists = $state(true);
+	// The settings the last launch was given, to tell whether a stopped run can
+	// be restarted as it was.
+	let startedKey = $state<string | null>(null);
 	// What the engine reports about GPU support. Null until the probe answers,
 	// which is a real wait -- it spawns the engine and asks onnxruntime to build
 	// a session -- so the controls show a checking state rather than flickering
@@ -80,23 +75,46 @@
 		logs: { line: string; seq: number }[];
 	}
 
+	type Output = Parameters<typeof run.handleOutput>[0][number];
+	const FLUSH_MS = 100;
+	let pending: Output[] = [];
+	let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function queueOutput(item: Output) {
+		pending.push(item);
+		flushTimer ??= setTimeout(flushOutput, FLUSH_MS);
+	}
+
+	function flushOutput() {
+		if (flushTimer !== null) clearTimeout(flushTimer);
+		flushTimer = null;
+		const items = pending;
+		pending = [];
+		run.handleOutput(items);
+	}
+
 	onMount(() => {
 		// Live events are held back until the attach below has had its say, so
 		// they apply on top of the snapshot rather than before it.
 		let held: (() => void)[] | null = [];
 		const deliver = (f: () => void) => (held ? held.push(f) : f());
 
+		// The engine announces every audio file as its own event, and a large
+		// tree means thousands of them in the first seconds. Applying each as it
+		// arrives rebuilt the whole tree per event and starved the UI thread --
+		// including the stop button. They are queued and applied together.
 		const unlistenProgress = listen<any>('engine-progress', (e) =>
-			deliver(() => run.handleEvent(e.payload))
+			deliver(() => queueOutput({ kind: 'event', payload: e.payload }))
 		);
 		const unlistenLog = listen<{ line: string; stderr: boolean; seq: number }>('engine-log', (e) =>
-			deliver(() => run.handleLog(e.payload.line, e.payload.seq))
+			deliver(() => queueOutput({ kind: 'log', line: e.payload.line, seq: e.payload.seq }))
 		);
-		loadHistory();
+		const unlistenUse = listen<HistorySettings>('history-use', (e) => useHistorySettings(e.payload));
 		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) =>
 			deliver(() => {
-				// The backend records the outcome before it emits this.
-				loadHistory();
+				flushOutput();
+				// The run may have created the output folder.
+				checkManifest();
 				if (!run.running) return;
 				// A cancelled engine is killed, so it exits by signal (null code) or
 				// non-zero -- expected, not an error worth showing.
@@ -166,6 +184,8 @@
 			unlistenProgress.then((f) => f());
 			unlistenLog.then((f) => f());
 			unlistenExit.then((f) => f());
+			unlistenUse.then((f) => f());
+			if (flushTimer !== null) clearTimeout(flushTimer);
 		};
 	});
 
@@ -221,6 +241,9 @@
 			manifest = null;
 			return;
 		}
+		dirOutExists = await invoke<boolean>('dir_exists', { path: settings.value.dirOut }).catch(
+			() => true
+		);
 		try {
 			manifest = await invoke<Manifest | null>('read_manifest', { dirOut: settings.value.dirOut });
 		} catch {
@@ -239,14 +262,15 @@
 		return await join(await documentDir(), 'buzzdetect', modelname);
 	}
 
-	// Re-derive the class list whenever the model changes, and auto-fill
-	// dirOut to a per-model results folder unless the user has picked their own.
+	// Re-derive the class list whenever the model changes. dirOut is only
+	// filled (with a per-model default) when empty; changing model never moves
+	// it, but the folder's manifest is re-checked against the new model.
 	async function onModelChange() {
 		if (!settings.value.modelname) return;
-		if (!settings.value.dirOutTouched) {
+		if (!settings.value.dirOut) {
 			settings.value.dirOut = await defaultDirOut(settings.value.modelname);
-			await checkManifest();
 		}
+		await checkManifest();
 		try {
 			const classes = await invoke<string[]>('get_model_classes', {
 				modelname: settings.value.modelname
@@ -308,7 +332,7 @@
 	async function removeCurrentModel() {
 		modelActionError = null;
 		const name = settings.value.modelname;
-		if (!confirm(`Remove the imported model "${name}"? Its files will be deleted.`)) return;
+		if (!confirm(`Delete the imported model "${name}"? Its files will be deleted.`)) return;
 		try {
 			await invoke('remove_model', { name });
 			await reloadModels();
@@ -353,31 +377,58 @@
 		settings.save();
 	}
 
-	async function loadHistory() {
-		try {
-			history = await invoke<HistoryEntry[]>('list_history');
-		} catch {
-			history = [];
+	// Refill the settings from a past run (sent by the past-runs window).
+	// dirOut counts as touched so the model change below doesn't swap it for
+	// the per-model default.
+	async function useHistorySettings(h: HistorySettings) {
+		if (run.running || run.stopping) return;
+		const v = settings.value;
+		v.modelname = h.modelname;
+		if (h.dir_audio) v.dirAudio = h.dir_audio;
+		if (h.dir_out) {
+			v.dirOut = h.dir_out;
+			v.dirOutTouched = true;
 		}
-	}
-
-	async function clearHistory() {
-		await invoke('clear_history');
-		history = [];
-	}
-
-	// Refill the settings from a past run. dirOut counts as touched so the
-	// model change below doesn't swap it for the per-model default.
-	async function useHistoryEntry(m: HistoryEntry['manifest']) {
-		settings.value.modelname = m.modelname;
-		if (m.dir_audio) settings.value.dirAudio = m.dir_audio;
-		if (m.dir_out) {
-			settings.value.dirOut = m.dir_out;
-			settings.value.dirOutTouched = true;
-		}
-		if (m.classes_out) settings.value.classesOut = m.classes_out;
+		if (h.classes_out) v.classesOut = h.classes_out;
+		if (h.chunklength !== undefined) v.chunklength = h.chunklength;
+		if (h.analyzers_cpu !== undefined) v.analyzersCpu = h.analyzers_cpu;
+		// A run recorded on a machine with a GPU shouldn't ask for one that isn't here.
+		if (h.analyzers_gpu !== undefined) v.analyzersGpu = gpu?.usable ? h.analyzers_gpu : 0;
+		if (h.gpu_fp16 !== undefined) v.gpuFp16 = h.gpu_fp16;
+		if (h.n_streamers !== undefined) v.nStreamers = h.n_streamers;
+		if (h.stream_buffer_depth !== undefined) v.streamBufferDepth = h.stream_buffer_depth;
+		if (h.verbosity_print) v.verbosityPrint = h.verbosity_print;
+		if (h.verbosity_log) v.verbosityLog = h.verbosity_log;
+		if (h.log_progress !== undefined) v.logProgress = h.log_progress;
 		settings.save();
 		await onModelChange();
+	}
+
+	function launchSettings() {
+		return {
+			modelname: settings.value.modelname,
+			dir_audio: settings.value.dirAudio,
+			dir_out: settings.value.dirOut,
+			classes_out: settings.value.classesOut,
+			chunklength: settings.value.chunklength,
+			analyzers_cpu: settings.value.analyzersCpu,
+			analyzers_gpu: settings.value.analyzersGpu,
+			gpu_fp16: settings.value.gpuFp16,
+			n_streamers: settings.value.nStreamers,
+			stream_buffer_depth: settings.value.streamBufferDepth,
+			verbosity_print: settings.value.verbosityPrint,
+			verbosity_log: settings.value.verbosityLog,
+			log_progress: settings.value.logProgress
+		};
+	}
+
+	const launchKey = $derived(JSON.stringify(launchSettings()));
+	// A run the user stopped can be picked up again, but only as it was:
+	// change anything and it is a new launch.
+	const canRestart = $derived(run.stopped && run.cancelled && startedKey === launchKey);
+
+	function openHistory() {
+		invoke('open_history').catch((e) => (startError = String(e)));
 	}
 
 	async function start() {
@@ -386,33 +437,18 @@
 			startError = 'Select at least one class to output.';
 			return;
 		}
+		pending = [];
 		run.reset();
 		hasStarted = true;
 		hasAutoExpanded = false;
 		expanded.clear();
+		startedKey = launchKey;
 		try {
-			await invoke('start_analysis', {
-				settings: {
-					modelname: settings.value.modelname,
-					dir_audio: settings.value.dirAudio,
-					dir_out: settings.value.dirOut,
-					classes_out: settings.value.classesOut,
-					chunklength: settings.value.chunklength,
-					analyzers_cpu: settings.value.analyzersCpu,
-					analyzers_gpu: settings.value.analyzersGpu,
-					gpu_fp16: settings.value.gpuFp16,
-					n_streamers: settings.value.nStreamers,
-					stream_buffer_depth: settings.value.streamBufferDepth,
-					verbosity_print: settings.value.verbosityPrint,
-					verbosity_log: settings.value.verbosityLog,
-					log_progress: settings.value.logProgress
-				}
-			});
+			await invoke('start_analysis', { settings: launchSettings() });
 		} catch (e) {
 			startError = String(e);
 			run.stop(startError);
 		}
-		loadHistory();
 	}
 
 	async function cancel() {
@@ -532,31 +568,25 @@
 					data-tooltip={currentModel?.has_readme ? undefined : 'This model has no README.'}
 					onclick={openModelInfo}>Info</button
 				></span>
-			<select
-				id="model-select"
-				bind:value={settings.value.modelname}
-				onchange={() => {
-					if (manifest) {
-						// Changing model away from a results folder's existing
-						// manifest can't be reconciled in place, so fall back to
-						// the new model's default output dir instead.
-						settings.value.dirOutTouched = false;
-					}
-					onModelChange();
-					settings.save();
-				}}
-			>
-				{#each models as m}
-					<option value={m.name}>{m.name}</option>
-				{/each}
-			</select>
+			<span class="model-row">
+				<select
+					id="model-select"
+					bind:value={settings.value.modelname}
+					onchange={() => {
+						onModelChange();
+						settings.save();
+					}}
+				>
+					{#each models as m}
+						<option value={m.name}>{m.name}</option>
+					{/each}
+				</select>
+				{#if currentModelRemovable}
+					<button type="button" class="delete-btn" onclick={removeCurrentModel}>Delete</button>
+				{/if}
+			</span>
 			{#if currentModel?.description}
 				<span class="model-description">{currentModel.description}</span>
-			{/if}
-			{#if currentModelRemovable}
-				<span class="model-actions">
-					<button type="button" onclick={removeCurrentModel}>Delete model</button>
-				</span>
 			{/if}
 			{#if modelActionError}
 				<span class="error">{modelActionError}</span>
@@ -565,7 +595,7 @@
 		<label class:field-error={!settings.value.dirAudio}>
 			<span class="label-text">Audio directory <span class="qmark" data-tooltip="Input folder containing audio files to analyze.">?</span></span>
 			<span class="path-row">
-				<input
+				<PathField
 					bind:value={settings.value.dirAudio}
 					oninput={() => settings.save()}
 					placeholder="/path/to/audio_in"
@@ -576,7 +606,7 @@
 		<label class:field-error={modelMismatch || !settings.value.dirOut}>
 			<span class="label-text">Output directory <span class="qmark" data-tooltip="Output folder for analysis results.">?</span></span>
 			<span class="path-row">
-				<input bind:value={settings.value.dirOut} oninput={onDirOutInput} />
+				<PathField bind:value={settings.value.dirOut} oninput={onDirOutInput} />
 				<button type="button" onclick={browseDirOut}>Browse…</button>
 				<button
 					type="button"
@@ -591,8 +621,10 @@
 					</svg>
 				</button>
 			</span>
-			{#if manifest && !modelMismatch}
-				<span class="found-hint">Existing results found</span>
+			{#if settings.value.dirOut && !dirOutExists}
+				<span class="found-hint">Output directory does not exist yet. It will be created upon analysis.</span>
+			{:else if manifest && !modelMismatch}
+				<span class="found-hint">Using settings from previous run.</span>
 			{/if}
 		</label>
 
@@ -794,14 +826,18 @@ Can produce very large log files."
 		</fieldset>
 		</div>
 
-		{#if !run.running && !run.stopping}
-			<div class="settings-actions">
+		<div class="settings-actions">
+			{#if run.running || run.stopping}
+				<button class="danger" onclick={cancel}>
+					{run.stopping ? 'Force Stop' : 'Stop Analysis'}
+				</button>
+			{:else}
 				<button
 					onclick={start}
 					disabled={!settings.value.dirAudio ||
 						!settings.value.modelname ||
 						settings.value.classesOut.length === 0 ||
-						modelMismatch}>Launch Analysis</button
+						modelMismatch}>{canRestart ? 'Restart Analysis' : 'Launch Analysis'}</button
 				>
 				{#if modelMismatch}
 					<p class="error">
@@ -818,8 +854,9 @@ Can produce very large log files."
 				{#if startError}
 					<p class="error">{startError}</p>
 				{/if}
-			</div>
-		{/if}
+			{/if}
+			<button type="button" class="history-btn" onclick={openHistory}>Past runs</button>
+		</div>
 	</section>
 
 	<div
@@ -909,39 +946,10 @@ Can produce very large log files."
 			{/each}
 		</div>
 
-		<details class="history">
-			<summary>Past runs ({history.length})</summary>
-			{#if history.length}
-				<ul>
-					{#each history as h (h.started_at + (h.manifest.dir_out ?? ''))}
-						<li>
-							<div>
-								{new Date(h.started_at * 1000).toLocaleString()} · {h.manifest.modelname} · {h.status}
-							</div>
-							<div class="history-path">{h.manifest.dir_audio ?? '?'} → {h.manifest.dir_out ?? '?'}</div>
-							<button
-								disabled={run.running || run.stopping}
-								onclick={() => useHistoryEntry(h.manifest)}>Use these settings</button
-							>
-						</li>
-					{/each}
-				</ul>
-				<button onclick={clearHistory}>Clear history</button>
-			{/if}
-		</details>
-
 		<details class="log" bind:this={logDetails} ontoggle={scrollLogToBottom}>
 			<summary>Log ({run.logLines.length})</summary>
 			<pre bind:this={logPre} onscroll={onLogScroll}>{run.logLines.join('\n')}</pre>
 		</details>
-
-		{#if run.running}
-			<div class="run-actions">
-				<button class="danger" onclick={cancel}>
-					{run.stopping ? 'Force Stop' : 'Stop Analysis'}
-				</button>
-			</div>
-		{/if}
 	</section>
 </div>
 </main>
@@ -1038,12 +1046,6 @@ Can produce very large log files."
 		border-radius: 6px;
 	}
 
-	.run-actions {
-		display: flex;
-		justify-content: flex-end;
-		flex-shrink: 0;
-	}
-
 	.tree-toolbar {
 		display: flex;
 		justify-content: flex-end;
@@ -1133,11 +1135,6 @@ Can produce very large log files."
 	.path-row {
 		display: flex;
 		gap: 0.4rem;
-		min-width: 0;
-	}
-
-	.path-row input {
-		flex: 1;
 		min-width: 0;
 	}
 
@@ -1254,6 +1251,33 @@ Can produce very large log files."
 		display: flex;
 		gap: 0.4rem;
 		margin-top: 0.3rem;
+	}
+
+	.model-row {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+	}
+
+	.model-row select {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.delete-btn {
+		flex-shrink: 0;
+		padding: 0.15rem 0.5rem;
+		font-size: 0.75rem;
+		border-color: #d33;
+		color: #d33;
+	}
+
+	.settings-actions .history-btn {
+		align-self: flex-start;
+		width: auto;
+		padding: 0.2rem 0.5rem;
+		font-size: 0.8rem;
+		font-weight: 400;
 	}
 
 	.model-actions button {
@@ -1391,29 +1415,6 @@ Can produce very large log files."
 	.log {
 		font-size: 0.8rem;
 		flex-shrink: 0;
-	}
-
-	.history {
-		font-size: 0.8rem;
-		flex-shrink: 0;
-	}
-
-	.history ul {
-		list-style: none;
-		margin: 0.25rem 0;
-		padding: 0;
-		max-height: 200px;
-		overflow: auto;
-	}
-
-	.history li {
-		padding: 0.35rem 0;
-		border-bottom: 1px solid rgba(127, 127, 127, 0.2);
-	}
-
-	.history-path {
-		opacity: 0.7;
-		word-break: break-all;
 	}
 
 	.log pre {

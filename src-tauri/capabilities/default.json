@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and the model info window",
-  "windows": ["main", "model-info"],
+  "description": "Capability for the main window the model info window and the past runs window",
+  "windows": ["main", "model-info", "history"],
   "permissions": [
     "core:default",
     "opener:default",

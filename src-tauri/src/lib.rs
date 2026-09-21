@@ -766,6 +766,9 @@ fn history_entry(settings: &AnalysisSettings, started_at: u64) -> serde_json::Va
             "dir_audio": settings.dir_audio,
             "dir_out": settings.dir_out,
         },
+        // Everything the launch was given, for the history window's preview.
+        // Entries from before this was recorded have only the manifest keys.
+        "settings": settings,
     })
 }
 
@@ -838,6 +841,32 @@ fn list_history(app: AppHandle, state: State<AnalysisState>) -> Vec<serde_json::
     entries
 }
 
+const HISTORY_WINDOW: &str = "history";
+
+/// Open the past-runs window, or focus it. async for the same reason as
+/// open_model_info.
+#[tauri::command]
+async fn open_history(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(HISTORY_WINDOW) {
+        let _ = window.unminimize();
+        return window.set_focus().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(&app, HISTORY_WINDOW, tauri::WebviewUrl::App("history".into()))
+        .title("Past runs")
+        .inner_size(820.0, 560.0)
+        .min_inner_size(520.0, 320.0)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Whether `path` is an existing directory. async so a slow network mount
+/// stalls a worker thread rather than the UI's.
+#[tauri::command]
+async fn dir_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_dir()
+}
+
 #[tauri::command]
 fn clear_history(app: AppHandle) {
     if let Some(path) = history_path(&app) {
@@ -879,7 +908,7 @@ fn read_manifest(dir_out: String) -> Result<Option<Manifest>, String> {
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AnalysisSettings {
     modelname: String,
     dir_audio: String,
@@ -1387,7 +1416,9 @@ pub fn run() {
             gpu_status,
             read_manifest,
             list_history,
-            clear_history
+            clear_history,
+            open_history,
+            dir_exists
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1744,6 +1775,8 @@ mod tests {
         assert_eq!(entry["manifest"]["dir_audio"], "/data/audio");
         assert!(entry["manifest"]["classes_out"].is_array());
         assert_eq!(entry["status"], "running");
+        assert_eq!(entry["settings"]["chunklength"], 200.0);
+        assert_eq!(entry["settings"]["dir_out"], entry["manifest"]["dir_out"]);
     }
 
     #[test]

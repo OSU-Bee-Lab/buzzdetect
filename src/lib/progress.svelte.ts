@@ -544,6 +544,27 @@ class AnalysisRun {
 		while (samples.length > 2 && samples[1].t <= cutoff) samples.shift();
 	}
 
+	// Working copy of `files` while a batch is being applied. The engine
+	// announces every file in the tree as its own event, and each one used to
+	// copy the whole map and rebuild the tree -- quadratic in the file count,
+	// and all on the UI thread. A batch pays for one copy and one rebuild.
+	private batch: Map<string, FileProgress> | null = null;
+
+	private commit(files: Map<string, FileProgress>) {
+		if (!this.batch) this.files = files;
+	}
+
+	handleBatch(payloads: any[]) {
+		if (payloads.length === 0) return;
+		this.batch = new Map(this.files);
+		try {
+			for (const p of payloads) this.handleEvent(p);
+		} finally {
+			this.files = this.batch;
+			this.batch = null;
+		}
+	}
+
 	handleEvent(payload: any) {
 		if (this.isStale(payload.seq)) return;
 		switch (payload.event) {
@@ -562,7 +583,7 @@ class AnalysisRun {
 				break;
 			}
 			case 'manifest': {
-				const files = new Map(this.files);
+				const files = this.batch ?? new Map(this.files);
 				const sizes = (payload.bytes ?? []) as number[];
 				(payload.paths as string[]).forEach((path, i) => {
 					if (!files.has(path)) {
@@ -578,7 +599,7 @@ class AnalysisRun {
 						});
 					}
 				});
-				this.files = files;
+				this.commit(files);
 				break;
 			}
 			case 'manifest_done': {
@@ -586,7 +607,7 @@ class AnalysisRun {
 				break;
 			}
 			case 'file_skip': {
-				const files = new Map(this.files);
+				const files = this.batch ?? new Map(this.files);
 				const existing = files.get(payload.path);
 				files.set(payload.path, {
 					path: payload.path,
@@ -598,11 +619,11 @@ class AnalysisRun {
 					workSeconds: 0,
 					doneSeconds: 0
 				});
-				this.files = files;
+				this.commit(files);
 				break;
 			}
 			case 'file_start': {
-				const files = new Map(this.files);
+				const files = this.batch ?? new Map(this.files);
 				files.set(payload.path, {
 					path: payload.path,
 					dir: dirOf(payload.path),
@@ -613,11 +634,11 @@ class AnalysisRun {
 					workSeconds: payload.work_seconds,
 					doneSeconds: 0
 				});
-				this.files = files;
+				this.commit(files);
 				break;
 			}
 			case 'chunk_done': {
-				const files = new Map(this.files);
+				const files = this.batch ?? new Map(this.files);
 				const existing = files.get(payload.path);
 				if (existing) {
 					// chunk_start/chunk_end are absolute offsets in the file, so
@@ -634,12 +655,13 @@ class AnalysisRun {
 						doneSeconds,
 						status: payload.done ? 'done' : 'running'
 					});
-					this.files = files;
+					this.commit(files);
 				}
 				this.touchRate();
 				break;
 			}
 			case 'error': {
+				if (this.batch) this.files = this.batch;
 				this.stop(payload.message);
 				break;
 			}
@@ -650,6 +672,26 @@ class AnalysisRun {
 		if (this.isStale(seq)) return;
 		this.logLines.push(line);
 		if (this.logLines.length > 500) this.logLines.shift();
+	}
+
+	// Applies engine output in arrival order. Events and log lines share one
+	// seq counter, so they can't be flushed as two separate groups without the
+	// second group looking stale; consecutive events go through one batch.
+	handleOutput(items: ({ kind: 'event'; payload: any } | { kind: 'log'; line: string; seq?: number })[]) {
+		let events: any[] = [];
+		const flush = () => {
+			this.handleBatch(events);
+			events = [];
+		};
+		for (const it of items) {
+			if (it.kind === 'event') {
+				events.push(it.payload);
+			} else {
+				flush();
+				this.handleLog(it.line, it.seq);
+			}
+		}
+		flush();
 	}
 }
 

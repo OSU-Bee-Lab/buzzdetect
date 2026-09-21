@@ -471,3 +471,27 @@ describe('re-attaching to a running engine', () => {
 		expect(run.summary!.runtimeSeconds).toBeGreaterThanOrEqual(60);
 	});
 });
+
+describe('handleOutput', () => {
+	it('applies events and logs in order, and matches one-at-a-time delivery', () => {
+		run.handleOutput([
+			{ kind: 'event', payload: { seq: 0, event: 'manifest', paths: ['a.wav', 'b/c.wav'], bytes: [1, 2] } },
+			{ kind: 'log', line: 'hello', seq: 1 },
+			{ kind: 'event', payload: { seq: 2, event: 'file_start', path: 'a.wav', duration: 10, work_seconds: 10 } },
+			{ kind: 'event', payload: { seq: 3, event: 'manifest_done', count: 2 } }
+		]);
+		expect(run.logLines).toEqual(['hello']);
+		expect(run.tree.files.map((f) => f.name)).toEqual(['a.wav']);
+		expect(file(run.tree, 'a.wav').status).toBe('running');
+		expect(dir(run.tree, 'b').files.map((f) => f.name)).toEqual(['c.wav']);
+		expect(run.discoveryDone).toBe(true);
+	});
+
+	it('does not reapply items an earlier delivery already covered', () => {
+		run.handleEvent({ seq: 5, event: 'manifest', paths: ['a.wav'], bytes: [0] });
+		run.handleOutput([
+			{ kind: 'event', payload: { seq: 5, event: 'manifest', paths: ['dup.wav'], bytes: [0] } }
+		]);
+		expect(run.tree.files.map((f) => f.name)).toEqual(['a.wav']);
+	});
+});
