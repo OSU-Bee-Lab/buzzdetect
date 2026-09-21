@@ -739,7 +739,7 @@ class AnalysisRun {
 		this.running = false;
 		this.stopping = false;
 		this.stopped = true;
-		if (error) this.error = error;
+		if (error && !this.error) this.error = error;
 		const now = Date.now();
 		this.now = now;
 		this.instantaneousRate = 0;
@@ -838,7 +838,10 @@ class AnalysisRun {
 				break;
 			}
 			case 'error': {
-				this.stop(payload.message);
+				// Only record it. The engine is still winding down after a worker
+				// failure; the run stays locked until engine-exit calls stop(),
+				// or a new start would be refused as "already running".
+				this.error = payload.message;
 				break;
 			}
 		}
