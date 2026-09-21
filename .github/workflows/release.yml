@@ -62,7 +62,7 @@ jobs:
           [
             {"id": "macos-arm",    "platform": "macos-14",       "triple": "aarch64-apple-darwin",     "args": "--bundles dmg,app",                                              "engine_flags": "", "portable": ""},
             {"id": "macos-intel",  "platform": "macos-15-intel", "triple": "x86_64-apple-darwin",      "args": "--bundles dmg,app",                                              "engine_flags": "", "portable": ""},
-            {"id": "linux",        "platform": "ubuntu-22.04",   "triple": "x86_64-unknown-linux-gnu", "args": "--bundles appimage,deb",                                         "engine_flags": "", "portable": ""},
+            {"id": "linux",        "platform": "ubuntu-22.04",   "triple": "x86_64-unknown-linux-gnu", "args": "--bundles appimage,deb --verbose",                                        "engine_flags": "", "portable": ""},
             {"id": "windows",      "platform": "windows-latest", "triple": "x86_64-pc-windows-msvc",   "args": "--bundles nsis",                                                 "engine_flags": "", "portable": ""},
             {"id": "windows-cuda", "platform": "windows-latest", "triple": "x86_64-pc-windows-msvc",   "args": "--no-bundle --config src-tauri/tauri.cuda.conf.json",            "engine_flags": "--cuda", "portable": "windows-x64"}
           ]
