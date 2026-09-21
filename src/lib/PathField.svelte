@@ -23,8 +23,8 @@
 	<input bind:this={input} bind:value {placeholder} {oninput} onblur={() => (editing = false)} />
 {:else}
 	<button type="button" class="path-display" data-tooltip={value} onclick={() => (editing = true)}>
-		<!-- rtl + ellipsis clips the parent from its left edge; <bdi> keeps the text itself reading left to right. -->
-		{#if parts.parent}<span class="parent"><bdi>{parts.parent}</bdi></span>{/if}<span class="leaf" class:solo={!parts.parent}>{parts.leaf}</span>
+		<!-- rtl + ellipsis clips from the left edge, so the end of the path stays visible; <bdi> keeps the text itself reading left to right. -->
+		<span class="path"><bdi>{#if parts.parent}<span class="parent">{parts.parent}</span>{/if}<span>{parts.leaf}</span></bdi></span>
 	</button>
 {/if}
 
@@ -50,24 +50,15 @@
 		cursor: text;
 	}
 
-	.parent {
-		flex: 0 100 auto;
+	.path {
+		flex: 1;
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		direction: rtl;
+	}
+
+	.parent {
 		opacity: 0.6;
-	}
-
-	.leaf {
-		flex: 0 1 auto;
-		min-width: 3ch;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		font-weight: 600;
-	}
-
-	.leaf.solo {
-		font-weight: inherit;
 	}
 </style>
