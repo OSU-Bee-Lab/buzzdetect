@@ -153,6 +153,35 @@ jobs:
       - name: Build the engine
         run: node scripts/build-engine.mjs ${{ matrix.engine_flags }}
 
+      # onnxruntime-gpu's CUDA and TensorRT provider libraries link against the
+      # NVIDIA runtime, which the plain build deliberately doesn't carry (see
+      # probe_gpu: Linux GPU users bring their own). linuxdeploy treats those
+      # unresolved deps as fatal ("Could not find dependency: libcublas.so.12"),
+      # and tauri gives us no way to pass it --exclude-library, so wrap it.
+      - name: Let linuxdeploy skip the NVIDIA runtime
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          set -euo pipefail
+          dir="$HOME/.cache/tauri"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/linuxdeploy-real.AppImage" \
+            https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
+          chmod +x "$dir/linuxdeploy-real.AppImage"
+          # Extract once so the wrapper needs neither FUSE nor a nested AppImage.
+          (cd "$dir" && ./linuxdeploy-real.AppImage --appimage-extract >/dev/null)
+          mv "$dir/squashfs-root" "$dir/linuxdeploy-root"
+          args=""
+          for l in 'libcublas*' 'libcublasLt*' 'libcudart*' 'libcudnn*' 'libcufft*' \
+                   'libcurand*' 'libcusparse*' 'libcusolver*' 'libnvrtc*' 'libnvinfer*' \
+                   'libnvonnxparser*' 'libnvJitLink*' 'libnccl*'; do
+            args="$args --exclude-library '$l'"
+          done
+          cat > "$dir/linuxdeploy-x86_64.AppImage" <<WRAP
+          #!/bin/sh
+          exec "$dir/linuxdeploy-root/AppRun" $args "\$@"
+          WRAP
+          chmod +x "$dir/linuxdeploy-x86_64.AppImage"
+
       - uses: tauri-apps/tauri-action@v0
         if: matrix.portable == ''
         env:
