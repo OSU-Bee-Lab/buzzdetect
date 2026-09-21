@@ -287,6 +287,54 @@ describe('the tree', () => {
 		expect(run.tree.files.map((f) => f.name)).toEqual(['top.wav']);
 	});
 
+	it('keeps its running sums equal to a sum over the files', () => {
+		// Directories keep deltas rather than re-adding their files, and the
+		// estimate for unopened files moves whenever the calibration does.
+		const sum = (d: TreeDir): { total: number; prior: number } => {
+			let total = 0;
+			let prior = 0;
+			for (const f of d.files) {
+				total += f.weights.totalSeconds;
+				prior += f.weights.priorSeconds;
+			}
+			for (const c of d.dirs) {
+				const s = sum(c);
+				total += s.total;
+				prior += s.prior;
+			}
+			return { total, prior };
+		};
+		const check = () => {
+			for (const d of [run.tree, dir(run.tree, 'siteA'), dir(run.tree, 'siteB')]) {
+				const s = sum(d);
+				expect(d.totalSeconds).toBeCloseTo(s.total, 9);
+				expect(d.priorSeconds).toBeCloseTo(s.prior, 9);
+			}
+		};
+		check();
+		run.handleEvent({ event: 'file_skip', path: 'siteB/z.wav', reason: 'already_analyzed' });
+		check();
+		start('siteA/a.wav', 10);
+		check();
+		chunk('siteA/a.wav', 0, 4);
+		start('top.wav', 30, 20);
+		check();
+		chunk('siteA/a.wav', 4, 10, true);
+		check();
+	});
+
+	it('updates nodes in place rather than rebuilding them', () => {
+		const tree = run.tree;
+		const siteA = dir(tree, 'siteA');
+		const a = file(siteA, 'a.wav');
+		start('siteA/a.wav', 10);
+		chunk('siteA/a.wav', 0, 4);
+		expect(run.tree).toBe(tree);
+		expect(dir(run.tree, 'siteA')).toBe(siteA);
+		expect(file(siteA, 'a.wav')).toBe(a);
+		expect(a.doneSeconds).toBe(4);
+	});
+
 	it('is empty before anything is discovered', () => {
 		run.reset();
 		expect(run.tree.files).toEqual([]);
