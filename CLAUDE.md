@@ -106,6 +106,8 @@ Two things about that which bite:
   without a new tag, `gh workflow run release.yml -f tag=<tag>`, optionally with
   `-f only=windows,windows-cuda` to redo just the legs that failed.
 
+**In-place updates.** The app checks `releases/latest/download/latest.json` at startup (`src-tauri/src/updater.rs`, `plugins.updater` in `tauri.conf.json`) and shows an amber version tag with a "New version available!" link. Builds that can't swap themselves in place (the CUDA portable zip, a Linux `.deb`) get the link only; `can_install_update` decides. Updater artifacts are signed with `TAURI_SIGNING_PRIVATE_KEY`(`_PASSWORD`) repo secrets, matching the pubkey in `tauri.conf.json`. `latest.json` points at the *raw-named* AppImage and NSIS installer, so `rename-assets` copies those two rather than renaming them. `latest.json` only becomes visible to clients once the draft release is published.
+
 There is one bundled-CUDA variant, Windows only, and it ships as a portable zip
 rather than an installer: its ~2.7GB of NVIDIA runtime passes both makensis's
 ~2GiB ceiling and GitHub's 2GiB release-asset limit. That size is a fixed cost

@@ -1,3 +1,5 @@
+mod updater;
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
@@ -285,8 +287,6 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
     Ok(out)
 }
 
-#[tauri::command]
-fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, String> {
 /// Names from shipped-models.txt (one per line, `#` comments). A bundle carries
 /// a copy inside models/; a checkout has it at the repo root, two levels up
 /// from engine/models/.
@@ -302,6 +302,8 @@ fn shipped_order(models_root: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+#[tauri::command]
+fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, String> {
     let config_path = model_dir(&app, &modelname)
         .ok_or_else(|| format!("model '{modelname}' not found"))?
         .join("config_model.json");
@@ -1457,6 +1459,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AnalysisState::default())
         .invoke_handler(tauri::generate_handler![
             start_analysis,
@@ -1476,7 +1479,10 @@ pub fn run() {
             clear_history,
             record_run_result,
             open_history,
-            dir_exists
+            dir_exists,
+            updater::check_for_update,
+            updater::install_update,
+            updater::can_install_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

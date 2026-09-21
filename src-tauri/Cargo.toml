@@ -23,6 +23,8 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2.7.2"
+# In-place updates from the release's latest.json; see src/updater.rs.
+tauri-plugin-updater = "2"
 # Model bundles collaborators share are .zip files; import_model extracts them.
 zip = { version = "2", default-features = false, features = ["deflate"] }
 

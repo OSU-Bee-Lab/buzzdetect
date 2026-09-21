@@ -2,6 +2,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { getVersion } from '@tauri-apps/api/app';
+	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { documentDir, join } from '@tauri-apps/api/path';
 	import { onMount } from 'svelte';
@@ -94,8 +95,32 @@
 		run.handleOutput(items);
 	}
 
+	const RELEASES_URL = 'https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest';
 	let appVersion = $state('');
+	let newVersion = $state<string | null>(null);
+	let canInstall = $state(false);
+	let installing = $state(false);
+	let installError = $state('');
 	getVersion().then((v) => (appVersion = v)).catch(() => {});
+	// A failed check (offline, no manifest yet) just means no notice.
+	invoke<{ version: string } | null>('check_for_update')
+		.then((u) => {
+			newVersion = u?.version ?? null;
+			if (u) invoke<boolean>('can_install_update').then((c) => (canInstall = c));
+		})
+		.catch(() => {});
+
+	async function installUpdate() {
+		installing = true;
+		installError = '';
+		try {
+			// Resolves only on failure; success restarts the app.
+			await invoke('install_update');
+		} catch (e) {
+			installing = false;
+			installError = String(e);
+		}
+	}
 
 	onMount(() => {
 		// Live events are held back until the attach below has had its say, so
@@ -966,7 +991,27 @@ Can produce very large log files."
 				<summary>Log ({run.logLines.length})</summary>
 				<pre bind:this={logPre} onscroll={onLogScroll}>{run.logLines.join('\n')}</pre>
 			</details>
-			{#if appVersion}<span class="version">v{appVersion}</span>{/if}
+			{#if appVersion}
+				<div class="version-box">
+					<span class="version" class:outdated={newVersion}>v{appVersion}</span>
+					{#if newVersion}
+						<a
+							class="update-link"
+							href={RELEASES_URL}
+							onclick={(e) => {
+								e.preventDefault();
+								openUrl(RELEASES_URL);
+							}}>New version available!</a
+						>
+						{#if canInstall && !(run.running || run.stopping)}
+							<button class="update-install" onclick={installUpdate} disabled={installing}>
+								{installing ? 'Installing…' : 'Install and restart'}
+							</button>
+						{/if}
+						{#if installError}<span class="update-error">{installError}</span>{/if}
+					{/if}
+				</div>
+			{/if}
 		</div>
 	</section>
 </div>
@@ -1439,13 +1484,41 @@ Can produce very large log files."
 		flex-shrink: 0;
 	}
 
-	.version {
+	.version-box {
 		position: absolute;
 		top: 0;
 		right: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.2rem;
 		font-size: 0.75rem;
+	}
+
+	.version {
 		opacity: 0.4;
 		user-select: none;
+	}
+
+	.version.outdated {
+		color: #d99a00;
+		opacity: 1;
+	}
+
+	.update-link {
+		color: #3b82f6;
+		text-decoration: none;
+	}
+
+	.update-install {
+		font-size: 0.75rem;
+		padding: 0.1rem 0.5rem;
+	}
+
+	.update-error {
+		color: #dc2626;
+		max-width: 20rem;
+		text-align: right;
 	}
 
 	.log {

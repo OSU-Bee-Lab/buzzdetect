@@ -19,6 +19,36 @@ on:
         default: ''
 
 jobs:
+  # tauri-action seeds latest.json from the copy already attached to the release
+  # and then refuses to replace existing darwin-* entries. On a rebuild of an
+  # existing tag the macOS jobs would re-sign new .app.tar.gz files while
+  # latest.json kept the previous build's signatures, and every macOS client
+  # would fail the update with "signature verification failed". Deleting the
+  # stale manifest before the matrix starts makes this run write it fresh.
+  reset-updater-manifest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete any stale latest.json from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          REPO="${{ github.repository }}"
+          RELEASE_ID=$(gh api "repos/${REPO}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          if [ -z "$RELEASE_ID" ]; then
+            echo "No release for $TAG yet -- nothing to clean."
+            exit 0
+          fi
+          ASSET_IDS=$(gh api "repos/${REPO}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | select(.name == "latest.json") | .id')
+          for id in $ASSET_IDS; do
+            gh api -X DELETE "repos/${REPO}/releases/assets/${id}"
+            echo "Deleted stale latest.json asset $id"
+          done
+
   # The matrix is built here rather than declared on `build`, so that a
   # dispatch can rebuild a subset of it: a job-level `if` cannot see the
   # `matrix` context, which is the only place a static matrix could be
@@ -82,7 +112,7 @@ jobs:
           jq -r '.[].id' <<<"$include" | sed 's/^/building: /'
 
   build:
-    needs: matrix
+    needs: [matrix, reset-updater-manifest]
     permissions:
       contents: write
     strategy:
@@ -195,6 +225,11 @@ jobs:
         if: matrix.portable == ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts (.sig files, latest.json). Generate the
+          # keypair with `npx tauri signer generate`; the pubkey is in
+          # tauri.conf.json's plugins.updater.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: buzzdetect ${{ inputs.tag || github.ref_name }}
@@ -212,6 +247,11 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts (.sig files, latest.json). Generate the
+          # keypair with `npx tauri signer generate`; the pubkey is in
+          # tauri.conf.json's plugins.updater.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           TAG="${{ inputs.tag || github.ref_name }}"
@@ -253,6 +293,43 @@ jobs:
           find src-tauri/target/release/bundle dist -maxdepth 2 -type f \
             \( -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' -o -name '*.zip' \) \
             -exec ls -lh {} + 2>/dev/null || true
+
+  # latest.json advertising a signature that doesn't belong to the artifact it
+  # points at makes the in-app updater fail for every user. Each platform
+  # entry's signature must equal the sidecar .sig published beside the artifact.
+  verify-updater-manifest:
+    needs: build
+    if: ${{ always() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # write, not read: draft releases are only visible to tokens with push access
+      contents: write
+    steps:
+      - name: Verify latest.json signatures match the published artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" \
+            -p latest.json -p '*.sig' -D . --clobber
+          python3 - <<'PY'
+          import json, os, sys
+
+          manifest = json.load(open('latest.json'))
+          failed = False
+          for name, platform in manifest['platforms'].items():
+              sidecar = os.path.basename(platform['url']) + '.sig'
+              if not os.path.exists(sidecar):
+                  print(f'FAIL {name}: no {sidecar} published alongside the artifact')
+                  failed = True
+                  continue
+              if platform['signature'].strip() != open(sidecar).read().strip():
+                  print(f'FAIL {name}: latest.json signature does not match {sidecar}')
+                  failed = True
+              else:
+                  print(f'ok   {name} -> {sidecar}')
+          sys.exit(1 if failed else 0)
+          PY
 
   # Renames the installers to something a user can recognise: the raw ones
   # carry version and arch strings that mean nothing to someone just trying to
@@ -307,9 +384,32 @@ jobs:
 
           rename_asset "buzzdetect_${VERSION}_aarch64.dmg"   "buzzdetect-macOS-AppleSilicon.dmg"
           rename_asset "buzzdetect_${VERSION}_x64.dmg"       "buzzdetect-macOS-Intel.dmg"
-          rename_asset "buzzdetect_${VERSION}_amd64.AppImage" "buzzdetect-Linux.AppImage"
           rename_asset "buzzdetect_${VERSION}_amd64.deb"      "buzzdetect-Linux.deb"
-          rename_asset "buzzdetect_${VERSION}_x64-setup.exe"  "buzzdetect-Windows.exe"
+
+          # latest.json points the updater at the raw-named AppImage and NSIS
+          # installer, so renaming those would 404 it. Publish friendly-named
+          # copies instead. This has to go through the authenticated asset
+          # endpoint: the release is still a draft, and an unauthenticated
+          # fetch of a draft asset returns a 9-byte "Not Found" body.
+          copy_asset() {
+            local from="$1" to="$2" id size
+            id=$(jq -r ".[] | select(.name == \"$from\") | .id" <<<"$assets")
+            if [ -z "$id" ]; then
+              echo "Skipped (not found): $from"
+              return
+            fi
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/${REPO}/releases/assets/${id}" > "$to"
+            size=$(stat -c%s "$to")
+            if [ "$size" -lt 1000000 ]; then
+              echo "Downloaded $from is only ${size} bytes; refusing to publish $to" >&2
+              exit 1
+            fi
+            gh release upload "$TAG" "$to" -R "$REPO" --clobber
+            echo "Copied: $from -> $to"
+          }
+          copy_asset "buzzdetect_${VERSION}_amd64.AppImage" "buzzdetect-Linux.AppImage"
+          copy_asset "buzzdetect_${VERSION}_x64-setup.exe"  "buzzdetect-Windows.exe"
 
           # Windows is the only bundled-CUDA build, and it ships as a portable
           # archive rather than an installer; see the matrix comments for why.
