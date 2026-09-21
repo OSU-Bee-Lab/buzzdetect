@@ -24,7 +24,7 @@
 {:else}
 	<button type="button" class="path-display" data-tooltip={value} onclick={() => (editing = true)}>
 		<!-- rtl + ellipsis clips the parent from its left edge; <bdi> keeps the text itself reading left to right. -->
-		{#if parts.parent}<span class="parent"><bdi>{parts.parent}</bdi></span>{/if}<span class="leaf">{parts.leaf}</span>
+		{#if parts.parent}<span class="parent"><bdi>{parts.parent}</bdi></span>{/if}<span class="leaf" class:solo={!parts.parent}>{parts.leaf}</span>
 	</button>
 {/if}
 
@@ -65,5 +65,9 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		font-weight: 600;
+	}
+
+	.leaf.solo {
+		font-weight: inherit;
 	}
 </style>
