@@ -659,9 +659,23 @@ async fn gpu_status(app: AppHandle) -> Result<GpuStatus, String> {
     }
 }
 
+/// The engine is a console-subsystem exe, so a GUI parent spawning it on
+/// Windows gets a blank console window unless told otherwise. Children of the
+/// engine (multiprocessing workers) inherit the hidden console.
+fn hide_console(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// Run the engine's own GPU probe and read back the providers it managed to load.
 fn probe_gpu(engine: &Engine) -> Result<Vec<String>, String> {
     let mut cmd = Command::new(&engine.program);
+    hide_console(&mut cmd);
     cmd.current_dir(&engine.workdir)
         .args(&engine.prefix_args)
         .arg("--probe_gpu")
@@ -724,9 +738,9 @@ fn kill_pid(pid: u32) {
 
 #[cfg(windows)]
 fn kill_pid(pid: u32) {
-    let _ = Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
-        .status();
+    let mut cmd = Command::new("taskkill");
+    hide_console(&mut cmd);
+    let _ = cmd.args(["/F", "/PID", &pid.to_string()]).status();
 }
 
 // Set when the user asks for a stop, so the run's history entry can say
@@ -1040,6 +1054,7 @@ fn start_analysis(
     }
 
     let mut cmd = Command::new(&engine.program);
+    hide_console(&mut cmd);
     cmd.current_dir(&engine.workdir)
         .args(&engine.prefix_args)
         .args(engine_args(&settings))
@@ -1283,9 +1298,9 @@ fn signal_engine(pid: u32, signal: i32) {
 fn signal_engine(pid: u32, _signal: i32) {
     // No process groups to signal; /T walks the child tree instead, which is
     // what actually gets PyInstaller's forked worker.
-    let _ = Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .status();
+    let mut cmd = Command::new("taskkill");
+    hide_console(&mut cmd);
+    let _ = cmd.args(["/F", "/T", "/PID", &pid.to_string()]).status();
 }
 
 #[tauri::command]
