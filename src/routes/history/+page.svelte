@@ -44,7 +44,7 @@
 	});
 </script>
 
-<svelte:head><title>Past runs</title></svelte:head>
+<svelte:head><title>History</title></svelte:head>
 
 <div class="window">
 	<nav>
@@ -56,7 +56,7 @@
 				<span class="detail">out: {baseName(e.manifest.dir_out ?? '?')}</span>
 			</button>
 		{:else}
-			<p class="empty">No past runs.</p>
+			<p class="empty">No runs yet.</p>
 		{/each}
 		{#if entries.length}
 			<button class="clear" onclick={clear}>Clear history</button>

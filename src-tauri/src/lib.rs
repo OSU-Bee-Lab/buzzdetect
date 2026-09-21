@@ -852,7 +852,7 @@ async fn open_history(app: AppHandle) -> Result<(), String> {
         return window.set_focus().map_err(|e| e.to_string());
     }
     tauri::WebviewWindowBuilder::new(&app, HISTORY_WINDOW, tauri::WebviewUrl::App("history".into()))
-        .title("Past runs")
+        .title("History")
         .inner_size(820.0, 560.0)
         .min_inner_size(520.0, 320.0)
         .build()

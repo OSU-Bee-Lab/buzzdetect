@@ -855,7 +855,7 @@ Can produce very large log files."
 					<p class="error">{startError}</p>
 				{/if}
 			{/if}
-			<button type="button" class="history-btn" onclick={openHistory}>Past runs</button>
+			<button type="button" class="history-btn" onclick={openHistory}>History</button>
 		</div>
 	</section>
 
