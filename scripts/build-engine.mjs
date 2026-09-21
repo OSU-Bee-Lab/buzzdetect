@@ -34,6 +34,7 @@
 
 import { execFileSync } from 'node:child_process';
 import {
+	copyFileSync,
 	cpSync,
 	existsSync,
 	readFileSync,
@@ -234,6 +235,8 @@ function assemblePayload() {
 	mkdirSync(modelsOut, { recursive: true });
 
 	const shipped = readShippedModels();
+	// The app lists models in this order, so the list rides along.
+	copyFileSync(join(ROOT, SHIPLIST), join(modelsOut, SHIPLIST));
 	for (const name of shipped) {
 		const dir = join(modelsSrc, name);
 		if (!existsSync(dir)) {

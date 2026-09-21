@@ -278,12 +278,30 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
             }
         }
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
+    // Shipped models first, in shipped-models.txt order; the rest alphabetical.
+    let order = shipped_order(&roots[0]);
+    let rank = |name: &str| order.iter().position(|n| n == name).unwrap_or(usize::MAX);
+    out.sort_by(|a, b| rank(&a.name).cmp(&rank(&b.name)).then_with(|| a.name.cmp(&b.name)));
     Ok(out)
 }
 
 #[tauri::command]
 fn get_model_classes(app: AppHandle, modelname: String) -> Result<Vec<String>, String> {
+/// Names from shipped-models.txt (one per line, `#` comments). A bundle carries
+/// a copy inside models/; a checkout has it at the repo root, two levels up
+/// from engine/models/.
+fn shipped_order(models_root: &std::path::Path) -> Vec<String> {
+    let text = ["shipped-models.txt", "../../shipped-models.txt"]
+        .iter()
+        .find_map(|p| std::fs::read_to_string(models_root.join(p)).ok())
+        .unwrap_or_default();
+    text.lines()
+        .map(|l| l.split('#').next().unwrap_or("").trim())
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
     let config_path = model_dir(&app, &modelname)
         .ok_or_else(|| format!("model '{modelname}' not found"))?
         .join("config_model.json");
