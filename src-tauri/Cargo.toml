@@ -1,6 +1,6 @@
 [package]
 name = "buzzdetect"
-version = "2.0.0-a3"
+version = "2.0.0-a4"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
