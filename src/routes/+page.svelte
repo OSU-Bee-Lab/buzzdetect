@@ -144,6 +144,15 @@
 			if (!(run.running || run.stopping)) await reloadModels();
 			refreshModelsBadge();
 		});
+		// Use this model, from the Models window.
+		const unlistenUseModel = listen<string>('models-use', async (e) => {
+			if (run.running || run.stopping) return;
+			if (!models.some((m) => m.name === e.payload)) await reloadModels();
+			if (!models.some((m) => m.name === e.payload)) return;
+			const from = settings.value.modelname;
+			settings.value.modelname = e.payload;
+			await onModelChange(from);
+		});
 		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) =>
 			deliver(() => {
 				flushOutput();
@@ -212,7 +221,8 @@
 				};
 			});
 
-		invoke<ModelInfo[]>('list_models').then((list) => {
+		invoke<ModelInfo[]>('list_models').then((all) => {
+			const list = pickable(all);
 			models = list;
 			if (!settings.value.modelname || !list.some((m) => m.name === settings.value.modelname)) {
 				settings.value.modelname = list[0]?.name ?? '';
@@ -228,6 +238,7 @@
 			unlistenExit.then((f) => f());
 			unlistenUse.then((f) => f());
 			unlistenModels.then((f) => f());
+			unlistenUseModel.then((f) => f());
 			if (flushTimer !== null) clearTimeout(flushTimer);
 		};
 	});
@@ -362,8 +373,11 @@
 			.catch(() => {});
 	}
 
+	// Disabled models (Models window) stay installed but aren't offered here.
+	const pickable = (list: ModelInfo[]) => list.filter((m) => !m.disabled);
+
 	async function reloadModels() {
-		models = await invoke<ModelInfo[]>('list_models');
+		models = pickable(await invoke<ModelInfo[]>('list_models'));
 		if (!models.some((m) => m.name === settings.value.modelname)) {
 			settings.value.modelname = models[0]?.name ?? '';
 		}

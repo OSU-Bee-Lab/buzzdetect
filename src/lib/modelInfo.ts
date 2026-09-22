@@ -11,6 +11,7 @@ export interface ModelInfo {
 	removable: boolean;
 	description: string | null;
 	has_readme: boolean;
+	disabled: boolean;
 }
 
 export interface ThresholdStat {
@@ -102,6 +103,7 @@ export interface ModelRow {
 	min_app_version: string | null;
 	update: boolean;
 	ignored: boolean;
+	disabled: boolean;
 	notify: boolean;
 	download_size: number | null;
 }
@@ -117,13 +119,15 @@ export interface ModelGroup {
 }
 
 /** Available (not installed or ignored) models, then installed ones, then
- * ignored ones; within each, anything badged first. Empty groups are dropped. */
+ * disabled and ignored ones; within each, anything badged first. Empty groups
+ * are dropped. */
 export function groupModels(rows: ModelRow[]): ModelGroup[] {
 	const badgedFirst = (list: ModelRow[]) =>
 		[...list].sort((a, b) => Number(b.notify) - Number(a.notify));
 	return [
 		{ title: 'Available', rows: badgedFirst(rows.filter((r) => !r.installed && !r.ignored)) },
-		{ title: 'Installed', rows: badgedFirst(rows.filter((r) => r.installed)) },
+		{ title: 'Installed', rows: badgedFirst(rows.filter((r) => r.installed && !r.disabled)) },
+		{ title: 'Disabled', rows: rows.filter((r) => r.installed && r.disabled) },
 		{ title: 'Ignored', rows: rows.filter((r) => !r.installed && r.ignored) }
 	].filter((g) => g.rows.length > 0);
 }

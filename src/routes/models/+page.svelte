@@ -5,7 +5,8 @@
 	// open_models. Downloads, imports, removals and ignores all happen here;
 	// each emits models-changed, which the main window listens for too.
 	import { invoke } from '@tauri-apps/api/core';
-	import { listen } from '@tauri-apps/api/event';
+	import { emitTo, listen } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { marked } from 'marked';
@@ -44,6 +45,24 @@
 	const html = $derived(
 		details?.readme ? DOMPurify.sanitize(marked.parse(details.readme, { async: false })) : ''
 	);
+	const descriptionHtml = $derived.by(() => {
+		const d = details?.description ?? row?.description;
+		return d ? DOMPurify.sanitize(marked.parseInline(d, { async: false })) : '';
+	});
+
+	let navWidth = $state(200);
+	let resizing = false;
+	function startResize(e: PointerEvent) {
+		resizing = true;
+		(e.target as HTMLElement).setPointerCapture(e.pointerId);
+	}
+	function onResize(e: PointerEvent) {
+		if (!resizing) return;
+		navWidth = Math.min(420, Math.max(140, e.clientX));
+	}
+	function stopResize() {
+		resizing = false;
+	}
 
 	async function refresh(fromNetwork = false) {
 		overview = await invoke<ModelsOverview>('models_overview', { refresh: fromNetwork });
@@ -112,6 +131,17 @@
 	const setIgnored = (name: string, ignored: boolean) =>
 		act(() => invoke('set_model_ignored', { name, ignored }));
 
+	const setDisabled = (name: string, disabled: boolean) =>
+		act(() => invoke('set_model_disabled', { name, disabled }));
+
+	// The main window owns the settings; it picks the model up from this.
+	async function useModel(name: string) {
+		await act(async () => {
+			await emitTo('main', 'models-use', name);
+			await getCurrentWindow().close();
+		});
+	}
+
 	function remove(name: string) {
 		if (!confirm(`Delete the model "${name}"? Its files will be deleted.`)) return;
 		act(() => invoke('remove_model', { name }));
@@ -154,7 +184,9 @@
 			: !r.installed && !r.compatible
 				? `Needs buzzdetect ${r.min_app_version} or newer`
 				: r.bundled
-					? 'Comes with buzzdetect'
+					? r.disabled
+						? 'Comes with buzzdetect; hidden from the model picker'
+						: 'Comes with buzzdetect'
 					: r.installed
 						? r.in_catalog
 							? 'Downloaded'
@@ -181,7 +213,7 @@
 
 <svelte:head><title>{selected ? `${selected} — Models` : 'Models'}</title></svelte:head>
 
-<div class="window">
+<div class="window" style="grid-template-columns: {navWidth}px 6px 1fr">
 	<nav>
 		{#each groups as g}
 			<h3>{g.title}</h3>
@@ -189,7 +221,7 @@
 				<button
 					type="button"
 					class:active={m.name === selected}
-					class:dim={m.ignored || (!m.installed && !m.compatible)}
+					class:dim={m.ignored || m.disabled || (!m.installed && !m.compatible)}
 					onclick={() => load(m.name)}
 					><span class="name">{m.name}</span>{#if m.notify}<span
 							class="badge"
@@ -199,50 +231,28 @@
 			{/each}
 		{/each}
 		<div class="nav-foot">
-			<button type="button" class="import" onclick={importModel}>Import from file…</button>
+			<button type="button" class="import" onclick={importModel}>Import from .zip…</button>
 			{#if overview?.catalog_error}
 				<p class="hint" title={overview.catalog_error}>Couldn't reach the model catalog.</p>
 			{/if}
 		</div>
 	</nav>
-	<main bind:this={body}>
+	<div
+		class="resize-handle"
+		role="separator"
+		aria-orientation="vertical"
+		onpointerdown={startResize}
+		onpointermove={onResize}
+		onpointerup={stopResize}
+	></div>
+	<main>
+		<div class="content" bind:this={body}>
 		{#if selected}
-			<header>
-				<h1>{selected}</h1>
-				{#if row}
-					<div class="actions">
-						{#if row.installed}
-							{#if row.update}
-								<button
-									type="button"
-									class="primary"
-									disabled={downloading[row.name]}
-									onclick={() => download(row.name)}
-									>{downloading[row.name] ? 'Updating…' : 'Update'}</button
-								>
-							{/if}
-							{#if !row.bundled}
-								<button type="button" onclick={() => remove(row.name)}>Remove</button>
-							{/if}
-						{:else}
-							<button
-								type="button"
-								class="primary"
-								disabled={!row.compatible || downloading[row.name]}
-								onclick={() => download(row.name)}
-								>{downloading[row.name] ? 'Downloading…' : 'Download'}</button
-							>
-							<button type="button" onclick={() => setIgnored(row.name, !row.ignored)}
-								>{row.ignored ? 'Un-ignore' : 'Ignore'}</button
-							>
-						{/if}
-						<span class="status" class:notify={row.update}>{status(row)}</span>
-						{#if downloading[row.name]}<span class="spinner" aria-hidden="true"></span>{/if}
-					</div>
-				{/if}
-			</header>
-			{#if details?.description ?? row?.description}
-				<p class="description">{details?.description ?? row?.description}</p>
+			<h1>{selected}</h1>
+			{#if descriptionHtml}
+				<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized above -->
+				<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+				<p class="description" onclick={onClick}>{@html descriptionHtml}</p>
 			{/if}
 		{/if}
 		{#if error}
@@ -298,6 +308,48 @@
 			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 			<article class="readme" onclick={onClick}>{@html html}</article>
 		{/if}
+		</div>
+		{#if row}
+			<footer>
+				<span class="status" class:notify={row.update}>{status(row)}</span>
+				{#if downloading[row.name]}<span class="spinner" aria-hidden="true"></span>{/if}
+				<span class="actions">
+					{#if row.installed}
+						{#if row.bundled}
+							<button type="button" onclick={() => setDisabled(row.name, !row.disabled)}
+								>{row.disabled ? 'Enable' : 'Disable'}</button
+							>
+						{:else}
+							<button type="button" class="danger" onclick={() => remove(row.name)}>Delete</button>
+						{/if}
+						{#if row.update}
+							<button
+								type="button"
+								disabled={downloading[row.name]}
+								onclick={() => download(row.name)}
+								>{downloading[row.name] ? 'Updating…' : 'Update'}</button
+							>
+						{/if}
+						{#if !row.disabled}
+							<button type="button" class="primary" onclick={() => useModel(row.name)}
+								>Use this model</button
+							>
+						{/if}
+					{:else}
+						<button type="button" onclick={() => setIgnored(row.name, !row.ignored)}
+							>{row.ignored ? 'Un-ignore' : 'Ignore'}</button
+						>
+						<button
+							type="button"
+							class="primary"
+							disabled={!row.compatible || downloading[row.name]}
+							onclick={() => download(row.name)}
+							>{downloading[row.name] ? 'Downloading…' : 'Download'}</button
+						>
+					{/if}
+				</span>
+			</footer>
+		{/if}
 	</main>
 </div>
 
@@ -316,7 +368,6 @@
 
 	.window {
 		display: grid;
-		grid-template-columns: 200px 1fr;
 		height: 100vh;
 	}
 
@@ -325,8 +376,22 @@
 		flex-direction: column;
 		gap: 0.15rem;
 		padding: 1rem 0.5rem;
-		border-right: 1px solid rgba(127, 127, 127, 0.2);
 		overflow-y: auto;
+		min-width: 0;
+	}
+
+	.resize-handle {
+		cursor: col-resize;
+		touch-action: none;
+	}
+
+	.resize-handle::after {
+		content: '';
+		display: block;
+		width: 1px;
+		height: 100%;
+		margin: 0 auto;
+		background: rgba(127, 127, 127, 0.25);
 	}
 
 	nav button {
@@ -402,23 +467,25 @@
 		margin: 0.5rem 0.3rem 0;
 	}
 
-	header {
+	footer {
 		display: flex;
-		flex-wrap: wrap;
 		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem 1rem;
-		margin-bottom: 0.25rem;
-	}
-
-	header h1 {
-		margin: 0;
+		gap: 0.5rem;
+		padding: 0.6rem 1.75rem;
+		border-top: 1px solid rgba(127, 127, 127, 0.2);
 	}
 
 	.actions {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
+		margin-left: auto;
+	}
+
+	.actions button.danger {
+		border-color: #d33;
+		color: #d33;
+		background: none;
 	}
 
 	.actions button {
@@ -469,9 +536,16 @@
 	}
 
 	main {
+		display: grid;
+		grid-template-rows: 1fr auto;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	.content {
 		overflow-y: auto;
 		padding: 1.25rem 1.75rem 2rem;
-		min-width: 0;
+		min-height: 0;
 	}
 
 	h1 {

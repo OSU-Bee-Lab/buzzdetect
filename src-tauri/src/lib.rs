@@ -228,6 +228,8 @@ struct ModelInfo {
     /// config_model.json's optional one-line `description`, written by hand.
     description: Option<String>,
     has_readme: bool,
+    /// Hidden from the model picker by the user (see catalog::set_model_disabled).
+    disabled: bool,
 }
 
 impl ModelInfo {
@@ -238,6 +240,7 @@ impl ModelInfo {
             removable,
             description: description_of(&config),
             has_readme: dir.join(README).is_file(),
+            disabled: false,
         }
     }
 }
@@ -260,6 +263,7 @@ fn description_of(config: &serde_json::Value) -> Option<String> {
 #[tauri::command]
 fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
     let roots = model_roots(&app);
+    let disabled = catalog::disabled_models(&app);
     let mut out: Vec<ModelInfo> = vec![];
     for (i, root) in roots.iter().enumerate() {
         let removable = i > 0; // root 0 is the bundled dir
@@ -281,7 +285,9 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
                 if out.iter().any(|m| m.name == name) {
                     continue;
                 }
-                out.push(ModelInfo::read(&path, name, removable));
+                let mut info = ModelInfo::read(&path, name, removable);
+                info.disabled = disabled.contains(name);
+                out.push(info);
             }
         }
     }
@@ -1487,6 +1493,7 @@ pub fn run() {
             catalog::models_overview,
             catalog::download_model,
             catalog::set_model_ignored,
+            catalog::set_model_disabled,
             catalog::catalog_model_details,
             open_model_file,
             import_model,

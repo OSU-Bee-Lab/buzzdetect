@@ -176,10 +176,16 @@ async fn catalog_entry(name: &str) -> Result<CatalogEntry, String> {
         .ok_or_else(|| format!("'{name}' isn't in the model catalog"))
 }
 
+/// The user's choices about models, in app-local data beside the user store.
 #[derive(Serialize, Deserialize, Default)]
 struct Prefs {
+    /// Catalog models not to badge.
     #[serde(default)]
     ignored: Vec<String>,
+    /// Installed models hidden from the model picker -- meant for bundled
+    /// ones, which can't be removed.
+    #[serde(default)]
+    disabled: Vec<String>,
 }
 
 fn prefs_path(app: &AppHandle) -> Option<PathBuf> {
@@ -191,6 +197,27 @@ fn read_prefs(app: &AppHandle) -> Prefs {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default()
+}
+
+fn write_prefs(app: &AppHandle, prefs: &Prefs) -> Result<(), String> {
+    let path = prefs_path(app).ok_or("couldn't resolve the app data directory")?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())
+}
+
+/// Add `name` to, or take it out of, one of the prefs lists.
+fn toggle(list: &mut Vec<String>, name: String, on: bool) {
+    list.retain(|n| *n != name);
+    if on {
+        list.push(name);
+    }
+}
+
+pub(crate) fn disabled_models(app: &AppHandle) -> HashSet<String> {
+    read_prefs(app).disabled.into_iter().collect()
 }
 
 /// sha256 of a file, remembered by (size, mtime) so listing the models doesn't
@@ -237,6 +264,7 @@ struct Installed {
     description: Option<String>,
     /// Its files don't match the catalog's. Only computed for imported models.
     differs: bool,
+    disabled: bool,
 }
 
 /// One row of the Models window's list.
@@ -253,6 +281,8 @@ struct ModelRow {
     /// An imported model whose files differ from the catalog's.
     update: bool,
     ignored: bool,
+    /// Installed but hidden from the model picker.
+    disabled: bool,
     /// Worth a badge: a compatible model not installed and not ignored, or
     /// an update. Updates can't be ignored -- they're how fixes arrive.
     notify: bool,
@@ -289,6 +319,7 @@ fn rows(
                 min_app_version: entry.and_then(|e| e.min_app_version.clone()),
                 update,
                 ignored: false,
+                disabled: m.disabled,
                 notify: update,
                 download_size: None,
             }
@@ -310,6 +341,7 @@ fn rows(
             min_app_version: e.min_app_version.clone(),
             update: false,
             ignored: is_ignored,
+            disabled: false,
             notify: compatible && !is_ignored,
             download_size: Some(e.files.values().filter_map(|f| f.size).sum()),
         });
@@ -345,6 +377,7 @@ pub async fn models_overview(app: AppHandle, refresh: bool) -> Result<ModelsOver
                 bundled,
                 description: m.description,
                 differs,
+                disabled: m.disabled,
             }
         })
         .collect();
@@ -460,17 +493,20 @@ pub async fn download_model(app: AppHandle, name: String) -> Result<(), String> 
 /// Stop (or resume) badging a catalog model the user doesn't want.
 #[tauri::command]
 pub fn set_model_ignored(app: AppHandle, name: String, ignored: bool) -> Result<(), String> {
-    let path = prefs_path(&app).ok_or("couldn't resolve the app data directory")?;
     let mut prefs = read_prefs(&app);
-    prefs.ignored.retain(|n| *n != name);
-    if ignored {
-        prefs.ignored.push(name);
-    }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    let text = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    toggle(&mut prefs.ignored, name, ignored);
+    write_prefs(&app, &prefs)?;
+    let _ = app.emit(MODELS_CHANGED, ());
+    Ok(())
+}
+
+/// Hide (or show again) an installed model in the model picker. The engine
+/// can still run it; it just isn't offered.
+#[tauri::command]
+pub fn set_model_disabled(app: AppHandle, name: String, disabled: bool) -> Result<(), String> {
+    let mut prefs = read_prefs(&app);
+    toggle(&mut prefs.disabled, name, disabled);
+    write_prefs(&app, &prefs)?;
     let _ = app.emit(MODELS_CHANGED, ());
     Ok(())
 }
@@ -526,6 +562,7 @@ mod tests {
             bundled,
             description: None,
             differs,
+            disabled: false,
         }
     }
 

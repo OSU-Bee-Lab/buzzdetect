@@ -97,6 +97,7 @@ function row(name: string, over: Partial<ModelRow> = {}): ModelRow {
 		min_app_version: null,
 		update: false,
 		ignored: false,
+		disabled: false,
 		notify: false,
 		download_size: null,
 		...over
@@ -104,17 +105,19 @@ function row(name: string, over: Partial<ModelRow> = {}): ModelRow {
 }
 
 describe('groupModels', () => {
-	it('puts available, then installed, then ignored, badged first within each', () => {
+	it('puts available, installed, disabled, then ignored, badged first within each', () => {
 		const groups = groupModels([
 			row('installed', { installed: true }),
 			row('stale', { installed: true, update: true, notify: true }),
 			row('too_new', { compatible: false }),
 			row('new', { notify: true }),
-			row('ignored', { ignored: true })
+			row('ignored', { ignored: true }),
+			row('bundled_off', { installed: true, bundled: true, disabled: true })
 		]);
 		expect(groups.map((g) => [g.title, g.rows.map((r) => r.name)])).toEqual([
 			['Available', ['new', 'too_new']],
 			['Installed', ['stale', 'installed']],
+			['Disabled', ['bundled_off']],
 			['Ignored', ['ignored']]
 		]);
 	});
