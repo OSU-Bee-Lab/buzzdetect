@@ -21,7 +21,8 @@
 		classes_out: string[] | null;
 	}
 
-	let models = $state<ModelInfo[]>([]);
+	// Every installed model, disabled ones included.
+	let installed = $state<ModelInfo[]>([]);
 	let modelActionError = $state<string | null>(null);
 	let availableClasses = $state<string[]>([]);
 	let startError = $state<string | null>(null);
@@ -149,8 +150,8 @@
 		// Use this model, from the Models window.
 		const unlistenUseModel = listen<string>('models-use', async (e) => {
 			if (run.running || run.stopping) return;
-			if (!models.some((m) => m.name === e.payload)) await reloadModels();
-			if (!models.some((m) => m.name === e.payload)) return;
+			if (!installed.some((m) => m.name === e.payload)) await reloadModels();
+			if (!installed.some((m) => m.name === e.payload)) return;
 			const from = settings.value.modelname;
 			settings.value.modelname = e.payload;
 			await onModelChange(from);
@@ -224,10 +225,9 @@
 			});
 
 		invoke<ModelInfo[]>('list_models').then((all) => {
-			const list = pickable(all);
-			models = list;
-			if (!settings.value.modelname || !list.some((m) => m.name === settings.value.modelname)) {
-				settings.value.modelname = list[0]?.name ?? '';
+			installed = all;
+			if (!settings.value.modelname || !all.some((m) => m.name === settings.value.modelname)) {
+				settings.value.modelname = all.find((m) => !m.disabled)?.name ?? '';
 			}
 			onModelChange();
 		});
@@ -361,6 +361,13 @@
 	// The model picker's value before its latest change; see onModelChange.
 	let modelBeforeChange = settings.value.modelname;
 
+	// What the picker offers. Disabled models (Models window) stay installed but
+	// aren't listed -- except the selected one, when a past run's settings
+	// chose it, so the picker names what will actually run.
+	const models = $derived(
+		installed.filter((m) => !m.disabled || m.name === settings.value.modelname)
+	);
+
 	const currentModel = $derived(models.find((m) => m.name === settings.value.modelname));
 
 	function openModels() {
@@ -379,13 +386,13 @@
 			.catch(() => {});
 	}
 
-	// Disabled models (Models window) stay installed but aren't offered here.
-	const pickable = (list: ModelInfo[]) => list.filter((m) => !m.disabled);
-
+	// After the Models window changes something. Disabling the selected model
+	// there moves the selection off it.
 	async function reloadModels() {
-		models = pickable(await invoke<ModelInfo[]>('list_models'));
-		if (!models.some((m) => m.name === settings.value.modelname)) {
-			settings.value.modelname = models[0]?.name ?? '';
+		installed = await invoke<ModelInfo[]>('list_models');
+		const current = installed.find((m) => m.name === settings.value.modelname);
+		if (!current || current.disabled) {
+			settings.value.modelname = installed.find((m) => !m.disabled)?.name ?? '';
 		}
 		await onModelChange(modelBeforeChange);
 	}
@@ -433,7 +440,7 @@
 	// waits for one to be chosen. A disabled one is still installed, so it's used.
 	async function useHistorySettings(h: HistorySettings) {
 		if (run.running || run.stopping) return;
-		const installed = await invoke<ModelInfo[]>('list_models').catch(() => []);
+		installed = await invoke<ModelInfo[]>('list_models').catch(() => installed);
 		const v = settings.value;
 		v.modelname = installed.some((m) => m.name === h.modelname) ? h.modelname : '';
 		if (h.dir_audio) v.dirAudio = h.dir_audio;
