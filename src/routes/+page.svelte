@@ -54,7 +54,9 @@
 	let gpu = $state<GpuStatus | null>(null);
 
 	const modelMismatch = $derived(
-		manifest !== null && manifest.modelname !== settings.value.modelname
+		manifest !== null &&
+			settings.value.modelname !== '' &&
+			manifest.modelname !== settings.value.modelname
 	);
 	const manifestLocked = $derived(manifest !== null && !modelMismatch);
 
@@ -323,7 +325,11 @@
 	// run's settings bring their own dirOut). Either way the folder's
 	// manifest is re-checked against the new model.
 	async function onModelChange(from?: string) {
-		if (!settings.value.modelname) return;
+		if (!settings.value.modelname) {
+			availableClasses = [];
+			await checkManifest();
+			return;
+		}
 		const name = settings.value.modelname;
 		if (
 			!settings.value.dirOut ||
@@ -423,10 +429,13 @@
 	// Refill the settings from a past run (sent by the past-runs window).
 	// dirOut counts as touched so the model change below doesn't swap it for
 	// the per-model default.
+	// A model that has since been deleted leaves the picker blank; Launch
+	// waits for one to be chosen. A disabled one is still installed, so it's used.
 	async function useHistorySettings(h: HistorySettings) {
 		if (run.running || run.stopping) return;
+		const installed = await invoke<ModelInfo[]>('list_models').catch(() => []);
 		const v = settings.value;
-		v.modelname = h.modelname;
+		v.modelname = installed.some((m) => m.name === h.modelname) ? h.modelname : '';
 		if (h.dir_audio) v.dirAudio = h.dir_audio;
 		if (h.dir_out) {
 			v.dirOut = h.dir_out;
@@ -602,7 +611,7 @@
 
 		<!-- for= rather than nesting alone: the Info button is the label's first
 		     labelable descendant, so without it a click on "Model" would press it. -->
-		<label class:field-error={modelMismatch} for="model-select">
+		<label class:field-error={modelMismatch || !settings.value.modelname} for="model-select">
 			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
 				<button type="button" class="models-btn" onclick={openModels}
 					>View Models{#if modelsBadge > 0}<span
@@ -619,6 +628,9 @@
 						settings.save();
 					}}
 				>
+					{#if !settings.value.modelname}
+						<option value="" disabled>Select a model</option>
+					{/if}
 					{#each models as m}
 						<option value={m.name}>{m.name}</option>
 					{/each}
