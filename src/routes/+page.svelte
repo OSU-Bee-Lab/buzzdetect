@@ -14,7 +14,7 @@
 	import ProgressBar from '$lib/ProgressBar.svelte';
 	import PathField from '$lib/PathField.svelte';
 	import type { HistorySettings } from '$lib/history';
-	import type { ModelInfo } from '$lib/modelInfo';
+	import type { ModelInfo, ModelsOverview } from '$lib/modelInfo';
 
 	interface Manifest {
 		modelname: string;
@@ -139,6 +139,11 @@
 			deliver(() => queueOutput({ kind: 'log', line: e.payload.line, seq: e.payload.seq }))
 		);
 		const unlistenUse = listen<HistorySettings>('history-use', (e) => useHistorySettings(e.payload));
+		// A download, import, removal or ignore in the Models window.
+		const unlistenModels = listen('models-changed', async () => {
+			if (!(run.running || run.stopping)) await reloadModels();
+			refreshModelsBadge();
+		});
 		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) =>
 			deliver(() => {
 				flushOutput();
@@ -214,6 +219,7 @@
 			}
 			onModelChange();
 		});
+		refreshModelsBadge();
 		checkManifest();
 
 		return () => {
@@ -221,6 +227,7 @@
 			unlistenLog.then((f) => f());
 			unlistenExit.then((f) => f());
 			unlistenUse.then((f) => f());
+			unlistenModels.then((f) => f());
 			if (flushTimer !== null) clearTimeout(flushTimer);
 		};
 	});
@@ -298,14 +305,22 @@
 		return await join(await documentDir(), 'buzzdetect', modelname);
 	}
 
-	// Re-derive the class list whenever the model changes. dirOut is only
-	// filled (with a per-model default) when empty; changing model never moves
-	// it, but the folder's manifest is re-checked against the new model.
-	async function onModelChange() {
+	// Re-derive the class list whenever the model changes. dirOut is filled
+	// with the per-model default when empty, and follows the model only while
+	// it is still the previous model's default -- `from` is that previous
+	// model, passed only for a change the user made in the picker (a past
+	// run's settings bring their own dirOut). Either way the folder's
+	// manifest is re-checked against the new model.
+	async function onModelChange(from?: string) {
 		if (!settings.value.modelname) return;
-		if (!settings.value.dirOut) {
-			settings.value.dirOut = await defaultDirOut(settings.value.modelname);
+		const name = settings.value.modelname;
+		if (
+			!settings.value.dirOut ||
+			(from && from !== name && settings.value.dirOut === (await defaultDirOut(from)))
+		) {
+			settings.value.dirOut = await defaultDirOut(name);
 		}
+		modelBeforeChange = name;
 		await checkManifest();
 		try {
 			const classes = await invoke<string[]>('get_model_classes', {
@@ -326,55 +341,33 @@
 		settings.save();
 	}
 
-	const currentModel = $derived(models.find((m) => m.name === settings.value.modelname));
-	let currentModelRemovable = $derived(currentModel?.removable ?? false);
+	// The model picker's value before its latest change; see onModelChange.
+	let modelBeforeChange = settings.value.modelname;
 
-	function openModelInfo() {
+	const currentModel = $derived(models.find((m) => m.name === settings.value.modelname));
+
+	function openModels() {
 		modelActionError = null;
-		invoke('open_model_info', { modelname: settings.value.modelname }).catch(
+		invoke('open_models', { modelname: settings.value.modelname }).catch(
 			(e) => (modelActionError = String(e))
 		);
 	}
 
-	async function reloadModels(select?: string) {
+	// Catalog models not yet installed or ignored, plus updates: the View
+	// Models button's badge. A failed catalog fetch just means no badge.
+	let modelsBadge = $state(0);
+	function refreshModelsBadge() {
+		invoke<ModelsOverview>('models_overview', { refresh: false })
+			.then((o) => (modelsBadge = o.models.filter((m) => m.notify).length))
+			.catch(() => {});
+	}
+
+	async function reloadModels() {
 		models = await invoke<ModelInfo[]>('list_models');
-		if (select && models.some((m) => m.name === select)) {
-			settings.value.modelname = select;
-		} else if (!models.some((m) => m.name === settings.value.modelname)) {
+		if (!models.some((m) => m.name === settings.value.modelname)) {
 			settings.value.modelname = models[0]?.name ?? '';
 		}
-		await onModelChange();
-	}
-
-	// Import a model (a .zip of a folder holding model.onnx + config_model.json,
-	// or the folder itself) into the per-user store, outside the app bundle, so
-	// it survives updates and needs no admin rights. The engine picks it up by
-	// name on the next run.
-	async function importModel() {
-		modelActionError = null;
-		const picked = await open({
-			title: 'Select a model .zip',
-			filters: [{ name: 'Model bundle', extensions: ['zip'] }]
-		});
-		if (typeof picked !== 'string') return;
-		try {
-			const info = await invoke<ModelInfo>('import_model', { src: picked });
-			await reloadModels(info.name);
-		} catch (e) {
-			modelActionError = String(e);
-		}
-	}
-
-	async function removeCurrentModel() {
-		modelActionError = null;
-		const name = settings.value.modelname;
-		if (!confirm(`Delete the imported model "${name}"? Its files will be deleted.`)) return;
-		try {
-			await invoke('remove_model', { name });
-			await reloadModels();
-		} catch (e) {
-			modelActionError = String(e);
-		}
+		await onModelChange(modelBeforeChange);
 	}
 
 	function onDirOutInput() {
@@ -597,19 +590,18 @@
 		     labelable descendant, so without it a click on "Model" would press it. -->
 		<label class:field-error={modelMismatch} for="model-select">
 			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
-				<button
-					type="button"
-					class="info-btn"
-					disabled={!currentModel?.has_readme}
-					data-tooltip={currentModel?.has_readme ? undefined : 'This model has no README.'}
-					onclick={openModelInfo}>Info</button
+				<button type="button" class="models-btn" onclick={openModels}
+					>View Models{#if modelsBadge > 0}<span
+							class="models-badge"
+							aria-label="{modelsBadge} new"
+						></span>{/if}</button
 				></span>
 			<span class="model-row">
 				<select
 					id="model-select"
 					bind:value={settings.value.modelname}
 					onchange={() => {
-						onModelChange();
+						onModelChange(modelBeforeChange);
 						settings.save();
 					}}
 				>
@@ -617,9 +609,6 @@
 						<option value={m.name}>{m.name}</option>
 					{/each}
 				</select>
-				{#if currentModelRemovable}
-					<button type="button" class="delete-btn" onclick={removeCurrentModel}>Delete</button>
-				{/if}
 			</span>
 			{#if currentModel?.description}
 				<span class="model-description">{currentModel.description}</span>
@@ -847,15 +836,6 @@ Can produce very large log files."
 				>
 					?
 				</span>
-			</label>
-			<label>
-				<span class="label-text">Models</span>
-				<span class="model-actions">
-					<button type="button" onclick={importModel}>Import model (.zip)…</button>
-				</span>
-				{#if modelActionError}
-					<span class="error">{modelActionError}</span>
-				{/if}
 			</label>
 		</details>
 
@@ -1297,15 +1277,21 @@ Can produce very large log files."
 		color: #d33;
 	}
 
-	.info-btn {
+	.models-btn {
+		position: relative;
 		margin-left: auto;
 		padding: 0.05rem 0.45rem;
 		font-size: 0.75rem;
 	}
 
-	.info-btn:disabled {
-		opacity: 0.45;
-		cursor: default;
+	.models-badge {
+		position: absolute;
+		top: -3px;
+		right: -3px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #2f7de1;
 	}
 
 	.model-description {
@@ -1314,12 +1300,6 @@ Can produce very large log files."
 		font-size: 0.8rem;
 		opacity: 0.7;
 		line-height: 1.3;
-	}
-
-	.model-actions {
-		display: flex;
-		gap: 0.4rem;
-		margin-top: 0.3rem;
 	}
 
 	.model-row {
@@ -1333,23 +1313,10 @@ Can produce very large log files."
 		min-width: 0;
 	}
 
-	.delete-btn {
-		flex-shrink: 0;
-		padding: 0.15rem 0.5rem;
-		font-size: 0.75rem;
-		border-color: #d33;
-		color: #d33;
-	}
-
 	.settings-actions .history-btn {
 		flex: 0 0 auto;
 		font-size: 0.8rem;
 		font-weight: 400;
-	}
-
-	.model-actions button {
-		padding: 0.25rem 0.5rem;
-		font-size: 0.85rem;
 	}
 
 	.hint {

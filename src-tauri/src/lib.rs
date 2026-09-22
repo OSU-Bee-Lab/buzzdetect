@@ -1,3 +1,4 @@
+mod catalog;
 mod updater;
 
 use serde::{Deserialize, Serialize};
@@ -271,6 +272,10 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
                 let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
+                // Dot-dirs are catalog downloads in progress (see catalog.rs).
+                if name.starts_with('.') {
+                    continue;
+                }
                 // Earlier root wins a name collision: a bundled model shadows
                 // an imported one, matching the engine's resolution order.
                 if out.iter().any(|m| m.name == name) {
@@ -455,6 +460,7 @@ fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
             return Err(format!("failed to copy the model in: {e}"));
         }
 
+        let _ = app.emit(catalog::MODELS_CHANGED, ());
         Ok(ModelInfo::read(&dest, &name, true))
     })();
 
@@ -477,16 +483,22 @@ struct ModelDetails {
     threshold_stats: Option<serde_json::Value>,
 }
 
+impl ModelDetails {
+    fn from_parts(name: &str, config: &serde_json::Value, readme: Option<String>) -> ModelDetails {
+        let object = |key: &str| config.get(key).filter(|v| v.is_object()).cloned();
+        ModelDetails {
+            name: name.to_string(),
+            description: description_of(config),
+            readme,
+            thresholds: object("thresholds"),
+            threshold_stats: object("threshold_stats"),
+        }
+    }
+}
+
 fn model_details_in(dir: &std::path::Path, name: &str) -> ModelDetails {
     let config = read_config(dir).unwrap_or_default();
-    let object = |key: &str| config.get(key).filter(|v| v.is_object()).cloned();
-    ModelDetails {
-        name: name.to_string(),
-        description: description_of(&config),
-        readme: std::fs::read_to_string(dir.join(README)).ok(),
-        thresholds: object("thresholds"),
-        threshold_stats: object("threshold_stats"),
-    }
+    ModelDetails::from_parts(name, &config, std::fs::read_to_string(dir.join(README)).ok())
 }
 
 #[tauri::command]
@@ -495,7 +507,7 @@ fn model_details(app: AppHandle, modelname: String) -> Result<ModelDetails, Stri
     Ok(model_details_in(&dir, &modelname))
 }
 
-const MODEL_INFO_WINDOW: &str = "model-info";
+const MODELS_WINDOW: &str = "models";
 
 fn percent_encode(s: &str) -> String {
     s.bytes()
@@ -508,20 +520,20 @@ fn percent_encode(s: &str) -> String {
         .collect()
 }
 
-/// Open the model info window on `modelname`, or point the open one at it.
+/// Open the Models window on `modelname`, or point the open one at it.
 /// async because building a window from a synchronous command deadlocks on
 /// Windows.
 #[tauri::command]
-async fn open_model_info(app: AppHandle, modelname: String) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(MODEL_INFO_WINDOW) {
-        app.emit_to(MODEL_INFO_WINDOW, "model-info-select", &modelname)
+async fn open_models(app: AppHandle, modelname: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(MODELS_WINDOW) {
+        app.emit_to(MODELS_WINDOW, "models-select", &modelname)
             .map_err(|e| e.to_string())?;
         let _ = window.unminimize();
         return window.set_focus().map_err(|e| e.to_string());
     }
-    let url = format!("model-info?model={}", percent_encode(&modelname));
-    tauri::WebviewWindowBuilder::new(&app, MODEL_INFO_WINDOW, tauri::WebviewUrl::App(url.into()))
-        .title("Model info")
+    let url = format!("models?model={}", percent_encode(&modelname));
+    tauri::WebviewWindowBuilder::new(&app, MODELS_WINDOW, tauri::WebviewUrl::App(url.into()))
+        .title("Models")
         .inner_size(860.0, 640.0)
         .min_inner_size(480.0, 320.0)
         .build()
@@ -562,7 +574,9 @@ fn remove_model(app: AppHandle, name: String) -> Result<(), String> {
     if dir.parent() != Some(user_root.as_path()) || !dir.join(MODEL_MARKER).is_file() {
         return Err(format!("'{name}' is not an imported model"));
     }
-    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    let _ = app.emit(catalog::MODELS_CHANGED, ());
+    Ok(())
 }
 
 /// What the frontend needs to decide whether to offer the GPU controls.
@@ -902,7 +916,7 @@ fn list_history(app: AppHandle, state: State<AnalysisState>) -> Vec<serde_json::
 const HISTORY_WINDOW: &str = "history";
 
 /// Open the past-runs window, or focus it. async for the same reason as
-/// open_model_info.
+/// open_models.
 #[tauri::command]
 async fn open_history(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(HISTORY_WINDOW) {
@@ -1469,7 +1483,11 @@ pub fn run() {
             list_models,
             get_model_classes,
             model_details,
-            open_model_info,
+            open_models,
+            catalog::models_overview,
+            catalog::download_model,
+            catalog::set_model_ignored,
+            catalog::catalog_model_details,
             open_model_file,
             import_model,
             remove_model,
