@@ -193,6 +193,7 @@ const IMPORT_FILES: [&str; 6] = [
 ];
 
 const README: &str = "README.md";
+const FNAME_FP16: &str = "model.fp16.onnx";
 
 /// Per-user model store, outside the app bundle. `None` if the platform data
 /// dir can't be resolved (shouldn't happen in practice).
@@ -228,6 +229,9 @@ struct ModelInfo {
     /// config_model.json's optional one-line `description`, written by hand.
     description: Option<String>,
     has_readme: bool,
+    /// Whether the model directory carries a model.fp16.onnx graph, so the
+    /// frontend can disable the reduced-precision setting for models without one.
+    has_fp16: bool,
     /// Hidden from the model picker by the user (see catalog::set_model_disabled).
     disabled: bool,
 }
@@ -240,6 +244,7 @@ impl ModelInfo {
             removable,
             description: description_of(&config),
             has_readme: dir.join(README).is_file(),
+            has_fp16: dir.join(FNAME_FP16).is_file(),
             disabled: false,
         }
     }
@@ -476,28 +481,20 @@ fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
     result
 }
 
-/// Everything the model info window shows: the README, and the thresholds that
-/// buzzdetect-training wrote into config_model.json. `thresholds` is a plain
-/// {class: number} map; `threshold_stats` is how much each one rests on. Both
-/// are passed through as-is, and either may be absent.
+/// Everything the model info window shows: the description and the README.
 #[derive(Serialize)]
 struct ModelDetails {
     name: String,
     description: Option<String>,
     readme: Option<String>,
-    thresholds: Option<serde_json::Value>,
-    threshold_stats: Option<serde_json::Value>,
 }
 
 impl ModelDetails {
     fn from_parts(name: &str, config: &serde_json::Value, readme: Option<String>) -> ModelDetails {
-        let object = |key: &str| config.get(key).filter(|v| v.is_object()).cloned();
         ModelDetails {
             name: name.to_string(),
             description: description_of(config),
             readme,
-            thresholds: object("thresholds"),
-            threshold_stats: object("threshold_stats"),
         }
     }
 }
@@ -1789,18 +1786,17 @@ mod tests {
         assert_eq!(info.description, None);
         assert!(!info.has_readme);
         let details = model_details_in(&dir, "bare");
-        assert!(details.readme.is_none() && details.thresholds.is_none());
+        assert!(details.readme.is_none());
     }
 
     #[test]
-    fn description_thresholds_and_readme_are_read() {
+    fn description_and_readme_are_read() {
         let dir = std::env::temp_dir().join("buzzdetect-test-details-full");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let config = good_config().replacen(
             '{',
-            r#"{"description": "  Buzz.  ", "thresholds": {"a": -1.2},
-                "threshold_stats": {"a": {"folds": 8}},"#,
+            r#"{"description": "  Buzz.  ","#,
             1,
         );
         std::fs::write(dir.join("config_model.json"), config).unwrap();
@@ -1811,8 +1807,6 @@ mod tests {
         assert!(info.has_readme);
         let details = model_details_in(&dir, "full");
         assert_eq!(details.readme.as_deref(), Some("# hi"));
-        assert_eq!(details.thresholds.unwrap()["a"], -1.2);
-        assert_eq!(details.threshold_stats.unwrap()["a"]["folds"], 8);
     }
 
     #[test]

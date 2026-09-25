@@ -512,7 +512,7 @@ pub fn set_model_disabled(app: AppHandle, name: String, disabled: bool) -> Resul
 }
 
 /// A catalog model's details, read from its release: the config (for the
-/// thresholds and description) and the README. For an installed model the
+/// description) and the README. For an installed model the
 /// window shows its local config but this README, which may be newer.
 #[tauri::command]
 pub async fn catalog_model_details(name: String) -> Result<ModelDetails, String> {

@@ -8,11 +8,13 @@
 		node,
 		depth,
 		expanded,
+		filesVisible,
 		pct
 	}: {
 		node: TreeDir;
 		depth: number;
 		expanded: Set<string>;
+		filesVisible: boolean;
 		pct: (done: number, total: number) => number;
 	} = $props();
 
@@ -48,9 +50,11 @@
 
 {#if isOpen}
 	{#each node.dirs as child (child.path)}
-		<Self node={child} depth={depth + 1} {expanded} {pct} />
+		<Self node={child} depth={depth + 1} {expanded} {filesVisible} {pct} />
 	{/each}
-	<FileRows files={node.files} depth={depth + 1} {pct} />
+	{#if filesVisible}
+		<FileRows files={node.files} depth={depth + 1} {pct} />
+	{/if}
 {/if}
 
 <style>

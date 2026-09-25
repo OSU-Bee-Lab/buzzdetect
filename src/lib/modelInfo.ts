@@ -1,81 +1,19 @@
 // What the model info window shows, minus the rendering: the shapes
-// `model_details` returns, and the rows of the thresholds table built from
-// them. `thresholds` and `threshold_stats` are written by buzzdetect-training's
-// 03_train/thresholds.py; a model exported before that, or by hand, may carry
-// thresholds with no stats, or neither. config_model.json is the only place
-// this table lives -- there used to be a duplicate rendering of it in the
-// model's README, which 03_train/thresholds.py no longer generates.
+// `list_models` and `model_details` return.
 
 export interface ModelInfo {
 	name: string;
 	removable: boolean;
 	description: string | null;
 	has_readme: boolean;
+	has_fp16: boolean;
 	disabled: boolean;
-}
-
-export interface ThresholdStat {
-	fpr_target?: number;
-	folds?: number;
-	folds_total?: number;
-	events?: number;
-	frames?: number;
-	sensitivity?: number;
-	sensitivity_exclquiet?: number;
 }
 
 export interface ModelDetails {
 	name: string;
 	description: string | null;
 	readme: string | null;
-	thresholds: Record<string, unknown> | null;
-	threshold_stats: Record<string, ThresholdStat> | null;
-}
-
-export interface ThresholdRow {
-	cls: string;
-	threshold: number;
-	sensitivity: number | null;
-	sensitivityExclQuiet: number | null;
-	folds: string | null;
-	events: number | null;
-}
-
-const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-
-/** One row per class with a numeric threshold, buzz first, then by name. */
-export function thresholdRows(details: ModelDetails): ThresholdRow[] {
-	const stats = details.threshold_stats ?? {};
-	return Object.entries(details.thresholds ?? {})
-		.filter((e): e is [string, number] => num(e[1]))
-		.map(([cls, threshold]) => {
-			const s = stats[cls] ?? {};
-			return {
-				cls,
-				threshold,
-				sensitivity: num(s.sensitivity) ? s.sensitivity : null,
-				sensitivityExclQuiet: num(s.sensitivity_exclquiet) ? s.sensitivity_exclquiet : null,
-				folds: num(s.folds)
-					? num(s.folds_total)
-						? `${s.folds}/${s.folds_total}`
-						: String(s.folds)
-					: null,
-				events: num(s.events) ? s.events : null
-			} satisfies ThresholdRow;
-		})
-		.sort((a, b) =>
-			a.cls === 'ins_buzz' ? -1 : b.cls === 'ins_buzz' ? 1 : a.cls.localeCompare(b.cls)
-		);
-}
-
-/** The FPR the suggestions were set at, if every stat agrees on one. */
-export function fprTarget(details: ModelDetails): number | null {
-	const targets = new Set(
-		Object.values(details.threshold_stats ?? {})
-			.map((s) => s.fpr_target)
-			.filter(num)
-	);
-	return targets.size === 1 ? [...targets][0] : null;
 }
 
 export type LinkTarget =

@@ -1,6 +1,6 @@
 <script lang="ts">
 	// The Models window: every installed model and every model in the catalog
-	// (src-tauri/src/catalog.rs), with the selected one's thresholds and README
+	// (src-tauri/src/catalog.rs), with the selected one's README
 	// on the right. Opened by the main window's View Models button through
 	// open_models. Downloads, imports, removals and ignores all happen here;
 	// each emits models-changed, which the main window listens for too.
@@ -15,9 +15,7 @@
 	import {
 		classifyLink,
 		formatSize,
-		fprTarget,
 		groupModels,
-		thresholdRows,
 		type ModelDetails,
 		type ModelInfo,
 		type ModelRow,
@@ -34,11 +32,6 @@
 
 	const groups = $derived(overview ? groupModels(overview.models) : []);
 	const row = $derived(overview?.models.find((m) => m.name === selected) ?? null);
-	const rows = $derived(details ? thresholdRows(details) : []);
-	const target = $derived(details ? fprTarget(details) : null);
-	const hasStats = $derived(
-		rows.some((r) => r.sensitivity !== null || r.sensitivityExclQuiet !== null || r.folds || r.events !== null)
-	);
 	// README content comes from model folders, including ones a collaborator
 	// sent, and from the catalog; this webview can invoke app commands -- so
 	// it's sanitized.
@@ -177,7 +170,6 @@
 		opened.catch((err) => (error = String(err)));
 	}
 
-	const fmt = (v: number) => v.toFixed(3);
 	const status = (r: ModelRow) =>
 		r.update
 			? 'Update available'
@@ -261,44 +253,6 @@
 
 		{#if loadingDetails && !details}
 			<p class="hint">Loading…</p>
-		{/if}
-
-		{#if rows.length}
-			<section class="thresholds">
-				<h2>
-					Recommended thresholds{#if target !== null}<span class="hint">
-							at {(target * 100).toFixed(1)}% false positive rate</span
-						>{/if}
-				</h2>
-				<table>
-					<thead>
-						<tr>
-							<th>Class</th>
-							<th>Threshold</th>
-							{#if hasStats}
-								<th>Sensitivity (all buzzes)</th>
-								<th>Sensitivity (excluding quiet)</th>
-								<th>Deployments tested</th>
-								<th>Events</th>
-							{/if}
-						</tr>
-					</thead>
-					<tbody>
-						{#each rows as r}
-							<tr>
-								<td>{r.cls}</td>
-								<td class="num">{fmt(r.threshold)}</td>
-								{#if hasStats}
-									<td class="num">{r.sensitivity !== null ? fmt(r.sensitivity) : ''}</td>
-									<td class="num">{r.sensitivityExclQuiet !== null ? fmt(r.sensitivityExclQuiet) : ''}</td>
-									<td class="num">{r.folds ?? ''}</td>
-									<td class="num">{r.events ?? ''}</td>
-								{/if}
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</section>
 		{/if}
 
 		{#if details && !details.readme}
@@ -572,40 +526,6 @@
 
 	.error {
 		color: #d33;
-	}
-
-	.thresholds {
-		margin: 0.5rem 0 1.5rem;
-		padding: 0.75rem 1rem;
-		border: 1px solid rgba(127, 127, 127, 0.3);
-		border-radius: 8px;
-		overflow-x: auto;
-	}
-
-	.thresholds h2 {
-		margin: 0 0 0.5rem;
-		font-size: 1rem;
-	}
-
-	table {
-		border-collapse: collapse;
-		font-size: 0.9rem;
-	}
-
-	th,
-	td {
-		padding: 0.25rem 0.75rem 0.25rem 0;
-		text-align: left;
-		white-space: nowrap;
-	}
-
-	th {
-		font-weight: 600;
-		border-bottom: 1px solid rgba(127, 127, 127, 0.3);
-	}
-
-	td.num {
-		font-variant-numeric: tabular-nums;
 	}
 
 	.readme {

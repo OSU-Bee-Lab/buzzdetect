@@ -7,6 +7,8 @@
 	import { documentDir, join } from '@tauri-apps/api/path';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 	import { run, formatDuration, type TreeDir } from '$lib/progress.svelte';
 	import { settings, LOGLEVELS } from '$lib/settings.svelte';
 	import DirRow from '$lib/DirRow.svelte';
@@ -34,6 +36,10 @@
 	// A SvelteSet, not $state(new Set()): $state doesn't proxy a Set, so the
 	// per-folder toggles' add/delete would change nothing on screen.
 	const expanded = new SvelteSet<string>();
+	// Whether an open folder's files are listed, separate from whether the
+	// folder itself is open -- lets "Expand all folders" walk the whole tree
+	// without also mounting a row (and progress bar) per file.
+	let filesVisible = $state(true);
 	let hasAutoExpanded = false;
 	let hasStarted = $state(false);
 	let manifest = $state<Manifest | null>(null);
@@ -186,6 +192,7 @@
 				hasStarted = true;
 				hasAutoExpanded = false;
 				expanded.clear();
+				filesVisible = true;
 				for (const l of snap.logs) run.handleLog(l.line, l.seq);
 				for (const ev of snap.events) run.handleEvent(ev);
 			})
@@ -369,6 +376,11 @@
 	);
 
 	const currentModel = $derived(models.find((m) => m.name === settings.value.modelname));
+	const currentModelDescriptionHtml = $derived(
+		currentModel?.description
+			? DOMPurify.sanitize(marked.parseInline(currentModel.description, { async: false }))
+			: ''
+	);
 
 	function openModels() {
 		modelActionError = null;
@@ -501,6 +513,7 @@
 		hasStarted = true;
 		hasAutoExpanded = false;
 		expanded.clear();
+		filesVisible = true;
 		startedKey = launchKey;
 		try {
 			await invoke('start_analysis', { settings: launchSettings() });
@@ -541,17 +554,30 @@
 		return all;
 	}
 
-	function toggleExpandAll() {
+	// Cycles collapsed -> folders expanded (files hidden) -> files also shown
+	// -> back to collapsed. The label always names what the next click does.
+	const treeState = $derived.by(() => {
 		const all = allDirPaths();
 		const allOpen = all.length > 0 && all.every((p) => expanded.has(p));
-		expanded.clear();
-		if (!allOpen) all.forEach((p) => expanded.add(p));
-	}
-
-	const allExpanded = $derived.by(() => {
-		const all = allDirPaths();
-		return all.length > 0 && all.every((p) => expanded.has(p));
+		if (!allOpen) return 'collapsed';
+		return filesVisible ? 'files' : 'folders';
 	});
+
+	const expandLabel = $derived(
+		{ collapsed: 'Expand all folders', folders: 'Expand all files', files: 'Collapse all' }[treeState]
+	);
+
+	function cycleExpand() {
+		if (treeState === 'collapsed') {
+			allDirPaths().forEach((p) => expanded.add(p));
+			filesVisible = false;
+		} else if (treeState === 'folders') {
+			filesVisible = true;
+		} else {
+			expanded.clear();
+			filesVisible = true;
+		}
+	}
 
 	// Rounds down so a run only shows 100%/a checkmark once truly finished,
 	// never early from rounding (e.g. 99.98% should read 99%, not 100%).
@@ -614,42 +640,44 @@
 	<section class="settings">
 		<h2>Settings</h2>
 		<div class="settings-body">
+			<!-- Kept outside settings-fields: View Models must stay usable during a
+			     run (the model page is read-only) even though the model can't be changed. -->
+			<!-- for= rather than nesting alone: the Info button is the label's first
+			     labelable descendant, so without it a click on "Model" would press it. -->
+			<label class:field-error={modelMismatch || !settings.value.modelname} for="model-select">
+				<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
+					<button type="button" class="models-btn" onclick={openModels}
+						>View Models{#if modelsBadge > 0}<span
+								class="models-badge"
+								aria-label="{modelsBadge} new"
+							></span>{/if}</button
+					></span>
+				<span class="model-row">
+					<select
+						id="model-select"
+						disabled={run.running || run.stopping}
+						bind:value={settings.value.modelname}
+						onchange={() => {
+							onModelChange(modelBeforeChange);
+							settings.save();
+						}}
+					>
+						{#if !settings.value.modelname}
+							<option value="" disabled>Select a model</option>
+						{/if}
+						{#each models as m}
+							<option value={m.name}>{m.name}</option>
+						{/each}
+					</select>
+				</span>
+				{#if currentModelDescriptionHtml}
+					<span class="model-description">{@html currentModelDescriptionHtml}</span>
+				{/if}
+				{#if modelActionError}
+					<span class="error">{modelActionError}</span>
+				{/if}
+			</label>
 			<fieldset class="settings-fields" disabled={run.running || run.stopping}>
-
-		<!-- for= rather than nesting alone: the Info button is the label's first
-		     labelable descendant, so without it a click on "Model" would press it. -->
-		<label class:field-error={modelMismatch || !settings.value.modelname} for="model-select">
-			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
-				<button type="button" class="models-btn" onclick={openModels}
-					>View Models{#if modelsBadge > 0}<span
-							class="models-badge"
-							aria-label="{modelsBadge} new"
-						></span>{/if}</button
-				></span>
-			<span class="model-row">
-				<select
-					id="model-select"
-					bind:value={settings.value.modelname}
-					onchange={() => {
-						onModelChange(modelBeforeChange);
-						settings.save();
-					}}
-				>
-					{#if !settings.value.modelname}
-						<option value="" disabled>Select a model</option>
-					{/if}
-					{#each models as m}
-						<option value={m.name}>{m.name}</option>
-					{/each}
-				</select>
-			</span>
-			{#if currentModel?.description}
-				<span class="model-description">{currentModel.description}</span>
-			{/if}
-			{#if modelActionError}
-				<span class="error">{modelActionError}</span>
-			{/if}
-		</label>
 		<label class:field-error={!settings.value.dirAudio}>
 			<span class="label-text">Audio directory <span class="qmark" data-tooltip="Input folder containing audio files to analyze.">?</span></span>
 			<span class="path-row">
@@ -777,7 +805,7 @@ If you're using GPU, you probably don't want any CPU analyzers."
 			<label class="checkbox-setting">
 				<input
 					type="checkbox"
-					disabled={!gpu.usable}
+					disabled={!gpu.usable || currentModel?.has_fp16 === false}
 					bind:checked={settings.value.gpuFp16}
 					onchange={() => {
 						settings.value.gpuFp16Touched = true;
@@ -795,6 +823,9 @@ Results from a reduced-precision run are not directly comparable with full-preci
 					</span>
 				</span>
 			</label>
+			{#if gpu.usable && currentModel?.has_fp16 === false}
+				<p class="hint">This model has no reduced-precision graph; it will run at full precision.</p>
+			{/if}
 			{/if}
 			<label>
 				<span class="label-text">
@@ -970,33 +1001,31 @@ Can produce very large log files."
 		{/if}
 		<ProgressBar weights={tree} provisional={!run.denominatorFinal} large />
 
-		<div class="tree-toolbar">
-			<button
-				type="button"
-				class="icon-btn"
-				data-tooltip={allExpanded ? 'Collapse All' : 'Expand All'}
-				aria-label={allExpanded ? 'Collapse All' : 'Expand All'}
-				onclick={toggleExpandAll}
-			>
-				{#if allExpanded}
-					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M6 10 12 5l6 5" stroke-linecap="round" stroke-linejoin="round" />
-						<path d="M6 17 12 12l6 5" stroke-linecap="round" stroke-linejoin="round" />
-					</svg>
-				{:else}
-					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M6 7 12 12l6-5" stroke-linecap="round" stroke-linejoin="round" />
-						<path d="M6 14 12 19l6-5" stroke-linecap="round" stroke-linejoin="round" />
-					</svg>
+		<div class="tree-panel">
+			<div class="tree">
+				{#if filesVisible}
+					<FileRows files={tree.files} depth={0} {pct} />
 				{/if}
-			</button>
-		</div>
-
-		<div class="tree">
-			<FileRows files={tree.files} depth={0} {pct} />
-			{#each tree.dirs as d (d.path)}
-				<DirRow node={d} depth={0} {expanded} {pct} />
-			{/each}
+				{#each tree.dirs as d (d.path)}
+					<DirRow node={d} depth={0} {expanded} {filesVisible} {pct} />
+				{/each}
+			</div>
+			<div class="tree-toolbar">
+				<button type="button" onclick={cycleExpand}>
+					{#if treeState === 'files'}
+						<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M6 10 12 5l6 5" stroke-linecap="round" stroke-linejoin="round" />
+							<path d="M6 17 12 12l6 5" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					{:else}
+						<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M6 7 12 12l6-5" stroke-linecap="round" stroke-linejoin="round" />
+							<path d="M6 14 12 19l6-5" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					{/if}
+					{expandLabel}
+				</button>
+			</div>
 		</div>
 
 		<div class="log-wrap">
@@ -1080,6 +1109,9 @@ Can produce very large log files."
 		overflow-y: auto;
 		overflow-x: hidden;
 		padding-right: 0.25rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
 	}
 
 	.settings-fields {
@@ -1129,10 +1161,19 @@ Can produce very large log files."
 	}
 
 	.tree-toolbar {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.5rem;
 		flex-shrink: 0;
+		display: flex;
+		justify-content: flex-start;
+		padding: 0.4rem 0.6rem;
+		border-top: 1px solid rgba(127, 127, 127, 0.2);
+	}
+
+	.tree-toolbar button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.75rem;
+		padding: 0.25rem 0.5rem;
 	}
 
 	.icon-btn {
@@ -1470,13 +1511,20 @@ Can produce very large log files."
 		font-variant-numeric: tabular-nums;
 	}
 
+	.tree-panel {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		border: 1px solid rgba(127, 127, 127, 0.2);
+		border-radius: 6px;
+	}
+
 	.tree {
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
 		overflow-x: hidden;
-		border: 1px solid rgba(127, 127, 127, 0.2);
-		border-radius: 6px;
 	}
 
 	.log-wrap {
