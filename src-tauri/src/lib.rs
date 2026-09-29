@@ -953,6 +953,9 @@ fn clear_history(app: AppHandle) {
 struct Manifest {
     modelname: String,
     classes_out: Option<Vec<String>>,
+    // Resampling was full quality until QQ became the default, so a manifest
+    // that predates the key came from a full-quality run.
+    full_quality_decode: bool,
 }
 
 // buzzdetect writes this into dir_out to record the settings that determine
@@ -977,9 +980,14 @@ fn read_manifest(dir_out: String) -> Result<Option<Manifest>, String> {
             .filter_map(|c| c.as_str().map(|s| s.to_string()))
             .collect()
     });
+    let full_quality_decode = value
+        .get("full_quality_decode")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     Ok(Some(Manifest {
         modelname,
         classes_out,
+        full_quality_decode,
     }))
 }
 
@@ -1709,6 +1717,22 @@ mod tests {
         let manifest = read_manifest(dir.to_string_lossy().into()).unwrap().unwrap();
         assert_eq!(manifest.modelname, "model_general_v3");
         assert_eq!(manifest.classes_out.unwrap(), ["frog", "ins_buzz"]);
+        // no full_quality_decode key: written before it existed, when resampling was HQ
+        assert!(manifest.full_quality_decode);
+    }
+
+    #[test]
+    fn a_manifest_records_the_decode_quality_it_was_run_at() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-manifest-quality");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("buzzdetect_manifest.json"),
+            r#"{"modelname": "m", "output_mode": "activations", "classes_out": ["a"],
+                "precision": null, "framehop_prop": 1, "full_quality_decode": false}"#,
+        )
+        .unwrap();
+        let manifest = read_manifest(dir.to_string_lossy().into()).unwrap().unwrap();
+        assert!(!manifest.full_quality_decode);
     }
 
     #[test]

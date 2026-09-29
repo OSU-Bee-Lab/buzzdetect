@@ -21,6 +21,7 @@
 	interface Manifest {
 		modelname: string;
 		classes_out: string[] | null;
+		full_quality_decode: boolean;
 	}
 
 	// Every installed model, disabled ones included.
@@ -314,6 +315,7 @@
 		}
 		if (!manifest || manifest.modelname !== settings.value.modelname) return;
 		if (manifest.classes_out) settings.value.classesOut = manifest.classes_out;
+		settings.value.fullQualityDecode = manifest.full_quality_decode;
 		settings.save();
 	}
 
@@ -917,13 +919,19 @@ Adds several lines per chunk to the log file."
 					?
 				</span>
 			</label>
-			<label class="checkbox">
-				<input type="checkbox" bind:checked={settings.value.fullQualityDecode} onchange={() => settings.save()} />
+			<label class="checkbox" class:locked={manifestLocked}>
+				<input
+					type="checkbox"
+					disabled={manifestLocked}
+					bind:checked={settings.value.fullQualityDecode}
+					onchange={() => settings.save()}
+				/>
 				Full quality decoding
 				<span
 					class="qmark"
 					data-tooltip="Resample audio to the model's sample rate with the slower, more accurate filter.
-The default is about 3x cheaper to resample and adequate for detection, but activations differ slightly between the two."
+The default is about 3x cheaper to resample and adequate for detection, but activations differ slightly between the two.
+Locked once an output folder has results, since mixing the two in one folder would make them inconsistent."
 				>
 					?
 				</span>

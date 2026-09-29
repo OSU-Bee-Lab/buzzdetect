@@ -114,6 +114,21 @@ class TestDiff(unittest.TestCase):
                 current[key] = ['sentinel'] if key == 'classes_out' else 'sentinel'
                 self.assertTrue(mf.diff_manifests(activations(), current))
 
+    def test_decode_quality_locks_the_folder(self):
+        hq = mf.build_manifest('m', 1, None, ['a'], full_quality_decode=True)
+        qq = mf.build_manifest('m', 1, None, ['a'], full_quality_decode=False)
+        self.assertTrue(any('full_quality_decode' in c for c in mf.diff_manifests(hq, qq)))
+        self.assertEqual(mf.diff_manifests(qq, qq), [])
+
+    def test_a_manifest_from_before_decode_quality_was_recorded_is_full_quality(self):
+        # Resampling was HQ until QQ became the default.
+        legacy = {k: v for k, v in mf.build_manifest('m', 1, None, ['a']).items()
+                  if k != 'full_quality_decode'}
+        self.assertEqual(
+            mf.diff_manifests(legacy, mf.build_manifest('m', 1, None, ['a'], full_quality_decode=True)), [])
+        self.assertTrue(
+            mf.diff_manifests(legacy, mf.build_manifest('m', 1, None, ['a'], full_quality_decode=False)))
+
     def test_thresholds_do_not_lock_the_folder(self):
         # A re-exported model can change its suggestion; results already
         # written are still the same schema.

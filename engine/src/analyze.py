@@ -311,6 +311,7 @@ class Analyzer:
             framehop_prop=self.framehop_prop,
             precision=self.precision,
             classes_out=self.classes_out,
+            full_quality_decode=self.full_quality_decode,
             framelength_s=self.model.framelength_s,
             thresholds=self.model.config.get('thresholds'),
             dir_audio=self.dir_audio,

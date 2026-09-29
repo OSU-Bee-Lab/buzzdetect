@@ -7,7 +7,13 @@ import os
 FNAME_MANIFEST = 'buzzdetect_manifest.json'
 
 # fields that must match for a run to safely write into an existing output folder
-KEYS_LOCKED = ('modelname', 'output_mode', 'classes_out', 'precision', 'framehop_prop')
+KEYS_LOCKED = ('modelname', 'output_mode', 'classes_out', 'precision', 'framehop_prop',
+               'full_quality_decode')
+
+# What a manifest written before a locked key existed implies for it. Resampling
+# was soxr HQ until QQ became the default, so a manifest with no
+# full_quality_decode came from a full-quality run.
+KEYS_LEGACY = {'full_quality_decode': True}
 
 # Recorded for whoever reads the results, never compared: both follow from the
 # model, which is locked already. `thresholds` is the model's suggested
@@ -24,7 +30,8 @@ KEYS_LATEST = ('dir_audio', 'dir_out')
 
 
 def build_manifest(modelname, framehop_prop, precision, classes_out,
-                   framelength_s=None, thresholds=None, dir_audio=None, dir_out=None):
+                   framelength_s=None, thresholds=None, dir_audio=None, dir_out=None,
+                   full_quality_decode=False):
     output_mode = 'detections' if precision is not None else 'activations'
     info = {
         'framelength_s': framelength_s,
@@ -39,6 +46,7 @@ def build_manifest(modelname, framehop_prop, precision, classes_out,
         'classes_out': sorted(classes_out) if output_mode == 'activations' else None,
         'precision': precision,
         'framehop_prop': framehop_prop,
+        'full_quality_decode': bool(full_quality_decode),
         **{k: v for k, v in info.items() if v is not None},
     }
 
@@ -62,7 +70,7 @@ def diff_manifests(existing, current):
     """Return a list of human-readable conflicts between two manifests."""
     conflicts = []
     for key in KEYS_LOCKED:
-        old = existing.get(key)
+        old = existing.get(key, KEYS_LEGACY.get(key))
         new = current.get(key)
         # classes_out is order-insensitive
         if key == 'classes_out' and old is not None and new is not None:

@@ -34,21 +34,24 @@ def _resolve_classes_out(modelname, classes_out):
         return json.load(f)['classes']
 
 
-def reconcile_with_manifest(modelname, dir_out, classes_out, precision, framehop_prop):
+def reconcile_with_manifest(modelname, dir_out, classes_out, precision, framehop_prop,
+                            full_quality_decode=False):
     """If the output folder already holds results from different settings, show the
     conflicts and offer to adopt the existing settings. Returns the (possibly
-    overridden) (modelname, classes_out, precision, framehop_prop). Exits on decline."""
-    from src.pipeline.manifest import build_manifest, read_manifest, diff_manifests
+    overridden) (modelname, classes_out, precision, framehop_prop, full_quality_decode).
+    Exits on decline."""
+    from src.pipeline.manifest import build_manifest, read_manifest, diff_manifests, KEYS_LEGACY
 
     existing = read_manifest(_resolve_dir_out(dir_out, modelname))
     if existing is None:
-        return modelname, classes_out, precision, framehop_prop
+        return modelname, classes_out, precision, framehop_prop, full_quality_decode
 
     resolved_classes = _resolve_classes_out(modelname, classes_out) if precision is None else classes_out
-    candidate = build_manifest(modelname, framehop_prop, precision, resolved_classes)
+    candidate = build_manifest(modelname, framehop_prop, precision, resolved_classes,
+                               full_quality_decode=full_quality_decode)
     conflicts = diff_manifests(existing, candidate)
     if not conflicts:
-        return modelname, classes_out, precision, framehop_prop
+        return modelname, classes_out, precision, framehop_prop, full_quality_decode
 
     print("The output folder already contains results from different settings:")
     for c in conflicts:
@@ -59,9 +62,10 @@ def reconcile_with_manifest(modelname, dir_out, classes_out, precision, framehop
         print("Exiting without analyzing.")
         sys.exit(0)
 
+    quality = existing.get('full_quality_decode', KEYS_LEGACY['full_quality_decode'])
     if existing['output_mode'] == 'detections':
-        return existing['modelname'], 'all', existing['precision'], existing['framehop_prop']
-    return existing['modelname'], existing['classes_out'], None, existing['framehop_prop']
+        return existing['modelname'], 'all', existing['precision'], existing['framehop_prop'], quality
+    return existing['modelname'], existing['classes_out'], None, existing['framehop_prop'], quality
 
 
 def main():
@@ -174,12 +178,13 @@ def main():
     elif isinstance(classes_out, str) and classes_out == 'all':
         classes_out = 'all'
 
-    modelname, classes_out, precision, framehop_prop = reconcile_with_manifest(
+    modelname, classes_out, precision, framehop_prop, full_quality_decode = reconcile_with_manifest(
         modelname=args.modelname,
         dir_out=args.dir_out,
         classes_out=classes_out,
         precision=args.precision,
         framehop_prop=args.framehop_prop,
+        full_quality_decode=args.full_quality_decode,
     )
 
     completed = analyze(
@@ -198,7 +203,7 @@ def main():
         verbosity_log=args.verbosity_log,
         log_progress=args.log_progress,
         benchmark=args.benchmark,
-        full_quality_decode=args.full_quality_decode,
+        full_quality_decode=full_quality_decode,
     )
 
     if not completed:
