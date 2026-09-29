@@ -3,6 +3,7 @@ from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
 from src.pipeline.progress_json import emit_progress
 from src.utils import Timer
+from src.pipeline.benchmark import now
 
 
 class WorkerInferer:
@@ -75,7 +76,9 @@ class WorkerInferer:
 
     def process_chunk(self, a_chunk: AssignChunk):
         try:
+            t_predict = now()
             a_chunk.results = self.model.predict(a_chunk.samples)
+            self.t_predict = now() - t_predict
         except Exception as e:
             # Chunk length is the one setting a user can act on here, and it is
             # not obvious from an allocator's error text that it is implicated
@@ -114,6 +117,8 @@ class WorkerInferer:
 
         self.timer_bottleneck.restart()
         while True:
+            depth = self.coordinator.q_analyze.qsize()
+            t_ask = now()
             a_chunk = self.coordinator.get_analyze()
             if a_chunk == 'exit':
                 break
@@ -121,7 +126,16 @@ class WorkerInferer:
             self.timer_bottleneck.stop()
             if self.timer_bottleneck.get_total() > 0.01:
                 self.report_bottleneck()
+            t_got = now()
             self.process_chunk(a_chunk)
+            t_done = now()
+            self.coordinator.bench.record(
+                'analyzer', self.id_analyzer,
+                t_wait=t_got - t_ask,
+                **self.model.timings,
+                t_post=t_done - t_got - self.t_predict,
+                depth=depth,
+            )
             self.timer_bottleneck.restart()
 
         self.log("terminating", 'INFO')

@@ -15,6 +15,7 @@ export interface HistorySettings {
 	verbosity_print?: string;
 	verbosity_log?: string;
 	log_progress?: boolean;
+	benchmark?: boolean;
 }
 
 export interface HistoryEntry {
@@ -76,7 +77,8 @@ export function previewSettings(e: HistoryEntry): [string, string][] {
 		['Stream buffer depth', auto(s.stream_buffer_depth)],
 		['Console verbosity', s.verbosity_print ?? ''],
 		['Log file verbosity', s.verbosity_log ?? ''],
-		['Log progress statements', s.log_progress ? 'yes' : 'no']
+		['Log progress statements', s.log_progress ? 'yes' : 'no'],
+		['Save benchmarks to log', s.benchmark ? 'yes' : 'no']
 	);
 	return rows;
 }

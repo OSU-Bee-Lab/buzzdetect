@@ -16,6 +16,7 @@ from src.pipeline.coordination import Coordinator
 from src.stream.audio import get_duration
 from src.inference.models import OnnxModel
 from src.pipeline.progress_json import emit_progress
+from src.pipeline.benchmark import now
 
 class WorkerStreamer:
     def __init__(self,
@@ -124,10 +125,13 @@ class WorkerStreamer:
         sample_to = int(chunk[1] * a_file.track.samplerate)
         read_size = sample_to - sample_from
 
+        t0 = now()
         a_file.track.seek(sample_from)
         samples = a_file.track.read(read_size, dtype=np.float32)
+        t1 = now()
         if a_file.track.channels > 1:
             samples = np.mean(samples, axis=1)
+        t2 = now()
 
         n_samples = len(samples)
 
@@ -143,16 +147,29 @@ class WorkerStreamer:
         # in with it -- a few hundred MB of dependency for one function.
         samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality='HQ')
         samples = samples.astype(np.float32)
+        t3 = now()
 
         last_chunk = force_last or not continue_file
         a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, last_chunk=last_chunk)
         self.coordinator.put_analyze(a_chunk)
+        t4 = now()
+
+        self.coordinator.bench.record(
+            'streamer', self.id_streamer,
+            t_read=t1 - t0,
+            t_downmix=t2 - t1,
+            t_resample=t3 - t2,
+            t_put_wait=t4 - t3,
+            audio_s=round(chunk[1] - chunk[0], 2),
+        )
 
         return continue_file
 
     def stream_to_queue(self, a_file: AssignFile):
         try:
+            t_open = now()
             self._chunk_file(a_file)
+            self.coordinator.bench.record('streamer_open', self.id_streamer, t_open=now() - t_open)
 
             last_index = len(a_file.chunklist) - 1
             for i, chunk in enumerate(a_file.chunklist):
@@ -173,7 +190,9 @@ class WorkerStreamer:
         while True:
             if self.coordinator.event_exitanalysis.is_set():
                 break
+            t_idle = now()
             a_file = self.coordinator.get_stream()
+            self.coordinator.bench.record('streamer_idle', self.id_streamer, t_wait_file=now() - t_idle)
             if a_file == 'exit' or self.coordinator.event_exitanalysis.is_set():
                 break
 

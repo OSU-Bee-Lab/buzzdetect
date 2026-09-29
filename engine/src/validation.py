@@ -182,6 +182,13 @@ def validate_log_progress(log_progress: bool):
         value_max=1,
     )
 
+def validate_benchmark(benchmark: bool):
+    return validate_int(
+        value=benchmark,
+        none_ok=False,
+        value_max=1,
+    )
+
 validate_map = {
     'modelname': validate_modelname,
     'classes_out': validate_classes_out,
@@ -197,4 +204,5 @@ validate_map = {
     'verbosity_print': validate_verbosity,
     'verbosity_log': validate_verbosity,
     'log_progress': validate_log_progress,
+    'benchmark': validate_benchmark,
 }

@@ -5,6 +5,7 @@ from queue import Queue, Full
 from dataclasses import dataclass, field
 
 from src.pipeline.assignments import AssignFile, AssignChunk, AssignLog
+from src.pipeline.benchmark import Bench
 
 # sentinel handed to a worker to tell it to stop
 EXIT = 'exit'
@@ -44,7 +45,8 @@ class Coordinator:
                  depth: int=None,
                  q_gui: Queue[AssignLog]=None,
                  event_analysisdone: multiprocessing.Event=None,
-                 q_earlyexit: multiprocessing.Queue=None,):
+                 q_earlyexit: multiprocessing.Queue=None,
+                 benchmark: bool=False,):
 
         self.analyzers_cpu = analyzers_cpu
         self.analyzers_gpu = analyzers_gpu
@@ -63,6 +65,8 @@ class Coordinator:
         self.q_stream: Queue[AssignFile | None] = Queue()
         self.q_analyze: Queue[AssignChunk] = Queue(maxsize=self.queue_depth)
         self.q_write: Queue[AssignChunk] = Queue()
+
+        self.bench = Bench(self.q_log, enabled=benchmark)
 
         self.streamers_done = threading.Event()
         self.analyzers_done = threading.Event()

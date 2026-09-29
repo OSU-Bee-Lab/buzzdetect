@@ -471,6 +471,7 @@
 		if (h.verbosity_print) v.verbosityPrint = h.verbosity_print;
 		if (h.verbosity_log) v.verbosityLog = h.verbosity_log;
 		if (h.log_progress !== undefined) v.logProgress = h.log_progress;
+		if (h.benchmark !== undefined) v.benchmark = h.benchmark;
 		settings.save();
 		await onModelChange();
 	}
@@ -489,7 +490,8 @@
 			stream_buffer_depth: settings.value.streamBufferDepth,
 			verbosity_print: settings.value.verbosityPrint,
 			verbosity_log: settings.value.verbosityLog,
-			log_progress: settings.value.logProgress
+			log_progress: settings.value.logProgress,
+			benchmark: settings.value.benchmark
 		};
 	}
 
@@ -898,6 +900,17 @@ Leave blank for automatic assignment."
 					class="qmark"
 					data-tooltip="Should progress statements (e.g., reports from analyzers) be written to the log file?
 Can produce very large log files."
+				>
+					?
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" bind:checked={settings.value.benchmark} onchange={() => settings.save()} />
+				Save benchmarks to log
+				<span
+					class="qmark"
+					data-tooltip="Write how long each stage (reading, resampling, waiting, inference, writing) takes for every chunk, plus a summary at the end of the run.
+Adds several lines per chunk to the log file."
 				>
 					?
 				</span>

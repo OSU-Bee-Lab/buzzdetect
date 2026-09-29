@@ -74,6 +74,7 @@ class Analyzer:
             verbosity_print: str = 'INFO',
             verbosity_log: str = 'DEBUG',
             log_progress: bool = False,
+            benchmark: bool = False,
             coordinator: Coordinator = None,
     ):
         """Initialize the analyzer with configuration parameters.
@@ -106,6 +107,7 @@ class Analyzer:
         self.verbosity_print = verbosity_print
         self.verbosity_log = verbosity_log
         self.log_progress = log_progress
+        self.benchmark = benchmark
 
         self.coordinator = coordinator
 
@@ -180,6 +182,7 @@ class Analyzer:
                 'verbosity_print': self.verbosity_print,
                 'verbosity_log': self.verbosity_log,
                 'log_progress': self.log_progress,
+                'benchmark': self.benchmark,
                 'coordinator': self.coordinator,
             }
         )
@@ -431,6 +434,8 @@ class Analyzer:
         rate = f' (rate: {c.audio_seconds / elapsed:.1f})' if elapsed > 0 else ''
         lines.append(f'{c.audio_seconds:,.1f}s of audio analyzed in {elapsed:,.1f}s{rate}')
         lines.append(self._END_STATUS.get(c.end_reason, f'Analysis ended: {c.end_reason}.'))
+        if c.bench.enabled:
+            lines.append(c.bench.summary())
         return '\n'.join(lines)
 
     def run(self) -> bool:
@@ -511,6 +516,7 @@ def analyze(
         verbosity_print: str = 'PROGRESS',
         verbosity_log: str = 'DEBUG',
         log_progress: bool = False,
+        benchmark: bool = False,
         q_gui: multiprocessing.Queue = None,
         event_stopanalysis: multiprocessing.Event = None,
 ):
@@ -559,6 +565,9 @@ def analyze(
     log_progress : bool, optional
         Whether or not to log progress statements to file, by default False
         For long analyses with small chunks, this can result in log files megabytes in size.
+    benchmark : bool, optional
+        Whether to write per-stage timings for every chunk, and a summary, to the log file
+        (level BENCHMARK), by default False. Adds a few lines per chunk.
     q_gui : multiprocessing.Queue, optional
         Queue for passing log messages to GUI, by default None
     event_stopanalysis : multiprocessing.Event, optional
@@ -587,7 +596,8 @@ def analyze(
         streamers_total=n_streamers,
         depth=stream_buffer_depth,
         q_gui=q_gui,
-        event_analysisdone=event_stopanalysis
+        event_analysisdone=event_stopanalysis,
+        benchmark=benchmark,
     )
 
     analyzer = Analyzer(
@@ -601,6 +611,7 @@ def analyze(
         verbosity_print=verbosity_print,
         verbosity_log=verbosity_log,
         log_progress=log_progress,
+        benchmark=benchmark,
         coordinator=coordinator
     )
 

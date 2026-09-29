@@ -147,6 +147,10 @@ def main():
                         help='Whether or not to log progress statements to file. For long analyses with small chunks, this can result in log files megabytes in size.',
                         required=False, default=False, type=str2bool)
 
+    parser.add_argument('--benchmark',
+                        help='Write per-stage timings for every chunk, and a summary, to the log file.',
+                        required=False, default=False, type=str2bool)
+
     args = parser.parse_args()
 
     # First sign of life a host GUI gets. Everything before this point is
@@ -189,6 +193,7 @@ def main():
         verbosity_print=args.verbosity_print,
         verbosity_log=args.verbosity_log,
         log_progress=args.log_progress,
+        benchmark=args.benchmark,
     )
 
     if not completed:

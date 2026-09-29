@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 import numpy as np
 
@@ -94,6 +95,7 @@ class OnnxModel:
         # Both set by WorkerInferer before initialize().
         self.processor = 'CPU'
         self.samples_session = None
+        self.timings = {}
 
     def session_length(self, chunklength_s):
         """Samples to build the session for, given the analyzer's chunk length.
@@ -160,10 +162,16 @@ class OnnxModel:
                 f'session from chunklength; a chunk longer than that should '
                 f'not exist.')
 
+        t0 = time.perf_counter()
         padded = np.zeros(self.samples_session, dtype=np.float32)
         padded[:n] = samples
+        t1 = time.perf_counter()
         results = self.model.run(None, {self.name_in: padded})[0]
-        return results[:self.n_frames(n)]
+        t2 = time.perf_counter()
+        out = results[:self.n_frames(n)]
+        # read by the benchmark; cheap enough to keep unconditionally
+        self.timings = {'t_pad': t1 - t0, 't_run': t2 - t1, 't_trim': time.perf_counter() - t2}
+        return out
 
 
 def load_model(modelname: str, framehop_prop: float, initialize: bool):

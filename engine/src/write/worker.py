@@ -5,6 +5,7 @@ import pandas as pd
 
 from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
+from src.pipeline.benchmark import now
 from src.write.formatting import format_activations, format_detections
 
 
@@ -91,11 +92,15 @@ class WorkerWriter:
     def run(self):
         self.log('launching', 'INFO')
         while True:
+            depth = self.coordinator.q_write.qsize()
+            t_ask = now()
             item = self.coordinator.get_write()
             if item == 'exit':
                 break
 
+            t_got = now()
             a_chunk, fully_analyzed = item
             self.write_results(a_chunk, fully_analyzed)
+            self.coordinator.bench.record('writer', t_wait=t_got - t_ask, t_write=now() - t_got, depth=depth)
 
         self.log("terminating", 'INFO')
