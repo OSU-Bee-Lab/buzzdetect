@@ -806,8 +806,9 @@ If you're using GPU, you probably don't want any CPU analyzers."
 				<input
 					type="checkbox"
 					disabled={!gpu.usable || currentModel?.has_fp16 === false}
-					bind:checked={settings.value.gpuFp16}
-					onchange={() => {
+					checked={currentModel?.has_fp16 !== false && settings.value.gpuFp16}
+					onchange={(e) => {
+						settings.value.gpuFp16 = e.currentTarget.checked;
 						settings.value.gpuFp16Touched = true;
 						settings.save();
 					}}
