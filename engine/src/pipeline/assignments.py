@@ -38,6 +38,13 @@ class AssignChunk:
     samples: np.ndarray = None
     # [n_frames, n_classes] from OnnxModel.predict
     results: np.ndarray = None
+    # `samples` arrives zero-padded to the session length (the streamer does
+    # that, so the analyzer doesn't); n_samples is how many of them are audio
+    n_samples: int = None
+    # set by the analyzer for the writer's progress report: which analyzer, and
+    # the wall time since it finished its previous chunk
+    analyzer: str = None
+    analysis_s: float = None
 
 
 @dataclass

@@ -2,11 +2,17 @@ from src.inference.models import load_model
 from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
 from src.pipeline.progress_json import emit_progress
-from src.utils import Timer
 from src.pipeline.benchmark import now
 
 
 class WorkerInferer:
+    """Takes padded chunks off the queue, runs the model, hands results on.
+
+    Deliberately does nothing else. Padding is the streamers' job and the
+    progress/log reporting is the writer's (which is why the chunk carries
+    `analyzer` and `analysis_s`): the only waiting this thread should do is
+    waiting for audio.
+    """
     def __init__(self,
                  id_analyzer,
                  processor: str,
@@ -21,8 +27,8 @@ class WorkerInferer:
 
         self.model = load_model(modelname, framehop_prop, initialize=False)
         self.chunklength = chunklength
-        self.timer_analysis = Timer()
-        self.timer_bottleneck = Timer()
+        self.t_prev = None
+        self.t_predict = 0.0
 
 
     def __call__(self):
@@ -30,30 +36,6 @@ class WorkerInferer:
 
     def log(self, msg, level_str):
         self.coordinator.q_log.put(AssignLog(message=f'analyzer {self.id_analyzer}: {msg}', level_str=level_str))
-
-    def report_rate(self, a_chunk: AssignChunk):
-        chunk_duration = a_chunk.chunk[1] - a_chunk.chunk[0]
-
-        self.timer_analysis.stop()
-        analysis_rate = chunk_duration / self.timer_analysis.get_total(5)
-
-        digits_time = self.model.digits_time
-        msg = (f"analyzed {a_chunk.file.shortpath_audio}, chunk ({float(a_chunk.chunk[0]):.{digits_time}f}, {float(a_chunk.chunk[1]):.{digits_time}f}) "
-                 f"in {self.timer_analysis.get_total():.2f}s (rate: {analysis_rate:.1f})")
-
-        self.log(msg, 'PROGRESS')
-        emit_progress(
-            'chunk_done',
-            path=a_chunk.file.shortpath_audio,
-            chunk_start=float(a_chunk.chunk[0]),
-            chunk_end=float(a_chunk.chunk[1]),
-            done=a_chunk.last_chunk,
-        )
-        self.timer_analysis.restart()
-
-    def report_bottleneck(self):
-        msg = f"BUFFER BOTTLENECK: analyzer {self.id_analyzer} received assignment after {self.timer_bottleneck.get_total().__round__(1)}s"
-        self.log(msg, 'DEBUG')
 
     # Substrings that mark an inference failure as "ran out of memory" rather
     # than anything wrong with the audio or the graph. onnxruntime reports an
@@ -76,9 +58,10 @@ class WorkerInferer:
 
     def process_chunk(self, a_chunk: AssignChunk):
         try:
-            t_predict = now()
-            a_chunk.results = self.model.predict(a_chunk.samples)
-            self.t_predict = now() - t_predict
+            t_start = now()
+            a_chunk.results = self.model.predict(a_chunk.samples, n_valid=a_chunk.n_samples)
+            t_done = now()
+            self.t_predict = t_done - t_start
         except Exception as e:
             # Chunk length is the one setting a user can act on here, and it is
             # not obvious from an allocator's error text that it is implicated
@@ -95,8 +78,14 @@ class WorkerInferer:
                     f'use fewer analyzers. Original error: {e}') from e
             raise
 
+        # the audio is spent; don't hold a chunk's worth of RAM until the writer is done
+        a_chunk.samples = None
+        # all the writer needs to report the rate: who, and the wall time since
+        # this analyzer finished its previous chunk (so waiting counts against it)
+        a_chunk.analyzer = self.id_analyzer
+        a_chunk.analysis_s = t_done - self.t_prev
+        self.t_prev = t_done
         self.coordinator.put_write(a_chunk)
-        self.report_rate(a_chunk)
 
     def run(self):
         self.log('launching', 'INFO')
@@ -106,8 +95,9 @@ class WorkerInferer:
         # nothing for this worker to place by hand.
         self.model.processor = self.processor
         # The session is built at one fixed input length, because CoreML cannot
-        # compile a graph with an unbounded dimension. predict() pads each chunk
-        # up to it and drops the frames that padding produced.
+        # compile a graph with an unbounded dimension. The streamers pad each
+        # chunk up to it (WorkerStreamer computes the same length from the same
+        # chunklength) and predict() drops the frames that padding produced.
         self.model.samples_session = self.model.session_length(self.chunklength)
         self.model.initialize()
         # The session is built, so this worker is ready for its first chunk.
@@ -115,7 +105,7 @@ class WorkerInferer:
         # monotonic and ignore the repeats.
         emit_progress('stage', name='analyzing', processor=self.processor)
 
-        self.timer_bottleneck.restart()
+        self.t_prev = now()
         while True:
             depth = self.coordinator.q_analyze.qsize()
             t_ask = now()
@@ -123,9 +113,6 @@ class WorkerInferer:
             if a_chunk == 'exit':
                 break
 
-            self.timer_bottleneck.stop()
-            if self.timer_bottleneck.get_total() > 0.01:
-                self.report_bottleneck()
             t_got = now()
             self.process_chunk(a_chunk)
             t_done = now()
@@ -136,6 +123,5 @@ class WorkerInferer:
                 t_post=t_done - t_got - self.t_predict,
                 depth=depth,
             )
-            self.timer_bottleneck.restart()
 
         self.log("terminating", 'INFO')

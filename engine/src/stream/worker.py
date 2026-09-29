@@ -32,6 +32,8 @@ class WorkerStreamer:
         self.chunklength = chunklength
         self.framelength_s = self.model.framelength_s
         self.resample_rate = self.model.samplerate
+        # the analyzers build their sessions at this length (see WorkerInferer.run)
+        self.samples_session = self.model.session_length(chunklength)
 
     def __call__(self):
         self.run()
@@ -149,8 +151,13 @@ class WorkerStreamer:
         samples = samples.astype(np.float32)
         t3 = now()
 
+        # pad here rather than in the analyzer, which should only ever run the model
+        n_audio = len(samples)
+        samples = self.model.pad(samples, self.samples_session)
+        t_pad = now() - t3
+
         last_chunk = force_last or not continue_file
-        a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, last_chunk=last_chunk)
+        a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, n_samples=n_audio, last_chunk=last_chunk)
         self.coordinator.put_analyze(a_chunk)
         t4 = now()
 
@@ -159,7 +166,8 @@ class WorkerStreamer:
             t_read=t1 - t0,
             t_downmix=t2 - t1,
             t_resample=t3 - t2,
-            t_put_wait=t4 - t3,
+            t_pad=t_pad,
+            t_put_wait=t4 - t3 - t_pad,
             audio_s=round(chunk[1] - chunk[0], 2),
         )
 

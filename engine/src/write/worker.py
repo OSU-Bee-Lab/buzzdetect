@@ -6,6 +6,7 @@ import pandas as pd
 from src.pipeline.assignments import AssignChunk, AssignLog
 from src.pipeline.coordination import Coordinator
 from src.pipeline.benchmark import now
+from src.pipeline.progress_json import emit_progress
 from src.write.formatting import format_activations, format_detections
 
 
@@ -66,6 +67,27 @@ class WorkerWriter:
     def log(self, msg, level_str):
         self.coordinator.q_log.put(AssignLog(message=f'writer: {msg}', level_str=level_str))
 
+    def report_chunk(self, a_chunk: AssignChunk):
+        # Reported from here, not the analyzer: formatting a line and writing to
+        # stdout (a pipe to the GUI, which can block) is not the model's job.
+        # The rate is the analyzer's -- audio seconds per wall second between
+        # its finished chunks -- so it includes any time it spent waiting.
+        chunk_duration = a_chunk.chunk[1] - a_chunk.chunk[0]
+        d = self.digits_time
+        msg = (f"analyzer {a_chunk.analyzer}: analyzed {a_chunk.file.shortpath_audio}, "
+               f"chunk ({float(a_chunk.chunk[0]):.{d}f}, {float(a_chunk.chunk[1]):.{d}f})")
+        if a_chunk.analysis_s:
+            msg += f" in {a_chunk.analysis_s:.2f}s (rate: {chunk_duration / a_chunk.analysis_s:.1f})"
+
+        self.coordinator.q_log.put(AssignLog(message=msg, level_str='PROGRESS'))
+        emit_progress(
+            'chunk_done',
+            path=a_chunk.file.shortpath_audio,
+            chunk_start=float(a_chunk.chunk[0]),
+            chunk_end=float(a_chunk.chunk[1]),
+            done=a_chunk.last_chunk,
+        )
+
     def write_results(self, a_chunk: AssignChunk, fully_analyzed: bool):
         output = self.format(
             results=a_chunk.results,
@@ -101,6 +123,9 @@ class WorkerWriter:
             t_got = now()
             a_chunk, fully_analyzed = item
             self.write_results(a_chunk, fully_analyzed)
-            self.coordinator.bench.record('writer', t_wait=t_got - t_ask, t_write=now() - t_got, depth=depth)
+            t_written = now()
+            self.report_chunk(a_chunk)
+            self.coordinator.bench.record('writer', t_wait=t_got - t_ask, t_write=t_written - t_got,
+                                          t_report=now() - t_written, depth=depth)
 
         self.log("terminating", 'INFO')

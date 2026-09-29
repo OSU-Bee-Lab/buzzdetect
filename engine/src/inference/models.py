@@ -146,25 +146,44 @@ class OnnxModel:
         self.model = make_session(path, self.processor, self.samples_session)
         self.name_in = self.model.get_inputs()[0].name
 
-    def predict(self, audiosamples):
+    def pad(self, audiosamples, length):
+        """Zero-pad a chunk up to `length` samples (the session's length).
+
+        Split out of predict() so the streamers can do it: the analyzer should
+        spend its time in the model, not allocating and copying 128MB.
+        """
+        samples = np.asarray(audiosamples, dtype=np.float32)
+        n = samples.shape[0]
+        if n > length:
+            raise ValueError(
+                f'{self.modelname} got a {n}-sample chunk but its session is '
+                f'built for {length}. The analyzer sizes the '
+                f'session from chunklength; a chunk longer than that should '
+                f'not exist.')
+
+        padded = np.zeros(length, dtype=np.float32)
+        padded[:n] = samples
+        return padded
+
+    def predict(self, audiosamples, n_valid=None):
         """Predictions for one chunk of audio at self.samplerate.
 
         The chunk is padded up to the session's length and the surplus frames
         are dropped here, so nothing downstream ever sees a result computed
-        from padding.
+        from padding. A caller that has already padded it (see pad()) passes
+        the real sample count as `n_valid` and the padding is skipped.
         """
-        samples = np.asarray(audiosamples, dtype=np.float32)
-        n = samples.shape[0]
-        if n > self.samples_session:
-            raise ValueError(
-                f'{self.modelname} got a {n}-sample chunk but its session is '
-                f'built for {self.samples_session}. The analyzer sizes the '
-                f'session from chunklength; a chunk longer than that should '
-                f'not exist.')
-
         t0 = time.perf_counter()
-        padded = np.zeros(self.samples_session, dtype=np.float32)
-        padded[:n] = samples
+        if n_valid is None:
+            padded = self.pad(audiosamples, self.samples_session)
+            n = len(audiosamples)
+        else:
+            padded = audiosamples
+            n = n_valid
+            if len(padded) != self.samples_session:
+                raise ValueError(
+                    f'{self.modelname} got a pre-padded chunk of {len(padded)} '
+                    f'samples but its session is built for {self.samples_session}.')
         t1 = time.perf_counter()
         results = self.model.run(None, {self.name_in: padded})[0]
         t2 = time.perf_counter()
