@@ -472,6 +472,7 @@
 		if (h.verbosity_log) v.verbosityLog = h.verbosity_log;
 		if (h.log_progress !== undefined) v.logProgress = h.log_progress;
 		if (h.benchmark !== undefined) v.benchmark = h.benchmark;
+		if (h.full_quality_decode !== undefined) v.fullQualityDecode = h.full_quality_decode;
 		settings.save();
 		await onModelChange();
 	}
@@ -491,7 +492,8 @@
 			verbosity_print: settings.value.verbosityPrint,
 			verbosity_log: settings.value.verbosityLog,
 			log_progress: settings.value.logProgress,
-			benchmark: settings.value.benchmark
+			benchmark: settings.value.benchmark,
+			full_quality_decode: settings.value.fullQualityDecode
 		};
 	}
 
@@ -911,6 +913,17 @@ Can produce very large log files."
 					class="qmark"
 					data-tooltip="Write how long each stage (reading, resampling, waiting, inference, writing) takes for every chunk, plus a summary at the end of the run.
 Adds several lines per chunk to the log file."
+				>
+					?
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" bind:checked={settings.value.fullQualityDecode} onchange={() => settings.save()} />
+				Full quality decoding
+				<span
+					class="qmark"
+					data-tooltip="Resample audio to the model's sample rate with the slower, more accurate filter.
+The default is about 3x cheaper to resample and adequate for detection, but activations differ slightly between the two."
 				>
 					?
 				</span>

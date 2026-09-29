@@ -151,6 +151,10 @@ def main():
                         help='Write per-stage timings for every chunk, and a summary, to the log file.',
                         required=False, default=False, type=str2bool)
 
+    parser.add_argument('--full_quality_decode',
+                        help='Resample audio at full quality (soxr HQ) instead of the faster default (QQ). Results differ slightly; QQ is about 3x cheaper to resample.',
+                        required=False, default=False, type=str2bool)
+
     args = parser.parse_args()
 
     # First sign of life a host GUI gets. Everything before this point is
@@ -194,6 +198,7 @@ def main():
         verbosity_log=args.verbosity_log,
         log_progress=args.log_progress,
         benchmark=args.benchmark,
+        full_quality_decode=args.full_quality_decode,
     )
 
     if not completed:

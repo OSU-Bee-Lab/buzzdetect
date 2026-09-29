@@ -75,6 +75,7 @@ class Analyzer:
             verbosity_log: str = 'DEBUG',
             log_progress: bool = False,
             benchmark: bool = False,
+            full_quality_decode: bool = False,
             coordinator: Coordinator = None,
     ):
         """Initialize the analyzer with configuration parameters.
@@ -108,6 +109,7 @@ class Analyzer:
         self.verbosity_log = verbosity_log
         self.log_progress = log_progress
         self.benchmark = benchmark
+        self.full_quality_decode = full_quality_decode
 
         self.coordinator = coordinator
 
@@ -230,6 +232,7 @@ class Analyzer:
                     'model': self.model,
                     'chunklength': self.chunklength,
                     'coordinator': self.coordinator,
+                    'full_quality_decode': self.full_quality_decode,
                 }
             )
             self.threads_streamers.append(streamer)
@@ -517,6 +520,7 @@ def analyze(
         verbosity_log: str = 'DEBUG',
         log_progress: bool = False,
         benchmark: bool = False,
+        full_quality_decode: bool = False,
         q_gui: multiprocessing.Queue = None,
         event_stopanalysis: multiprocessing.Event = None,
 ):
@@ -568,6 +572,10 @@ def analyze(
     benchmark : bool, optional
         Whether to write per-stage timings for every chunk, and a summary, to the log file
         (level BENCHMARK), by default False. Adds a few lines per chunk.
+    full_quality_decode : bool, optional
+        Resample audio to the model's rate at soxr's HQ setting instead of the default QQ,
+        by default False. QQ is about three times cheaper and adequate for detection; results
+        differ slightly between the two.
     q_gui : multiprocessing.Queue, optional
         Queue for passing log messages to GUI, by default None
     event_stopanalysis : multiprocessing.Event, optional
@@ -612,6 +620,7 @@ def analyze(
         verbosity_log=verbosity_log,
         log_progress=log_progress,
         benchmark=benchmark,
+        full_quality_decode=full_quality_decode,
         coordinator=coordinator
     )
 

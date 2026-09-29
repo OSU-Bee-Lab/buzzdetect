@@ -1011,6 +1011,8 @@ pub struct AnalysisSettings {
     log_progress: bool,
     #[serde(default)]
     benchmark: bool,
+    #[serde(default)]
+    full_quality_decode: bool,
 }
 
 fn default_chunklength() -> f64 {
@@ -1056,6 +1058,8 @@ fn engine_args(settings: &AnalysisSettings) -> Vec<String> {
         settings.log_progress.to_string(),
         "--benchmark".into(),
         settings.benchmark.to_string(),
+        "--full_quality_decode".into(),
+        settings.full_quality_decode.to_string(),
         "--classes_out".into(),
     ];
     args.extend(settings.classes_out.iter().cloned());
@@ -1555,6 +1559,7 @@ mod tests {
         assert!(!s.gpu_fp16);
         assert!(!s.log_progress);
         assert!(!s.benchmark);
+        assert!(!s.full_quality_decode);
         assert!(s.n_streamers.is_none());
         assert!(s.stream_buffer_depth.is_none());
     }
@@ -1573,6 +1578,7 @@ mod tests {
             "verbosity_log": "INFO",
             "log_progress": true,
             "benchmark": true,
+            "full_quality_decode": true,
             "n_streamers": 3,
             "stream_buffer_depth": 7,
         })));
@@ -1586,6 +1592,7 @@ mod tests {
         assert_eq!(value_after(&args, "--verbosity_log").as_deref(), Some("INFO"));
         assert_eq!(value_after(&args, "--log_progress").as_deref(), Some("true"));
         assert_eq!(value_after(&args, "--benchmark").as_deref(), Some("true"));
+        assert_eq!(value_after(&args, "--full_quality_decode").as_deref(), Some("true"));
         assert_eq!(value_after(&args, "--n_streamers").as_deref(), Some("3"));
         assert_eq!(value_after(&args, "--stream_buffer_depth").as_deref(), Some("7"));
     }

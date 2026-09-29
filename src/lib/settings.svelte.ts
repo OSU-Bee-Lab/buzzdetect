@@ -25,6 +25,7 @@ export interface Settings {
 	verbosityLog: string;
 	logProgress: boolean;
 	benchmark: boolean;
+	fullQualityDecode: boolean;
 }
 
 const STORAGE_KEY = 'buzzdetect.settings';
@@ -46,7 +47,8 @@ function defaults(): Settings {
 		verbosityPrint: 'PROGRESS',
 		verbosityLog: 'DEBUG',
 		logProgress: false,
-		benchmark: false
+		benchmark: false,
+		fullQualityDecode: false
 	};
 }
 

@@ -23,7 +23,8 @@ class WorkerStreamer:
                  id_streamer,
                  model: OnnxModel,
                  chunklength: float,
-                 coordinator: Coordinator, ):
+                 coordinator: Coordinator,
+                 full_quality_decode: bool = False, ):
 
         self.model = model
         self.id_streamer = id_streamer
@@ -32,6 +33,9 @@ class WorkerStreamer:
         self.chunklength = chunklength
         self.framelength_s = self.model.framelength_s
         self.resample_rate = self.model.samplerate
+        # soxr QQ is ~3x cheaper than HQ and lands ~-46 dB from a VHQ reference
+        # in-band, against ~-88 dB for HQ; see --full_quality_decode
+        self.resample_quality = 'HQ' if full_quality_decode else 'QQ'
         # the analyzers build their sessions at this length (see WorkerInferer.run)
         self.samples_session = self.model.session_length(chunklength)
 
@@ -147,7 +151,7 @@ class WorkerStreamer:
         # soxr directly rather than librosa.resample, which is a thin wrapper
         # over this same call (res_type='soxr_hq') but drags numba/llvmlite/scipy
         # in with it -- a few hundred MB of dependency for one function.
-        samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality='HQ')
+        samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality=self.resample_quality)
         samples = samples.astype(np.float32)
         t3 = now()
 
