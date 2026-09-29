@@ -428,6 +428,15 @@ _OVERLAP_FRAMES = 12
 # of samples -- enormously more evidence than the decision needs.
 _VERIFY_FRAMES = 4
 
+# Largest sample-wise difference from the body's decode that a seam boundary may
+# leave and still be adopted. Where mpg123's synthesis reproduces the body
+# exactly one boundary has residual 0 and is taken outright; where it does not
+# (arm64/NEON) the residual is ~3e-8 on either boundary, the last float32 digit,
+# and the better of the two is used rather than re-reading the file. The
+# boundary that is *wrong* leaves ~2e-7 on x86, which this also admits -- the
+# same bound tests/test_mp3_driver.py holds the tail to.
+_SEAM_TOLERANCE = 1e-6
+
 # The smallest window worth deciding on. A mismatched boundary perturbs roughly
 # 40% of samples, so even this many of them is overwhelming evidence.
 _VERIFY_MINIMUM = 64
@@ -724,6 +733,7 @@ class LocalDriver:
             return True
 
         reference = self._reference(body)
+        best = None         # (residual, shim, track, first, overlap, carry)
         for overlap in (_OVERLAP_FRAMES, _OVERLAP_FRAMES + 1):
             opened = self._open_fragment(overlap)
             if opened is None:
@@ -745,14 +755,28 @@ class LocalDriver:
                     return True
 
                 got, carry = self._probe(track, first, reference.shape[0])
-                if np.array_equal(got, reference):
+                residual = float(np.max(np.abs(got - reference))) if got.size else 0.0
+                if residual == 0.0:
+                    if best is not None:
+                        best[2].close()
+                        best[1].close()
                     self._adopt_tail(shim, track, first, overlap, carry)
                     return True
+                if residual <= _SEAM_TOLERANCE and (best is None or residual < best[0]):
+                    if best is not None:
+                        best[2].close()
+                        best[1].close()
+                    best = (residual, shim, track, first, overlap, carry)
+                    continue
             except Exception:
                 pass
             track.close()
             shim.close()
 
+        if best is not None:
+            _, shim, track, first, overlap, carry = best
+            self._adopt_tail(shim, track, first, overlap, carry)
+            return True
         return False
 
     def _adopt_tail(self, shim, track, first, overlap, carry):
