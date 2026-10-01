@@ -48,3 +48,5 @@ environment/
 
 # local Claude Code settings and worktrees
 .claude/
+
+CLAUDE.md
