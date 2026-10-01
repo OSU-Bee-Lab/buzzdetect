@@ -1,0 +1,89 @@
+{
+  "models": [
+    {
+      "name": "balanced_v1",
+      "description": "Faster than heavy, but more susceptible to false positives from vehicles, people, and other environmental sounds.",
+      "url": "https://github.com/OSU-Bee-Lab/buzzdetect/releases/download/model-balanced_v1/",
+      "files": {
+        "model.onnx": {
+          "sha256": "3085541cc5c89edac18d774632f56d4a4806709a12eb709c0fef2228388016da",
+          "size": 4440897
+        },
+        "model.fp16.onnx": {
+          "sha256": "436ad2161ffea6c189231249a33f0767099f3ff760ca97b20644714e07cfb8be",
+          "size": 2840564
+        },
+        "config_model.json": {
+          "sha256": "e4e88f7c98465d85c6bb1c2e971e2b5fb0e9adfca9b5cf3b90e47d588d0b0b78",
+          "size": 2551
+        }
+      }
+    },
+    {
+      "name": "heavy_v1",
+      "description": "A slow but powerful model. Most resistant to false positives. Heavy offers more output classes than the other models, but only ambient_rain, human, and ins_buzz have been tested for performance.",
+      "url": "https://github.com/OSU-Bee-Lab/buzzdetect/releases/download/model-heavy_v1/",
+      "files": {
+        "model.onnx": {
+          "sha256": "196a7523442dff231617cf3585c55eb7da72e0d04b55ff52779b8bec237772cd",
+          "size": 20695033
+        },
+        "model.fp16.onnx": {
+          "sha256": "a51618a479aa2d9c262809407b33c962163c783cee5cbd487941276106b4cb87",
+          "size": 11578765
+        },
+        "config_model.json": {
+          "sha256": "2d99967ac5bd05e1896fc7d07f833b4b91cfcd017f5a2a1b979b853a0f3c3bf7",
+          "size": 5718
+        }
+      }
+    },
+    {
+      "name": "fast_v1",
+      "description": "Extremely fast, but more prone to false positives than balanced.",
+      "url": "https://github.com/OSU-Bee-Lab/buzzdetect/releases/download/model-fast_v1/",
+      "files": {
+        "model.onnx": {
+          "sha256": "f198b1c1775e2525e763005e4d2490de850c08656433df56b6e5f7252eef6b6a",
+          "size": 3591498
+        },
+        "model.fp16.onnx": {
+          "sha256": "6dbf5b7c1403f65c18f18e761cfcff5fcb43a354d5eb879b010baa63ebf2a15e",
+          "size": 1985742
+        },
+        "config_model.json": {
+          "sha256": "280fe6c1455c54d15b1d4498c08d9fcbc74f0e9494875f5da91473dbb207d94c",
+          "size": 2499
+        }
+      }
+    },
+    {
+      "name": "model_general_v3",
+      "description": "NOTE: this model is surpassed by the more recent models, but is retained as a legacy model. This is the same model used in the original buzzdetect manuscript. Only the ins_buzz neuron is reliable.",
+      "url": "https://github.com/OSU-Bee-Lab/buzzdetect/releases/download/model-model_general_v3/",
+      "files": {
+        "model.onnx": {
+          "sha256": "13c4b113a83a3ef20be20a508e6e7c3b8ea9caf1e921cc3ff78aa60ccf50c104",
+          "size": 14005606
+        },
+        "model.fp16.onnx": {
+          "sha256": "762a074f92d4edee0e50333074d2b3d906a39f6911d25f12b24f35a93b8998c1",
+          "size": 7610503
+        },
+        "config_model.json": {
+          "sha256": "f4e271a84e99807ac136a0bb6f0bc166a93e02a06265d025bebe41f746501ec2",
+          "size": 652
+        },
+        "translation.csv": {
+          "sha256": "12c525f09a7d32139ae9780de8dc0606d7ad1346d4f42b0ecf951afb79025ae2",
+          "size": 976
+        },
+        "weights.csv": {
+          "sha256": "0b72c4efd853fce55f9111180fdb9ae288af70316fafebb957b8a43e68e670df",
+          "size": 504
+        },
+        "README.md": {}
+      }
+    }
+  ]
+}

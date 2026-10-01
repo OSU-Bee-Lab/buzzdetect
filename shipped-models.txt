@@ -1,2 +1,2 @@
-yamnet_large_general
-model_general_v3
+balanced_v1
+heavy_v1

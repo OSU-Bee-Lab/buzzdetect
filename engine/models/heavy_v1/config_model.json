@@ -1,0 +1,245 @@
+{
+  "description": "A slow but powerful model. Most resistant to false positives. Heavy offers more output classes than the other models, but only ambient_rain, human, and ins_buzz have been tested for performance.",
+  "classes": [
+    "ambient_scraping",
+    "ambient_background",
+    "ambient_music",
+    "ambient_noise",
+    "ambient_rain",
+    "ambient_thunder",
+    "animal",
+    "human",
+    "ins_buzz",
+    "ins_trill",
+    "mech_auto",
+    "mech_hum",
+    "mech_machinery",
+    "mech_plane",
+    "mech_quadcopter"
+  ],
+  "samplerate": 16000,
+  "framelength_s": 0.96,
+  "digits_time": 2,
+  "digits_results": 8,
+  "samples_hop": 15360,
+  "samples_min": 30719,
+  "samples_floor_nonzero": 15360,
+  "center_stats": {
+    "ambient_background": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 3,
+      "folds_total": 5,
+      "events": 84,
+      "events_source": "sample",
+      "frames": 60524,
+      "sensitivity": 0.039,
+      "false_positive_rate": 0.00801,
+      "precision_reached": 0.983,
+      "fold_threshold_spread": [
+        -1.04,
+        1.155
+      ]
+    },
+    "ambient_music": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 2,
+      "folds_total": 5,
+      "events": 2,
+      "events_source": "sample",
+      "frames": 1165,
+      "sensitivity": 0.123,
+      "false_positive_rate": 0.0536,
+      "precision_reached": 0.187,
+      "fold_threshold_spread": [
+        -1.081,
+        1.081
+      ]
+    },
+    "ambient_noise": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 1,
+      "folds_total": 5,
+      "events": 34,
+      "events_source": "sample",
+      "frames": 2589,
+      "sensitivity": 0.005,
+      "false_positive_rate": 0.0,
+      "precision_reached": 1.0,
+      "fold_threshold_spread": [
+        0.0,
+        0.0
+      ]
+    },
+    "ambient_rain": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 1,
+      "folds_total": 5,
+      "events": 2,
+      "events_source": "sample",
+      "frames": 4698,
+      "sensitivity": 0.981,
+      "false_positive_rate": 0.00736,
+      "precision_reached": 0.95,
+      "fold_threshold_spread": [
+        0.0,
+        0.0
+      ]
+    },
+    "ambient_thunder": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 1,
+      "folds_total": 5,
+      "events": 3,
+      "events_source": "sample",
+      "frames": 1951,
+      "sensitivity": 0.199,
+      "false_positive_rate": 0.00056,
+      "precision_reached": 0.951,
+      "fold_threshold_spread": [
+        0.0,
+        0.0
+      ]
+    },
+    "animal": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 1,
+      "folds_total": 5,
+      "events": 7,
+      "events_source": "sample",
+      "frames": 713,
+      "sensitivity": 0.023,
+      "false_positive_rate": 0.0,
+      "precision_reached": 1.0,
+      "fold_threshold_spread": [
+        0.0,
+        0.0
+      ]
+    },
+    "human": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 2,
+      "folds_total": 5,
+      "events": 6,
+      "events_source": "sample",
+      "frames": 71,
+      "sensitivity": 0.078,
+      "false_positive_rate": 0.00156,
+      "precision_reached": 0.071,
+      "fold_threshold_spread": [
+        -0.053,
+        0.053
+      ]
+    },
+    "ins_buzz": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 5,
+      "folds_total": 5,
+      "events": 187,
+      "events_source": "sample",
+      "frames": 19766,
+      "sensitivity": 0.407,
+      "false_positive_rate": 0.00384,
+      "precision_reached": 0.951,
+      "fold_threshold_spread": [
+        -1.036,
+        0.809
+      ],
+      "sensitivity_exclquiet": 0.5
+    },
+    "ins_trill": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 3,
+      "folds_total": 5,
+      "events": 79,
+      "events_source": "sample",
+      "frames": 67102,
+      "sensitivity": 0.326,
+      "false_positive_rate": 0.05385,
+      "precision_reached": 0.967,
+      "fold_threshold_spread": [
+        -1.445,
+        2.605
+      ]
+    },
+    "mech_auto": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 3,
+      "folds_total": 5,
+      "events": 67,
+      "events_source": "sample",
+      "frames": 31496,
+      "sensitivity": 0.0,
+      "false_positive_rate": 0.0,
+      "precision_reached": 1.0,
+      "fold_threshold_spread": [
+        -0.993,
+        1.509
+      ]
+    },
+    "mech_hum": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 1,
+      "folds_total": 5,
+      "events": 9,
+      "events_source": "sample",
+      "frames": 3850,
+      "sensitivity": 0.0,
+      "false_positive_rate": 0.0,
+      "precision_reached": 1.0,
+      "fold_threshold_spread": [
+        0.0,
+        0.0
+      ]
+    },
+    "mech_machinery": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 2,
+      "folds_total": 5,
+      "events": 2,
+      "events_source": "sample",
+      "frames": 1618,
+      "sensitivity": 0.766,
+      "false_positive_rate": 0.69039,
+      "precision_reached": 0.029,
+      "fold_threshold_spread": [
+        -0.54,
+        0.54
+      ]
+    },
+    "mech_plane": {
+      "source": "cv",
+      "precision_target": 0.95,
+      "folds": 4,
+      "folds_total": 5,
+      "events": 47,
+      "events_source": "sample",
+      "frames": 15988,
+      "sensitivity": 0.049,
+      "false_positive_rate": 0.0005,
+      "precision_reached": 0.976,
+      "fold_threshold_spread": [
+        -1.576,
+        1.866
+      ]
+    }
+  },
+  "metadata": {
+    "embeddername": "yamnet_trunk_pitchshift_depth12",
+    "set": "moderate",
+    "trained_date": "2026-09-28",
+    "overlap_event_prop": 0.2,
+    "modelname_internal": "v4-ft-ps-e60-moderate"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "description": "A general buzz-detector. The same model used in the original buzzdetect publication. Only the ins_buzz neuron is reliable.",
+  "description": "NOTE: this model is surpassed by the more recent models, but is retained as a legacy model. This is the same model used in the original buzzdetect manuscript. Only the ins_buzz neuron is reliable.",
   "classes": [
     "mech_train",
     "ins_trill",
