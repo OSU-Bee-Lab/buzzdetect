@@ -36,6 +36,10 @@ struct RunRecord {
     // files need their chunks replayed. Keeps this O(files), not O(chunks).
     events: Vec<Option<serde_json::Value>>,
     open_chunks: HashMap<String, Vec<usize>>,
+    // Sum of every chunk_done's length, counted here rather than trusted to
+    // the page: a webview that is throttled or reloaded mid-run can miss
+    // events, and the history's rate comes from this.
+    audio_seconds: f64,
     logs: VecDeque<serde_json::Value>,
 }
 
@@ -59,6 +63,11 @@ impl RunRecord {
         let chunk_path = (value["event"] == "chunk_done")
             .then(|| value["path"].as_str().map(str::to_owned))
             .flatten();
+        if chunk_path.is_some() {
+            if let (Some(a), Some(b)) = (value["chunk_start"].as_f64(), value["chunk_end"].as_f64()) {
+                self.audio_seconds += b - a;
+            }
+        }
         if let Some(path) = chunk_path {
             if value["done"] == true {
                 for idx in self.open_chunks.remove(&path).unwrap_or_default() {
@@ -877,11 +886,14 @@ fn finish_history(app: &AppHandle, started_at: u64, status: &str) {
     }
 }
 
-/// The frontend measures how much audio a run got through, so it reports that
-/// back once the run has ended; it lands on the newest entry, which is the run
-/// that just finished (only one is ever live).
+/// The frontend reports the run's duration once it has ended; it lands on the
+/// newest entry, which is the run that just finished (only one is ever live).
+/// The audio total is the Rust record's own count when it has one, since the
+/// page's sum can fall short if it missed events.
 #[tauri::command]
 fn record_run_result(app: AppHandle, audio_seconds: f64, runtime_seconds: f64) {
+    let counted = RUN_RECORD.lock().ok().and_then(|r| r.as_ref().map(|r| r.audio_seconds));
+    let audio_seconds = counted.filter(|s| *s > 0.0).unwrap_or(audio_seconds);
     let Some(path) = history_path(&app) else { return };
     let mut entries = read_history_file(&path);
     let Some(entry) = entries.last_mut() else { return };
@@ -1658,6 +1670,18 @@ mod tests {
         assert_eq!(kept[1]["path"], "b.wav");
         assert_eq!(kept[2]["done"], true);
         assert_eq!(r.logs[0]["seq"], 3);
+    }
+
+    #[test]
+    fn audio_seconds_sums_every_chunk_including_final_ones() {
+        let mut r = RunRecord::default();
+        let chunk = |s: f64, e: f64, done: bool| {
+            serde_json::json!({ "event": "chunk_done", "path": "a.wav", "chunk_start": s, "chunk_end": e, "done": done })
+        };
+        r.push_event(serde_json::json!({ "event": "file_start", "path": "a.wav" }));
+        r.push_event(chunk(0.0, 200.0, false));
+        r.push_event(chunk(200.0, 300.0, true));
+        assert_eq!(r.audio_seconds, 300.0);
     }
 
     #[test]
