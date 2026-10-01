@@ -68,6 +68,8 @@ below for the case that motivated this.
 - **`mp4.py`** — MP4 uses a sample-rate `time_base`, so `pts` *is* an exact
   sample position and no landmark cache is needed. But AAC emits one corrupt
   frame after any container seek, so it seeks one frame early and discards.
+- **`m4a.py`** — `.m4a` is the `.mp4` container with audio only; re-exports
+  `mp4.Driver`.
 - **`mts.py`** — AC3 never resyncs cleanly after a container seek (error
   persists at 0.3–1% of full scale indefinitely), so the only bit-exact path is
   decoding straight through from 0. Backward seeks reopen the container.
