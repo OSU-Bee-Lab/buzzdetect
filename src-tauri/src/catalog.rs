@@ -14,8 +14,8 @@
 //! in the user store with the same name.
 
 use super::{
-    list_models, model_dir, user_models_dir, validate_model_dir, AnalysisState, ModelDetails,
-    IMPORT_FILES, MODEL_MARKER, README,
+    cached_readme_path, list_models, model_dir, user_models_dir, validate_model_dir,
+    AnalysisState, ModelDetails, IMPORT_FILES, MODEL_MARKER, README,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -511,11 +511,39 @@ pub fn set_model_disabled(app: AppHandle, name: String, disabled: bool) -> Resul
     Ok(())
 }
 
+/// Keep a fetched README for offline use. A model in the user store gets it
+/// written over its own README.md; a bundled one can't be written to (it's
+/// inside the signed app), so it goes to a cache that `model_details` prefers.
+/// Best effort: failing to save never fails the lookup.
+fn store_readme(app: &AppHandle, name: &str, readme: &str) {
+    let installed = user_models_dir(app)
+        .map(|d| d.join(name))
+        .filter(|d| d.join(MODEL_MARKER).is_file());
+    let dest = match installed {
+        Some(dir) if model_dir(app, name).as_deref() == Some(dir.as_path()) => dir.join(README),
+        _ => match cached_readme_path(app, name) {
+            Some(p) => p,
+            None => return,
+        },
+    };
+    if std::fs::read_to_string(&dest).is_ok_and(|old| old == readme) {
+        return;
+    }
+    if let Some(parent) = dest.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = dest.with_extension("md.tmp");
+    if std::fs::write(&tmp, readme).is_ok() && std::fs::rename(&tmp, &dest).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
 /// A catalog model's details, read from its release: the config (for the
 /// description) and the README. For an installed model the
-/// window shows its local config but this README, which may be newer.
+/// window shows its local config but this README, which may be newer; the
+/// README is also saved locally so it's there next time offline.
 #[tauri::command]
-pub async fn catalog_model_details(name: String) -> Result<ModelDetails, String> {
+pub async fn catalog_model_details(app: AppHandle, name: String) -> Result<ModelDetails, String> {
     let entry = catalog_entry(&name).await?;
     let config: serde_json::Value = serde_json::from_slice(
         &fetch(&asset_url(&entry.url, MODEL_MARKER), CATALOG_TIMEOUT).await?,
@@ -529,6 +557,9 @@ pub async fn catalog_model_details(name: String) -> Result<ModelDetails, String>
     } else {
         None
     };
+    if let Some(text) = &readme {
+        store_readme(&app, &name, text);
+    }
     Ok(ModelDetails::from_parts(&name, &config, readme))
 }
 

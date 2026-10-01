@@ -222,6 +222,14 @@ fn model_roots(app: &AppHandle) -> Vec<PathBuf> {
     roots
 }
 
+/// Where a bundled model's newer README is kept (see `catalog::store_readme`).
+fn cached_readme_path(app: &AppHandle, modelname: &str) -> Option<PathBuf> {
+    app.path()
+        .app_local_data_dir()
+        .ok()
+        .map(|d| d.join("readmes").join(format!("{modelname}.md")))
+}
+
 fn model_dir(app: &AppHandle, modelname: &str) -> Option<PathBuf> {
     model_roots(app)
         .into_iter()
@@ -516,7 +524,16 @@ fn model_details_in(dir: &std::path::Path, name: &str) -> ModelDetails {
 #[tauri::command]
 fn model_details(app: AppHandle, modelname: String) -> Result<ModelDetails, String> {
     let dir = model_dir(&app, &modelname).ok_or_else(|| format!("model '{modelname}' not found"))?;
-    Ok(model_details_in(&dir, &modelname))
+    let mut details = model_details_in(&dir, &modelname);
+    let bundled = user_models_dir(&app).is_none_or(|u| !dir.starts_with(u));
+    if bundled {
+        if let Some(cached) = cached_readme_path(&app, &modelname)
+            .and_then(|p| std::fs::read_to_string(p).ok())
+        {
+            details.readme = Some(cached);
+        }
+    }
+    Ok(details)
 }
 
 const MODELS_WINDOW: &str = "models";
