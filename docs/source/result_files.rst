@@ -100,7 +100,7 @@ Result files have a variable number of columns with the following names:
 Prior to version 2.0, buzzdetect offered a detection mode that applied thresholds to the activations *before* they were written to the result file.
 We have removed this feature, as the choice of threshold is dependent on model, acoustic environment, and target species.
 The appropriate threshold demands consideration of the signal:noise ratio of the experiment in question and so cannot be universal.
-However, each model ships with evaluations and recommendations for starting points.
+However, we document evaluations and recommended starting points in each model's README.
 Use our companion R package `buzzr <https://github.com/OSU-Bee-Lab/buzzr>`_ to apply detection thresholds in a reproducible and flexible way.
 
 Note that there is no "end" column. Because all frames have the same frame length for a given output directory, an end column is redundant.
@@ -113,8 +113,8 @@ The values are not softmaxed, are not calibrated to probabilities, are not cente
 The distribution of neuron activations varies meaningfully between models;
 for one model, an activation above -1.2 might indicate a 95% chance of a true buzz in that frame,
 while the same value corresponds to a 20% chance in another model.
-With each model, we report our estimated sensitivity, false-positive-rate, and precision across a range of thresholds at which to call buzzes.
-View these metrics using the model's **Info** button in the app (see :doc:`gui`).
+For each model, we report our estimated sensitivity, false-positive-rate, and precision at suggested thresholds.
+Read them in the model's README under **View Models** in the app (see :doc:`gui`).
 
 saving storage
 ^^^^^^^^^^^^^^^^^
@@ -130,6 +130,15 @@ The results also read more quickly than a CSV!
 Result metadata: buzzdetect_manifest.json
 --------------------------------------------
 
-When an analysis is run , 
+Every output directory gets a ``buzzdetect_manifest.json`` file recording the settings that shape its results:
 
-The name of the model used for analysis is stored in the ``buzzdetect_manifest.json`` file in the output directory and its framelength can be found 
+* **modelname:** the model used for analysis.
+* **classes_out:** which classes' activations are written.
+* **full_quality_decode:** whether audio was resampled with the full-quality filter (see :doc:`gui`).
+* **framelength_s:** the length of each frame in seconds, so the end time of a frame is ``start + framelength_s``.
+* **thresholds:** the model's suggested detection threshold for each class, when it has them.
+  buzzr and SeeNote read these from here.
+* **dir_audio** / **dir_out:** the folders used by the most recent run.
+
+The first three are locked: a later analysis into the same folder must use the same model, classes, and decoding,
+so every result file in a folder is comparable. When you pick a folder that already has results, the app locks those settings to match.

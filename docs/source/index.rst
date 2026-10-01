@@ -44,7 +44,7 @@ for reproducability, cite and `the Zenodo DOI <https://doi.org/10.5281/zenodo.15
 buzzdetect is under active development, so these docs could drift out of date. Please contact the maintainers if you find an error!
 
 buzzdetect at a glance
--------------
+----------------------
 
 - **Automate your observations.** Enables passive acoustic monitoring of pollinators by detecting the buzz of insect flight in audio.
   Drop your recorders in the field and let them do your observation for you.
@@ -54,13 +54,13 @@ buzzdetect at a glance
   buzzdetect will plod through the audio one chunk at a time.
   And you won't lose your work - interrupted analyses can pick right back up from where you left off, no data lost!
 
-- **Lots of formats.** Support for a wide variety of audio formats - even (the audio part of) some videos! Including: wav, mp3, flac, ogg, aiff, mp4, wma, mts, and a bunch of others.
+- **Lots of formats.** Support for a wide variety of audio formats - even (the audio part of) some videos! Including: wav, mp3, flac, ogg, aiff, mp4, m4a, wma, mts, and a bunch of others.
 
 - **From sounds to stats.** Check out our companion package, `buzzr <https://github.com/OSU-Bee-Lab/buzzr>`_ and `our walkthrough <https://lukehearon.com/blog/2026/buzzdetect-walkthrough/>`_
   for everything you need to go from recordings to results.
 
 - **It's FOSS!** buzzdetect's source code is licensed under MIT, free as in speech, free as in pizza.
-  Embedding models could be subject to their own licenses. Check out `NOTICE <https://github.com/OSU-Bee-Lab/buzzdetect/blob/main/NOTICE>`_ and `LICENSES/ <https://github.com/OSU-Bee-Lab/buzzdetect/tree/main/LICENSES>`_ for more info.
+  Embedding models could be subject to their own licenses. Check out `NOTICE <https://github.com/OSU-Bee-Lab/buzzdetect/blob/HEAD/engine/NOTICE>`_ and `LICENSES/ <https://github.com/OSU-Bee-Lab/buzzdetect/tree/HEAD/engine/LICENSES>`_ for more info.
 
 .. toctree::
    :maxdepth: 2

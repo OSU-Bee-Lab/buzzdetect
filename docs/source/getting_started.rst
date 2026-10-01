@@ -11,7 +11,8 @@ Desktop app
 ------------
 
 To get the desktop app, all you have to do is download the installer for your platform and run it.
-The analysis engine and latest models ship inside the app, so you don't have to mess around with the command line and installing dependencies.
+The analysis engine and our two main models ship inside the app, so you don't have to mess around with the command line and installing dependencies.
+Other models can be downloaded from inside the app.
 See :doc:`gui` for a walkthrough of using the app.
 
 .. |badge-macos-arm| image:: https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000?style=for-the-badge&logo=apple&logoColor=white
@@ -89,6 +90,7 @@ The engine uses `uv <https://docs.astral.sh/uv/>`_ to manage its own virtual env
 separate from the desktop app's Node/Rust toolchain.
 
 ::
+
     cd buzzdetect/engine
     uv venv --python 3.13 .venv
     uv pip install -r requirements.txt
@@ -101,7 +103,9 @@ separate from the desktop app's Node/Rust toolchain.
     .venv/bin/python3 buzzdetect_cli.py --modelname <name> --dir_audio <dir> --dir_out <dir>
 
 ``<name>`` is a model directory under ``models/`` (see ``shipped-models.txt`` for what's
-bundled). Run ``buzzdetect_cli.py --help`` for the full set of options, which correspond to the desktop app's settings.
+bundled).
+Other models are published as GitHub releases tagged ``model-<name>``; download one into a folder of its own
+and point ``BUZZDETECT_MODELS_PATH`` at the folder that contains it. Run ``buzzdetect_cli.py --help`` for the full set of options, which correspond to the desktop app's settings.
 
 Building it yourself
 --------------------------------------
@@ -112,9 +116,9 @@ To build the desktop app itself rather than just running the engine, you'll addi
 ::
 
     npm install
-    npm run build:engine     # freezes the Python engine into a sidecar binary
+    npm run build:engine     # freezes the Python engine into src-tauri/engine-payload/
     npx tauri build
 
-To work on it without freezing the engine each time, set up ``engine/.venv`` (``cd engine && uv venv --python 3.13 .venv && uv pip install -r requirements.txt``) and run ``npx tauri dev`` — the app falls back to running the engine from source when no sidecar is present.
+To work on it without freezing the engine each time, set up ``engine/.venv`` (``cd engine && uv venv --python 3.13 .venv && uv pip install -r requirements.txt``) and run ``npx tauri dev`` — the app runs the engine from source when no frozen engine has been built.
 
 Happy listening!

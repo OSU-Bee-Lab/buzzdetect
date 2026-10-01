@@ -8,7 +8,7 @@ You'll likely want to set **CPU analyzers** to 0 and otherwise do some tuning. S
 Windows
 ------------------
 
-If you're on Windows and have an NVIDIA card, use the Windows CUDA build to runinference on the GPU.
+If you're on Windows and have an NVIDIA card, use the Windows CUDA build to run inference on the GPU.
 This build bundles the CUDA runtime, so you need a recent NVIDIA driver but you don't need to install CUDA to your system.
 Turing (GTX 16-series, RTX 20-series) and newer are supported.
 Because of its size, it ships as a portable zip rather than an installer. Unpack it anywhere and run ``buzzdetect-cuda.exe``.
