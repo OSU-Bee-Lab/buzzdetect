@@ -35,34 +35,34 @@ For more details on these settings and on tuning analyses, see :doc:`tuning`.
 - **CPU analyzers** / **GPU analyzers:** how many CPU- and GPU-based workers to launch. The GPU
   option only appears once the app has probed this machine and confirmed a usable GPU.
 - **Reduced precision (fp16):** Apple GPUs only. Runs the model at half precision on Apple's Neural Engine.
-  This can be roughly twice as fast, unless you're IO bottlenecked.
-  It shifts the activations by a very little bit (roughly 0.015), but after applying a detection threshold
+  This can be roughly twice as fast, unless you're already IO bottlenecked.
+  It shifts the activations by a very little bit, but after applying a detection threshold
   the results are essentially identical. Disabled for models that don't come with a reduced-precision version.
 - **Concurrent streamers:** how many concurrent workers should be reading audio files? This will require some tuning, but the faster your analyzer the more streamers you'll need.
 - **Stream buffer depth:** streamers put their chunks on a buffer that the analyzer(s) pull from. How many chunks should that buffer hold before streamers need to wait?
 - **Console verbosity** / **Log file verbosity:** how much detail the engine writes to the log panel and to the log file in the output folder.
-- **Log progress statements to file:** also write the progress reports (e.g., from analyzers) to the log file. Can produce very large log files.
+- **Log progress statements to file:** also write the progress reports (i.e. analyzer speed) to the log file. Can produce very large log files.
 - **Save benchmarks to log:** write how long each stage (reading, resampling, waiting, inference, writing) takes for every chunk, plus a summary at the end of the run.
-  Useful when tuning (see :doc:`tuning`).
+  Useful when tuning (see :doc:`tuning`), but also produces large log files.
 - **Full quality decoding:** resample audio to the model's sample rate with a slower, more accurate filter.
-  The default is about 3x cheaper and adequate for detection, but the activations differ slightly between the two.
+  The default is low-quality, faster, and adequate for detection, but the activations can differ very slightly between the two.
   Like the model and classes, this is locked once an output folder has results, so a folder never mixes the two.
 
 Models window
 --------------
 
-**View Models** opens a window listing every model you have installed, plus the ones available to download.
-Select a model to read its README, which is where we document what it's good at, where it struggles, and suggested detection thresholds.
+**View Models** opens a window listing every model you have installed, plus any new ones we've released that are available to download.
 
 - **Download** a model to add it to the app. When we publish a fix to a model you've downloaded, it's offered here as an **Update**.
-- **Use this model** selects it in the main window.
-- **Delete** removes a downloaded or imported model. The bundled models can't be deleted, but **Disable** hides them from the picker.
-- **Ignore** stops the app from flagging a model you don't want to download as new.
+- **Use this model** loads it into your analysis settings.
+- **Delete** removes a downloaded or imported model. The models that come bundled with the application can't be deleted, but **Disable** hides them from the picker.
+- **Ignore** stops the app from notifying you about a model you don't want to download.
 - **Import from .zip…** adds a model of your own, so long as it follows the format we use.
 
 History
 --------
 
-**History** lists your past runs. Select one to see the settings it used, and click **Use these settings** to load them back into the main window.
+**History** lists your past runs.
+Select one to see the settings it used, and click **Use these settings** to load them as your current analysis settings.
 
 Once you click **Launch Analysis**, see :doc:`gui_analysis` for what to expect while it runs and after it stops.

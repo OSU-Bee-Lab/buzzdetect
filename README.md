@@ -22,7 +22,7 @@ See the [full documentation](https://buzzdetect.readthedocs.io/en/latest/getting
 
 - **Automate your observations.** Enables passive acoustic monitoring of pollinators by detecting the buzz of insect flight in audio. Drop your recorders in the field and let them do your observation for you.
 
-- **Big ol' data.** Supports arbitrarily large datasets. Input audio files can be days long, input datasets can be years long. buzzdetect will plod through the audio one chunk at a time. And you won't lose your work - interrupted analyses can pick right back up from where you left off, no data lost!
+- **Purpose-built for long-term monitoring.** Supports arbitrarily large datasets. Input datasets can be years long with thousands of files. buzzdetect will diligently chew through the audio one chunk at a time. The engine has been aggressively tuned to squeeze out every drop of performance. And you won't lose your work - interrupted analyses can pick right back up from where you left off, no data lost!
 
 - **Lots of formats.** Support for a wide variety of audio formats - even (the audio part of) some videos! Including: wav, mp3, flac, ogg, aiff, mp4, wma, mts, and a bunch of others.
 
@@ -33,4 +33,3 @@ See the [full documentation](https://buzzdetect.readthedocs.io/en/latest/getting
 ## citing buzzdetect
 
 If you want to cite buzzdetect in a scholarly work, please cite `the paper <https://doi.org/10.1093/jisesa/ieaf104>`\_ for the method; for reproducability, cite and `the Zenodo DOI <https://doi.org/10.5281/zenodo.15537954>`\_ corresponding to the version you used in your analysis.
-

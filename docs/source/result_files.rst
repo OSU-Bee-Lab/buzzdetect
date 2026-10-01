@@ -113,8 +113,10 @@ The values are not softmaxed, are not calibrated to probabilities, are not cente
 The distribution of neuron activations varies meaningfully between models;
 for one model, an activation above -1.2 might indicate a 95% chance of a true buzz in that frame,
 while the same value corresponds to a 20% chance in another model.
-For each model, we report our estimated sensitivity, false-positive-rate, and precision at suggested thresholds.
-Read them in the model's README under **View Models** in the app (see :doc:`gui`).
+View the models' READMEs for any special considerations about how to handle its results.
+
+Starting in buzzdetect v2.0.0, we try to center a model's activations so that 0 is a safe threshold for calling buzzes.
+You might need to increase your threshold if there are sources of false positives, or decrease it if you need higher sensitivity.
 
 saving storage
 ^^^^^^^^^^^^^^^^^
@@ -130,15 +132,17 @@ The results also read more quickly than a CSV!
 Result metadata: buzzdetect_manifest.json
 --------------------------------------------
 
-Every output directory gets a ``buzzdetect_manifest.json`` file recording the settings that shape its results:
+A metadata file, ``buzzdetect_manifest.json``, is written to every results folder.
+It records any settings that would affect results and locks future runs to the same settings if they're outputting to the same folder.
+The following settings are recorded:
 
 * **modelname:** the model used for analysis.
 * **classes_out:** which classes' activations are written.
 * **full_quality_decode:** whether audio was resampled with the full-quality filter (see :doc:`gui`).
-* **framelength_s:** the length of each frame in seconds, so the end time of a frame is ``start + framelength_s``.
-* **thresholds:** the model's suggested detection threshold for each class, when it has them.
-  buzzr and SeeNote read these from here.
-* **dir_audio** / **dir_out:** the folders used by the most recent run.
 
-The first three are locked: a later analysis into the same folder must use the same model, classes, and decoding,
-so every result file in a folder is comparable. When you pick a folder that already has results, the app locks those settings to match.
+Additionally, it stores model metadata that's needed to interpret results:
+
+* **framelength_s:** the length of each frame in seconds, so the end time of a frame is ``start + framelength_s``.
+* **thresholds:** our suggested detection threshold to use as a starting point for each class.
+  (these are also read by buzzr and SeeNote).
+* **dir_audio** / **dir_out:** the input and output paths for the most recent run.

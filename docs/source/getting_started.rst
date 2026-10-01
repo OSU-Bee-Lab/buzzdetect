@@ -11,7 +11,7 @@ Desktop app
 ------------
 
 To get the desktop app, all you have to do is download the installer for your platform and run it.
-The analysis engine and our two main models ship inside the app, so you don't have to mess around with the command line and installing dependencies.
+The application ships with everything you need to start running analyses right out the gate.
 Other models can be downloaded from inside the app.
 See :doc:`gui` for a walkthrough of using the app.
 
@@ -44,11 +44,11 @@ If you have an NVIDIA GPU or an Apple Silicon Mac, see :doc:`gpu` for how to use
 macOS woes
 ^^^^^^^^^^^
 
-buzzdetect is not code-signed, because we cannot afford the developer licenses. Because of this, macOS helpfully pitches a tantrum when you try to use this tool.
+Due to developer license fees, buzzdetect is not code-signed. Because of this, macOS helpfully pitches a tantrum when you try to use this tool.
 
-Install it to ``/Applications`` (drag it there from the DMG), then open it. You'll get one of two complaints, and they need different answers.
+Install it to ``/Applications`` (drag it there from the DMG), then open it. You'll get one of two complaints.
 
-**"buzzdetect.app" is damaged and can't be opened.** Nothing is damaged — this is what macOS says about an unsigned app it has quarantined, and there's no button that gets past it. Remove the quarantine flag in Terminal:
+**"buzzdetect.app" is damaged and can't be opened.** Nothing is damaged — this is what macOS says about an unsigned app it has quarantined. Remove the quarantine flag in Terminal:
 
 ::
 
@@ -56,7 +56,7 @@ Install it to ``/Applications`` (drag it there from the DMG), then open it. You'
 
 Then open it normally.
 
-**"buzzdetect.app" Not Opened.** The milder version, which you can click through:
+**"buzzdetect.app" Not Opened.** You can click through this one without running commands:
 
 1. Click "Done".
 2. Open System Settings → Privacy & Security, scroll to the Security section near the bottom. You should see ""buzzdetect.app" was blocked to protect your Mac".
