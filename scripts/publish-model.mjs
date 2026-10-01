@@ -97,12 +97,19 @@ if (minApp && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(minApp)) usage(`--min-ap
 const configPath = join(dir, 'config_model.json');
 if (!existsSync(join(dir, 'model.onnx'))) usage(`${dir} has no model.onnx`);
 if (!existsSync(configPath)) usage(`${dir} has no config_model.json`);
-if (!existsSync(join(dir, 'README.md'))) usage(`${dir} has no README.md`);
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const missing = REQUIRED_CONFIG_KEYS.filter((k) => !(k in config));
 if (missing.length) usage(`config_model.json is missing ${missing.join(', ')}`);
 
 const files = MODEL_FILES.filter((f) => existsSync(join(dir, f)));
+// A README is optional: a model can go out undocumented and get one later
+// with --readme, which adds it to the catalog entry.
+const readmePath = join(dir, 'README.md');
+const hasReadme = existsSync(readmePath);
+if (readmeOnly && !hasReadme) usage(`${dir} has no README.md`);
+const notes = hasReadme
+	? ['--notes-file', readmePath]
+	: ['--notes', (typeof config.description === 'string' && config.description.trim()) || 'No README yet.'];
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 function run(cmd, cmdArgs, { check = true } = {}) {
@@ -152,11 +159,38 @@ const entry = {
 	)
 };
 
+function uploadCatalog(text) {
+	const scratch = mkdtempSync(join(tmpdir(), 'buzzdetect-catalog-'));
+	const upload = join(scratch, 'models.json');
+	writeFileSync(upload, text);
+	if (!dryRun && !releaseExists(CATALOG_TAG)) {
+		run('gh', [
+			'release', 'create', CATALOG_TAG,
+			'--title', 'Model catalog',
+			'--notes', 'The list of downloadable models the buzzdetect app reads. Each model is its own model-<name> release; see scripts/publish-model.mjs.',
+			'--latest=false',
+			'--repo', REPO
+		]);
+	}
+	run('gh', ['release', 'upload', CATALOG_TAG, upload, '--clobber', '--repo', REPO]);
+	rmSync(scratch, { recursive: true, force: true });
+}
+
 if (readmeOnly) {
-	// Only the README moves; the hashed files and the entry stay as they were.
-	run('gh', ['release', 'upload', tag, join(dir, 'README.md'), '--clobber', '--repo', REPO]);
-	run('gh', ['release', 'edit', tag, '--notes-file', join(dir, 'README.md'), '--repo', REPO]);
-	console.log(`\nUpdated ${name}'s README. The catalog is unchanged.`);
+	// Only the README moves; the hashed files stay as they were.
+	run('gh', ['release', 'upload', tag, readmePath, '--clobber', '--repo', REPO]);
+	run('gh', ['release', 'edit', tag, ...notes, '--repo', REPO]);
+	if (existing.files['README.md']) {
+		console.log(`\nUpdated ${name}'s README. The catalog is unchanged.`);
+		process.exit(0);
+	}
+	// First README for a model published without one: the app only fetches
+	// files the entry names, so the catalog has to learn about it.
+	existing.files['README.md'] = {};
+	const text = JSON.stringify(catalog, null, 2) + '\n';
+	if (!dryRun) writeFileSync(catalogPath, text);
+	uploadCatalog(text);
+	console.log(`\nAdded ${name}'s README. Commit models.json.`);
 	process.exit(0);
 }
 
@@ -164,12 +198,12 @@ if (readmeOnly) {
 const paths = files.map((f) => join(dir, f));
 if (!dryRun && releaseExists(tag)) {
 	run('gh', ['release', 'upload', tag, ...paths, '--clobber', '--repo', REPO]);
-	run('gh', ['release', 'edit', tag, '--notes-file', join(dir, 'README.md'), '--latest=false', '--repo', REPO]);
+	run('gh', ['release', 'edit', tag, ...notes, '--latest=false', '--repo', REPO]);
 } else {
 	run('gh', [
 		'release', 'create', tag, ...paths,
 		'--title', name,
-		'--notes-file', join(dir, 'README.md'),
+		...notes,
 		'--latest=false',
 		'--repo', REPO
 	]);
@@ -181,20 +215,7 @@ else catalog.models.push(entry);
 const text = JSON.stringify(catalog, null, 2) + '\n';
 if (!dryRun) writeFileSync(catalogPath, text);
 
-const scratch = mkdtempSync(join(tmpdir(), 'buzzdetect-catalog-'));
-const upload = join(scratch, 'models.json');
-writeFileSync(upload, text);
-if (!dryRun && !releaseExists(CATALOG_TAG)) {
-	run('gh', [
-		'release', 'create', CATALOG_TAG,
-		'--title', 'Model catalog',
-		'--notes', 'The list of downloadable models the buzzdetect app reads. Each model is its own model-<name> release; see scripts/publish-model.mjs.',
-		'--latest=false',
-		'--repo', REPO
-	]);
-}
-run('gh', ['release', 'upload', CATALOG_TAG, upload, '--clobber', '--repo', REPO]);
-rmSync(scratch, { recursive: true, force: true });
+uploadCatalog(text);
 
 if (dryRun) console.log(`\nmodels.json would become:\n${text}`);
 else console.log(`\nPublished ${name}. Commit models.json.`);
