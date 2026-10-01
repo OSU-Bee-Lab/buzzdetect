@@ -8,8 +8,11 @@ data-dependent control flow, so content doesn't change the speed.
 Run from anywhere; it chdirs to engine/ (src/config.py uses relative paths).
 
     engine/.venv/bin/python3 benchmarks/model-speed/bench_models.py
-    engine/.venv/bin/python3 benchmarks/model-speed/bench_models.py --processor GPU
+    engine/.venv/bin/python3 benchmarks/model-speed/bench_models.py --processor CPU   # or GPU; default is both
     engine/.venv/bin/python3 benchmarks/model-speed/bench_models.py --seconds 200 --repeats 15
+
+Default runs CPU and GPU, each at fp32 and (where a model has one) fp16, and prints one
+table. A GPU column is omitted if no GPU provider actually loads.
 
 fp16 only means something on a provider that acts on it. On CPU the fp16 graph
 is loaded directly; on GPU it goes through BUZZDETECT_GPU_FP16=1, exactly as the
@@ -76,15 +79,19 @@ def main():
     ap.add_argument('--seconds', type=float, default=200)
     ap.add_argument('--repeats', type=int, default=15)
     ap.add_argument('--warmup', type=int, default=2)
-    ap.add_argument('--processor', choices=['CPU', 'GPU'], default='CPU')
+    ap.add_argument('--processor', choices=['CPU', 'GPU', 'both'], default='both')
     ap.add_argument('--models', nargs='*', help='names to run (default: all)')
     args = ap.parse_args()
+    processors = ['CPU', 'GPU'] if args.processor == 'both' else [args.processor]
 
     rng = np.random.default_rng(0)
-    rows = []
+    results = {}   # (model, processor, precision) -> (mean, se) or None if unavailable
+    providers = {}  # processor -> provider that actually ran
+    models = []
     for name, d in discover():
         if args.models and name not in args.models:
             continue
+        models.append(name)
         with open(os.path.join(d, 'config_model.json')) as f:
             config = json.load(f)
         n, samples_session = session_samples(config, args.seconds)
@@ -94,31 +101,45 @@ def main():
         if os.path.isfile(os.path.join(d, bd_onnx.FNAME_FP16)):
             variants.append(('fp16', bd_onnx.FNAME_FP16))
 
-        for label, fname in variants:
-            fp16 = label == 'fp16'
-            path = os.path.abspath(os.path.join(d, fname))
-            # On CPU there is no fp16 switch, so hand over the fp16 file itself.
-            # On GPU, make_session takes the sibling from the env var.
-            if args.processor == 'GPU':
-                path = os.path.abspath(os.path.join(d, 'model.onnx'))
-            try:
-                t_load, times, provider = bench(path, args.processor, fp16, samples_session,
-                                                audio, args.repeats, args.warmup)
-            except Exception as e:
-                print(f'{name} {label}: FAILED {type(e).__name__}: {e}', file=sys.stderr)
-                continue
-            rates = [args.seconds / t for t in times]
-            mean = statistics.mean(rates)
-            se = statistics.stdev(rates) / len(rates) ** 0.5
-            rows.append((name, label, provider, t_load, mean, se))
-            print(f'{name:36s} {label} {mean:8.0f} +- {se:.0f} s/s', flush=True)
+        for processor in processors:
+            for label, fname in variants:
+                fp16 = label == 'fp16'
+                path = os.path.abspath(os.path.join(d, fname))
+                # On CPU there is no fp16 switch, so hand over the fp16 file itself.
+                # On GPU, make_session takes the sibling from the env var.
+                if processor == 'GPU':
+                    path = os.path.abspath(os.path.join(d, 'model.onnx'))
+                try:
+                    t_load, times, provider = bench(path, processor, fp16, samples_session,
+                                                    audio, args.repeats, args.warmup)
+                except Exception as e:
+                    print(f'{name} {processor} {label}: FAILED {type(e).__name__}: {e}', file=sys.stderr)
+                    continue
+                if processor == 'GPU' and provider == 'CPUExecutionProvider':
+                    print(f'{name} {processor} {label}: no GPU provider loaded, skipped', file=sys.stderr)
+                    continue
+                rates = [args.seconds / t for t in times]
+                mean = statistics.mean(rates)
+                se = statistics.stdev(rates) / len(rates) ** 0.5
+                results[(name, processor, label)] = (mean, se)
+                providers[processor] = provider
+                print(f'{name:28s} {processor} {label} {mean:8.0f} +- {se:.0f} s/s', flush=True)
 
-    print(f'\n{args.seconds:g} s of audio per run, {args.repeats} runs ({args.warmup} warmup), '
-          f'requested processor {args.processor}')
-    print('rate = audio seconds analyzed per wall-clock second, mean +- standard error\n')
-    print(f'{"model":36s} {"prec":5s} {"provider":24s} {"load s":>7s} {"rate":>8s} {"+- SE":>7s}')
-    for name, label, prov, load, mean, se in rows:
-        print(f'{name:36s} {label:5s} {prov:24s} {load:7.2f} {mean:8.0f} {se:7.1f}')
+    print(f'\n{args.seconds:g} s of audio per run, {args.repeats} runs ({args.warmup} warmup)')
+    print('rate = audio seconds analyzed per wall-clock second, mean +- standard error')
+    for proc, prov in providers.items():
+        print(f'{proc} = {prov}')
+    print()
+
+    cols = [(p, l) for p in processors for l in ('fp32', 'fp16')
+            if any((m, p, l) in results for m in models)]
+    print(f'{"model":28s}' + ''.join(f'{p + " " + l:>16s}' for p, l in cols))
+    for m in models:
+        cells = []
+        for p, l in cols:
+            r = results.get((m, p, l))
+            cells.append(f'{r[0]:9.0f} +-{r[1]:3.0f}' if r else f'{"-":>14s}')
+        print(f'{m:28s}' + ''.join(f'{c:>16s}' for c in cells))
 
 
 if __name__ == '__main__':
