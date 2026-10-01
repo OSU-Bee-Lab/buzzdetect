@@ -7,6 +7,8 @@
 	import { documentDir, join } from '@tauri-apps/api/path';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 	import { run, formatDuration, type TreeDir } from '$lib/progress.svelte';
 	import { settings, LOGLEVELS } from '$lib/settings.svelte';
 	import DirRow from '$lib/DirRow.svelte';
@@ -14,14 +16,16 @@
 	import ProgressBar from '$lib/ProgressBar.svelte';
 	import PathField from '$lib/PathField.svelte';
 	import type { HistorySettings } from '$lib/history';
-	import type { ModelInfo } from '$lib/modelInfo';
+	import type { ModelInfo, ModelsOverview } from '$lib/modelInfo';
 
 	interface Manifest {
 		modelname: string;
 		classes_out: string[] | null;
+		full_quality_decode: boolean;
 	}
 
-	let models = $state<ModelInfo[]>([]);
+	// Every installed model, disabled ones included.
+	let installed = $state<ModelInfo[]>([]);
 	let modelActionError = $state<string | null>(null);
 	let availableClasses = $state<string[]>([]);
 	let startError = $state<string | null>(null);
@@ -33,6 +37,10 @@
 	// A SvelteSet, not $state(new Set()): $state doesn't proxy a Set, so the
 	// per-folder toggles' add/delete would change nothing on screen.
 	const expanded = new SvelteSet<string>();
+	// Whether an open folder's files are listed, separate from whether the
+	// folder itself is open -- lets "Expand all folders" walk the whole tree
+	// without also mounting a row (and progress bar) per file.
+	let filesVisible = $state(true);
 	let hasAutoExpanded = false;
 	let hasStarted = $state(false);
 	let manifest = $state<Manifest | null>(null);
@@ -54,7 +62,9 @@
 	let gpu = $state<GpuStatus | null>(null);
 
 	const modelMismatch = $derived(
-		manifest !== null && manifest.modelname !== settings.value.modelname
+		manifest !== null &&
+			settings.value.modelname !== '' &&
+			manifest.modelname !== settings.value.modelname
 	);
 	const manifestLocked = $derived(manifest !== null && !modelMismatch);
 
@@ -139,6 +149,20 @@
 			deliver(() => queueOutput({ kind: 'log', line: e.payload.line, seq: e.payload.seq }))
 		);
 		const unlistenUse = listen<HistorySettings>('history-use', (e) => useHistorySettings(e.payload));
+		// A download, import, removal or ignore in the Models window.
+		const unlistenModels = listen('models-changed', async () => {
+			if (!(run.running || run.stopping)) await reloadModels();
+			refreshModelsBadge();
+		});
+		// Use this model, from the Models window.
+		const unlistenUseModel = listen<string>('models-use', async (e) => {
+			if (run.running || run.stopping) return;
+			if (!installed.some((m) => m.name === e.payload)) await reloadModels();
+			if (!installed.some((m) => m.name === e.payload)) return;
+			const from = settings.value.modelname;
+			settings.value.modelname = e.payload;
+			await onModelChange(from);
+		});
 		const unlistenExit = listen<{ code: number | null }>('engine-exit', (e) =>
 			deliver(() => {
 				flushOutput();
@@ -169,6 +193,7 @@
 				hasStarted = true;
 				hasAutoExpanded = false;
 				expanded.clear();
+				filesVisible = true;
 				for (const l of snap.logs) run.handleLog(l.line, l.seq);
 				for (const ev of snap.events) run.handleEvent(ev);
 			})
@@ -207,13 +232,14 @@
 				};
 			});
 
-		invoke<ModelInfo[]>('list_models').then((list) => {
-			models = list;
-			if (!settings.value.modelname || !list.some((m) => m.name === settings.value.modelname)) {
-				settings.value.modelname = list[0]?.name ?? '';
+		invoke<ModelInfo[]>('list_models').then((all) => {
+			installed = all;
+			if (!settings.value.modelname || !all.some((m) => m.name === settings.value.modelname)) {
+				settings.value.modelname = all.find((m) => !m.disabled)?.name ?? '';
 			}
 			onModelChange();
 		});
+		refreshModelsBadge();
 		checkManifest();
 
 		return () => {
@@ -221,6 +247,8 @@
 			unlistenLog.then((f) => f());
 			unlistenExit.then((f) => f());
 			unlistenUse.then((f) => f());
+			unlistenModels.then((f) => f());
+			unlistenUseModel.then((f) => f());
 			if (flushTimer !== null) clearTimeout(flushTimer);
 		};
 	});
@@ -287,6 +315,7 @@
 		}
 		if (!manifest || manifest.modelname !== settings.value.modelname) return;
 		if (manifest.classes_out) settings.value.classesOut = manifest.classes_out;
+		settings.value.fullQualityDecode = manifest.full_quality_decode;
 		settings.save();
 	}
 
@@ -298,14 +327,26 @@
 		return await join(await documentDir(), 'buzzdetect', modelname);
 	}
 
-	// Re-derive the class list whenever the model changes. dirOut is only
-	// filled (with a per-model default) when empty; changing model never moves
-	// it, but the folder's manifest is re-checked against the new model.
-	async function onModelChange() {
-		if (!settings.value.modelname) return;
-		if (!settings.value.dirOut) {
-			settings.value.dirOut = await defaultDirOut(settings.value.modelname);
+	// Re-derive the class list whenever the model changes. dirOut is filled
+	// with the per-model default when empty, and follows the model only while
+	// it is still the previous model's default -- `from` is that previous
+	// model, passed only for a change the user made in the picker (a past
+	// run's settings bring their own dirOut). Either way the folder's
+	// manifest is re-checked against the new model.
+	async function onModelChange(from?: string) {
+		if (!settings.value.modelname) {
+			availableClasses = [];
+			await checkManifest();
+			return;
 		}
+		const name = settings.value.modelname;
+		if (
+			!settings.value.dirOut ||
+			(from && from !== name && settings.value.dirOut === (await defaultDirOut(from)))
+		) {
+			settings.value.dirOut = await defaultDirOut(name);
+		}
+		modelBeforeChange = name;
 		await checkManifest();
 		try {
 			const classes = await invoke<string[]>('get_model_classes', {
@@ -326,55 +367,48 @@
 		settings.save();
 	}
 
-	const currentModel = $derived(models.find((m) => m.name === settings.value.modelname));
-	let currentModelRemovable = $derived(currentModel?.removable ?? false);
+	// The model picker's value before its latest change; see onModelChange.
+	let modelBeforeChange = settings.value.modelname;
 
-	function openModelInfo() {
+	// What the picker offers. Disabled models (Models window) stay installed but
+	// aren't listed -- except the selected one, when a past run's settings
+	// chose it, so the picker names what will actually run.
+	const models = $derived(
+		installed.filter((m) => !m.disabled || m.name === settings.value.modelname)
+	);
+
+	const currentModel = $derived(models.find((m) => m.name === settings.value.modelname));
+	const currentModelDescriptionHtml = $derived(
+		currentModel?.description
+			? DOMPurify.sanitize(marked.parseInline(currentModel.description, { async: false }))
+			: ''
+	);
+
+	function openModels() {
 		modelActionError = null;
-		invoke('open_model_info', { modelname: settings.value.modelname }).catch(
+		invoke('open_models', { modelname: settings.value.modelname }).catch(
 			(e) => (modelActionError = String(e))
 		);
 	}
 
-	async function reloadModels(select?: string) {
-		models = await invoke<ModelInfo[]>('list_models');
-		if (select && models.some((m) => m.name === select)) {
-			settings.value.modelname = select;
-		} else if (!models.some((m) => m.name === settings.value.modelname)) {
-			settings.value.modelname = models[0]?.name ?? '';
-		}
-		await onModelChange();
+	// Catalog models not yet installed or ignored, plus updates: the View
+	// Models button's badge. A failed catalog fetch just means no badge.
+	let modelsBadge = $state(0);
+	function refreshModelsBadge() {
+		invoke<ModelsOverview>('models_overview', { refresh: false })
+			.then((o) => (modelsBadge = o.models.filter((m) => m.notify).length))
+			.catch(() => {});
 	}
 
-	// Import a model (a .zip of a folder holding model.onnx + config_model.json,
-	// or the folder itself) into the per-user store, outside the app bundle, so
-	// it survives updates and needs no admin rights. The engine picks it up by
-	// name on the next run.
-	async function importModel() {
-		modelActionError = null;
-		const picked = await open({
-			title: 'Select a model .zip',
-			filters: [{ name: 'Model bundle', extensions: ['zip'] }]
-		});
-		if (typeof picked !== 'string') return;
-		try {
-			const info = await invoke<ModelInfo>('import_model', { src: picked });
-			await reloadModels(info.name);
-		} catch (e) {
-			modelActionError = String(e);
+	// After the Models window changes something. Disabling the selected model
+	// there moves the selection off it.
+	async function reloadModels() {
+		installed = await invoke<ModelInfo[]>('list_models');
+		const current = installed.find((m) => m.name === settings.value.modelname);
+		if (!current || current.disabled) {
+			settings.value.modelname = installed.find((m) => !m.disabled)?.name ?? '';
 		}
-	}
-
-	async function removeCurrentModel() {
-		modelActionError = null;
-		const name = settings.value.modelname;
-		if (!confirm(`Delete the imported model "${name}"? Its files will be deleted.`)) return;
-		try {
-			await invoke('remove_model', { name });
-			await reloadModels();
-		} catch (e) {
-			modelActionError = String(e);
-		}
+		await onModelChange(modelBeforeChange);
 	}
 
 	function onDirOutInput() {
@@ -416,10 +450,13 @@
 	// Refill the settings from a past run (sent by the past-runs window).
 	// dirOut counts as touched so the model change below doesn't swap it for
 	// the per-model default.
+	// A model that has since been deleted leaves the picker blank; Launch
+	// waits for one to be chosen. A disabled one is still installed, so it's used.
 	async function useHistorySettings(h: HistorySettings) {
 		if (run.running || run.stopping) return;
+		installed = await invoke<ModelInfo[]>('list_models').catch(() => installed);
 		const v = settings.value;
-		v.modelname = h.modelname;
+		v.modelname = installed.some((m) => m.name === h.modelname) ? h.modelname : '';
 		if (h.dir_audio) v.dirAudio = h.dir_audio;
 		if (h.dir_out) {
 			v.dirOut = h.dir_out;
@@ -436,6 +473,8 @@
 		if (h.verbosity_print) v.verbosityPrint = h.verbosity_print;
 		if (h.verbosity_log) v.verbosityLog = h.verbosity_log;
 		if (h.log_progress !== undefined) v.logProgress = h.log_progress;
+		if (h.benchmark !== undefined) v.benchmark = h.benchmark;
+		if (h.full_quality_decode !== undefined) v.fullQualityDecode = h.full_quality_decode;
 		settings.save();
 		await onModelChange();
 	}
@@ -454,7 +493,9 @@
 			stream_buffer_depth: settings.value.streamBufferDepth,
 			verbosity_print: settings.value.verbosityPrint,
 			verbosity_log: settings.value.verbosityLog,
-			log_progress: settings.value.logProgress
+			log_progress: settings.value.logProgress,
+			benchmark: settings.value.benchmark,
+			full_quality_decode: settings.value.fullQualityDecode
 		};
 	}
 
@@ -478,6 +519,7 @@
 		hasStarted = true;
 		hasAutoExpanded = false;
 		expanded.clear();
+		filesVisible = true;
 		startedKey = launchKey;
 		try {
 			await invoke('start_analysis', { settings: launchSettings() });
@@ -518,17 +560,30 @@
 		return all;
 	}
 
-	function toggleExpandAll() {
+	// Cycles collapsed -> folders expanded (files hidden) -> files also shown
+	// -> back to collapsed. The label always names what the next click does.
+	const treeState = $derived.by(() => {
 		const all = allDirPaths();
 		const allOpen = all.length > 0 && all.every((p) => expanded.has(p));
-		expanded.clear();
-		if (!allOpen) all.forEach((p) => expanded.add(p));
-	}
-
-	const allExpanded = $derived.by(() => {
-		const all = allDirPaths();
-		return all.length > 0 && all.every((p) => expanded.has(p));
+		if (!allOpen) return 'collapsed';
+		return filesVisible ? 'files' : 'folders';
 	});
+
+	const expandLabel = $derived(
+		{ collapsed: 'Expand all folders', folders: 'Expand all files', files: 'Collapse all' }[treeState]
+	);
+
+	function cycleExpand() {
+		if (treeState === 'collapsed') {
+			allDirPaths().forEach((p) => expanded.add(p));
+			filesVisible = false;
+		} else if (treeState === 'folders') {
+			filesVisible = true;
+		} else {
+			expanded.clear();
+			filesVisible = true;
+		}
+	}
 
 	// Rounds down so a run only shows 100%/a checkmark once truly finished,
 	// never early from rounding (e.g. 99.98% should read 99%, not 100%).
@@ -591,43 +646,44 @@
 	<section class="settings">
 		<h2>Settings</h2>
 		<div class="settings-body">
-			<fieldset class="settings-fields" disabled={run.running || run.stopping}>
-
-		<!-- for= rather than nesting alone: the Info button is the label's first
-		     labelable descendant, so without it a click on "Model" would press it. -->
-		<label class:field-error={modelMismatch} for="model-select">
-			<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
-				<button
-					type="button"
-					class="info-btn"
-					disabled={!currentModel?.has_readme}
-					data-tooltip={currentModel?.has_readme ? undefined : 'This model has no README.'}
-					onclick={openModelInfo}>Info</button
-				></span>
-			<span class="model-row">
-				<select
-					id="model-select"
-					bind:value={settings.value.modelname}
-					onchange={() => {
-						onModelChange();
-						settings.save();
-					}}
-				>
-					{#each models as m}
-						<option value={m.name}>{m.name}</option>
-					{/each}
-				</select>
-				{#if currentModelRemovable}
-					<button type="button" class="delete-btn" onclick={removeCurrentModel}>Delete</button>
+			<!-- Kept outside settings-fields: View Models must stay usable during a
+			     run (the model page is read-only) even though the model can't be changed. -->
+			<!-- for= rather than nesting alone: the Info button is the label's first
+			     labelable descendant, so without it a click on "Model" would press it. -->
+			<label class:field-error={modelMismatch || !settings.value.modelname} for="model-select">
+				<span class="label-text">Model <span class="qmark" data-tooltip="Select a model to use for analysis.">?</span>
+					<button type="button" class="models-btn" onclick={openModels}
+						>View Models{#if modelsBadge > 0}<span
+								class="models-badge"
+								aria-label="{modelsBadge} new"
+							></span>{/if}</button
+					></span>
+				<span class="model-row">
+					<select
+						id="model-select"
+						disabled={run.running || run.stopping}
+						bind:value={settings.value.modelname}
+						onchange={() => {
+							onModelChange(modelBeforeChange);
+							settings.save();
+						}}
+					>
+						{#if !settings.value.modelname}
+							<option value="" disabled>Select a model</option>
+						{/if}
+						{#each models as m}
+							<option value={m.name}>{m.name}</option>
+						{/each}
+					</select>
+				</span>
+				{#if currentModelDescriptionHtml}
+					<span class="model-description">{@html currentModelDescriptionHtml}</span>
 				{/if}
-			</span>
-			{#if currentModel?.description}
-				<span class="model-description">{currentModel.description}</span>
-			{/if}
-			{#if modelActionError}
-				<span class="error">{modelActionError}</span>
-			{/if}
-		</label>
+				{#if modelActionError}
+					<span class="error">{modelActionError}</span>
+				{/if}
+			</label>
+			<fieldset class="settings-fields" disabled={run.running || run.stopping}>
 		<label class:field-error={!settings.value.dirAudio}>
 			<span class="label-text">Audio directory <span class="qmark" data-tooltip="Input folder containing audio files to analyze.">?</span></span>
 			<span class="path-row">
@@ -755,9 +811,10 @@ If you're using GPU, you probably don't want any CPU analyzers."
 			<label class="checkbox-setting">
 				<input
 					type="checkbox"
-					disabled={!gpu.usable}
-					bind:checked={settings.value.gpuFp16}
-					onchange={() => {
+					disabled={!gpu.usable || currentModel?.has_fp16 === false}
+					checked={currentModel?.has_fp16 !== false && settings.value.gpuFp16}
+					onchange={(e) => {
+						settings.value.gpuFp16 = e.currentTarget.checked;
 						settings.value.gpuFp16Touched = true;
 						settings.save();
 					}}
@@ -773,6 +830,9 @@ Results from a reduced-precision run are not directly comparable with full-preci
 					</span>
 				</span>
 			</label>
+			{#if gpu.usable && currentModel?.has_fp16 === false}
+				<p class="hint">This model has no reduced-precision graph; it will run at full precision.</p>
+			{/if}
 			{/if}
 			<label>
 				<span class="label-text">
@@ -848,14 +908,33 @@ Can produce very large log files."
 					?
 				</span>
 			</label>
-			<label>
-				<span class="label-text">Models</span>
-				<span class="model-actions">
-					<button type="button" onclick={importModel}>Import model (.zip)…</button>
+			<label class="checkbox">
+				<input type="checkbox" bind:checked={settings.value.benchmark} onchange={() => settings.save()} />
+				Save benchmarks to log
+				<span
+					class="qmark"
+					data-tooltip="Write how long each stage (reading, resampling, waiting, inference, writing) takes for every chunk, plus a summary at the end of the run.
+Adds several lines per chunk to the log file."
+				>
+					?
 				</span>
-				{#if modelActionError}
-					<span class="error">{modelActionError}</span>
-				{/if}
+			</label>
+			<label class="checkbox" class:locked={manifestLocked}>
+				<input
+					type="checkbox"
+					disabled={manifestLocked}
+					bind:checked={settings.value.fullQualityDecode}
+					onchange={() => settings.save()}
+				/>
+				Full quality decoding
+				<span
+					class="qmark"
+					data-tooltip="Resample audio to the model's sample rate with the slower, more accurate filter.
+The default is about 3x cheaper to resample and adequate for detection, but activations differ slightly between the two.
+Locked once an output folder has results, since mixing the two in one folder would make them inconsistent."
+				>
+					?
+				</span>
 			</label>
 		</details>
 
@@ -957,33 +1036,31 @@ Can produce very large log files."
 		{/if}
 		<ProgressBar weights={tree} provisional={!run.denominatorFinal} large />
 
-		<div class="tree-toolbar">
-			<button
-				type="button"
-				class="icon-btn"
-				data-tooltip={allExpanded ? 'Collapse All' : 'Expand All'}
-				aria-label={allExpanded ? 'Collapse All' : 'Expand All'}
-				onclick={toggleExpandAll}
-			>
-				{#if allExpanded}
-					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M6 10 12 5l6 5" stroke-linecap="round" stroke-linejoin="round" />
-						<path d="M6 17 12 12l6 5" stroke-linecap="round" stroke-linejoin="round" />
-					</svg>
-				{:else}
-					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M6 7 12 12l6-5" stroke-linecap="round" stroke-linejoin="round" />
-						<path d="M6 14 12 19l6-5" stroke-linecap="round" stroke-linejoin="round" />
-					</svg>
+		<div class="tree-panel">
+			<div class="tree">
+				{#if filesVisible}
+					<FileRows files={tree.files} depth={0} {pct} />
 				{/if}
-			</button>
-		</div>
-
-		<div class="tree">
-			<FileRows files={tree.files} depth={0} {pct} />
-			{#each tree.dirs as d (d.path)}
-				<DirRow node={d} depth={0} {expanded} {pct} />
-			{/each}
+				{#each tree.dirs as d (d.path)}
+					<DirRow node={d} depth={0} {expanded} {filesVisible} {pct} />
+				{/each}
+			</div>
+			<div class="tree-toolbar">
+				<button type="button" onclick={cycleExpand}>
+					{#if treeState === 'files'}
+						<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M6 10 12 5l6 5" stroke-linecap="round" stroke-linejoin="round" />
+							<path d="M6 17 12 12l6 5" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					{:else}
+						<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M6 7 12 12l6-5" stroke-linecap="round" stroke-linejoin="round" />
+							<path d="M6 14 12 19l6-5" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					{/if}
+					{expandLabel}
+				</button>
+			</div>
 		</div>
 
 		<div class="log-wrap">
@@ -1067,6 +1144,9 @@ Can produce very large log files."
 		overflow-y: auto;
 		overflow-x: hidden;
 		padding-right: 0.25rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
 	}
 
 	.settings-fields {
@@ -1116,10 +1196,19 @@ Can produce very large log files."
 	}
 
 	.tree-toolbar {
-		display: flex;
-		justify-content: flex-end;
-		gap: 0.5rem;
 		flex-shrink: 0;
+		display: flex;
+		justify-content: flex-start;
+		padding: 0.4rem 0.6rem;
+		border-top: 1px solid rgba(127, 127, 127, 0.2);
+	}
+
+	.tree-toolbar button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-size: 0.75rem;
+		padding: 0.25rem 0.5rem;
 	}
 
 	.icon-btn {
@@ -1297,15 +1386,21 @@ Can produce very large log files."
 		color: #d33;
 	}
 
-	.info-btn {
+	.models-btn {
+		position: relative;
 		margin-left: auto;
 		padding: 0.05rem 0.45rem;
 		font-size: 0.75rem;
 	}
 
-	.info-btn:disabled {
-		opacity: 0.45;
-		cursor: default;
+	.models-badge {
+		position: absolute;
+		top: -3px;
+		right: -3px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #2f7de1;
 	}
 
 	.model-description {
@@ -1314,12 +1409,6 @@ Can produce very large log files."
 		font-size: 0.8rem;
 		opacity: 0.7;
 		line-height: 1.3;
-	}
-
-	.model-actions {
-		display: flex;
-		gap: 0.4rem;
-		margin-top: 0.3rem;
 	}
 
 	.model-row {
@@ -1333,23 +1422,10 @@ Can produce very large log files."
 		min-width: 0;
 	}
 
-	.delete-btn {
-		flex-shrink: 0;
-		padding: 0.15rem 0.5rem;
-		font-size: 0.75rem;
-		border-color: #d33;
-		color: #d33;
-	}
-
 	.settings-actions .history-btn {
 		flex: 0 0 auto;
 		font-size: 0.8rem;
 		font-weight: 400;
-	}
-
-	.model-actions button {
-		padding: 0.25rem 0.5rem;
-		font-size: 0.85rem;
 	}
 
 	.hint {
@@ -1470,13 +1546,20 @@ Can produce very large log files."
 		font-variant-numeric: tabular-nums;
 	}
 
+	.tree-panel {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		border: 1px solid rgba(127, 127, 127, 0.2);
+		border-radius: 6px;
+	}
+
 	.tree {
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
 		overflow-x: hidden;
-		border: 1px solid rgba(127, 127, 127, 0.2);
-		border-radius: 6px;
 	}
 
 	.log-wrap {

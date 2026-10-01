@@ -1,3 +1,4 @@
+mod catalog;
 mod updater;
 
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,10 @@ struct RunRecord {
     // files need their chunks replayed. Keeps this O(files), not O(chunks).
     events: Vec<Option<serde_json::Value>>,
     open_chunks: HashMap<String, Vec<usize>>,
+    // Sum of every chunk_done's length, counted here rather than trusted to
+    // the page: a webview that is throttled or reloaded mid-run can miss
+    // events, and the history's rate comes from this.
+    audio_seconds: f64,
     logs: VecDeque<serde_json::Value>,
 }
 
@@ -58,6 +63,11 @@ impl RunRecord {
         let chunk_path = (value["event"] == "chunk_done")
             .then(|| value["path"].as_str().map(str::to_owned))
             .flatten();
+        if chunk_path.is_some() {
+            if let (Some(a), Some(b)) = (value["chunk_start"].as_f64(), value["chunk_end"].as_f64()) {
+                self.audio_seconds += b - a;
+            }
+        }
         if let Some(path) = chunk_path {
             if value["done"] == true {
                 for idx in self.open_chunks.remove(&path).unwrap_or_default() {
@@ -192,6 +202,7 @@ const IMPORT_FILES: [&str; 6] = [
 ];
 
 const README: &str = "README.md";
+const FNAME_FP16: &str = "model.fp16.onnx";
 
 /// Per-user model store, outside the app bundle. `None` if the platform data
 /// dir can't be resolved (shouldn't happen in practice).
@@ -227,6 +238,11 @@ struct ModelInfo {
     /// config_model.json's optional one-line `description`, written by hand.
     description: Option<String>,
     has_readme: bool,
+    /// Whether the model directory carries a model.fp16.onnx graph, so the
+    /// frontend can disable the reduced-precision setting for models without one.
+    has_fp16: bool,
+    /// Hidden from the model picker by the user (see catalog::set_model_disabled).
+    disabled: bool,
 }
 
 impl ModelInfo {
@@ -237,6 +253,8 @@ impl ModelInfo {
             removable,
             description: description_of(&config),
             has_readme: dir.join(README).is_file(),
+            has_fp16: dir.join(FNAME_FP16).is_file(),
+            disabled: false,
         }
     }
 }
@@ -259,6 +277,7 @@ fn description_of(config: &serde_json::Value) -> Option<String> {
 #[tauri::command]
 fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
     let roots = model_roots(&app);
+    let disabled = catalog::disabled_models(&app);
     let mut out: Vec<ModelInfo> = vec![];
     for (i, root) in roots.iter().enumerate() {
         let removable = i > 0; // root 0 is the bundled dir
@@ -271,12 +290,18 @@ fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
                 let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
+                // Dot-dirs are catalog downloads in progress (see catalog.rs).
+                if name.starts_with('.') {
+                    continue;
+                }
                 // Earlier root wins a name collision: a bundled model shadows
                 // an imported one, matching the engine's resolution order.
                 if out.iter().any(|m| m.name == name) {
                     continue;
                 }
-                out.push(ModelInfo::read(&path, name, removable));
+                let mut info = ModelInfo::read(&path, name, removable);
+                info.disabled = disabled.contains(name);
+                out.push(info);
             }
         }
     }
@@ -455,6 +480,7 @@ fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
             return Err(format!("failed to copy the model in: {e}"));
         }
 
+        let _ = app.emit(catalog::MODELS_CHANGED, ());
         Ok(ModelInfo::read(&dest, &name, true))
     })();
 
@@ -464,29 +490,27 @@ fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
     result
 }
 
-/// Everything the model info window shows: the README, and the thresholds that
-/// buzzdetect-training wrote into config_model.json. `thresholds` is a plain
-/// {class: number} map; `threshold_stats` is how much each one rests on. Both
-/// are passed through as-is, and either may be absent.
+/// Everything the model info window shows: the description and the README.
 #[derive(Serialize)]
 struct ModelDetails {
     name: String,
     description: Option<String>,
     readme: Option<String>,
-    thresholds: Option<serde_json::Value>,
-    threshold_stats: Option<serde_json::Value>,
+}
+
+impl ModelDetails {
+    fn from_parts(name: &str, config: &serde_json::Value, readme: Option<String>) -> ModelDetails {
+        ModelDetails {
+            name: name.to_string(),
+            description: description_of(config),
+            readme,
+        }
+    }
 }
 
 fn model_details_in(dir: &std::path::Path, name: &str) -> ModelDetails {
     let config = read_config(dir).unwrap_or_default();
-    let object = |key: &str| config.get(key).filter(|v| v.is_object()).cloned();
-    ModelDetails {
-        name: name.to_string(),
-        description: description_of(&config),
-        readme: std::fs::read_to_string(dir.join(README)).ok(),
-        thresholds: object("thresholds"),
-        threshold_stats: object("threshold_stats"),
-    }
+    ModelDetails::from_parts(name, &config, std::fs::read_to_string(dir.join(README)).ok())
 }
 
 #[tauri::command]
@@ -495,7 +519,7 @@ fn model_details(app: AppHandle, modelname: String) -> Result<ModelDetails, Stri
     Ok(model_details_in(&dir, &modelname))
 }
 
-const MODEL_INFO_WINDOW: &str = "model-info";
+const MODELS_WINDOW: &str = "models";
 
 fn percent_encode(s: &str) -> String {
     s.bytes()
@@ -508,20 +532,20 @@ fn percent_encode(s: &str) -> String {
         .collect()
 }
 
-/// Open the model info window on `modelname`, or point the open one at it.
+/// Open the Models window on `modelname`, or point the open one at it.
 /// async because building a window from a synchronous command deadlocks on
 /// Windows.
 #[tauri::command]
-async fn open_model_info(app: AppHandle, modelname: String) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(MODEL_INFO_WINDOW) {
-        app.emit_to(MODEL_INFO_WINDOW, "model-info-select", &modelname)
+async fn open_models(app: AppHandle, modelname: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(MODELS_WINDOW) {
+        app.emit_to(MODELS_WINDOW, "models-select", &modelname)
             .map_err(|e| e.to_string())?;
         let _ = window.unminimize();
         return window.set_focus().map_err(|e| e.to_string());
     }
-    let url = format!("model-info?model={}", percent_encode(&modelname));
-    tauri::WebviewWindowBuilder::new(&app, MODEL_INFO_WINDOW, tauri::WebviewUrl::App(url.into()))
-        .title("Model info")
+    let url = format!("models?model={}", percent_encode(&modelname));
+    tauri::WebviewWindowBuilder::new(&app, MODELS_WINDOW, tauri::WebviewUrl::App(url.into()))
+        .title("Models")
         .inner_size(860.0, 640.0)
         .min_inner_size(480.0, 320.0)
         .build()
@@ -562,7 +586,9 @@ fn remove_model(app: AppHandle, name: String) -> Result<(), String> {
     if dir.parent() != Some(user_root.as_path()) || !dir.join(MODEL_MARKER).is_file() {
         return Err(format!("'{name}' is not an imported model"));
     }
-    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    let _ = app.emit(catalog::MODELS_CHANGED, ());
+    Ok(())
 }
 
 /// What the frontend needs to decide whether to offer the GPU controls.
@@ -860,11 +886,14 @@ fn finish_history(app: &AppHandle, started_at: u64, status: &str) {
     }
 }
 
-/// The frontend measures how much audio a run got through, so it reports that
-/// back once the run has ended; it lands on the newest entry, which is the run
-/// that just finished (only one is ever live).
+/// The frontend reports the run's duration once it has ended; it lands on the
+/// newest entry, which is the run that just finished (only one is ever live).
+/// The audio total is the Rust record's own count when it has one, since the
+/// page's sum can fall short if it missed events.
 #[tauri::command]
 fn record_run_result(app: AppHandle, audio_seconds: f64, runtime_seconds: f64) {
+    let counted = RUN_RECORD.lock().ok().and_then(|r| r.as_ref().map(|r| r.audio_seconds));
+    let audio_seconds = counted.filter(|s| *s > 0.0).unwrap_or(audio_seconds);
     let Some(path) = history_path(&app) else { return };
     let mut entries = read_history_file(&path);
     let Some(entry) = entries.last_mut() else { return };
@@ -902,7 +931,7 @@ fn list_history(app: AppHandle, state: State<AnalysisState>) -> Vec<serde_json::
 const HISTORY_WINDOW: &str = "history";
 
 /// Open the past-runs window, or focus it. async for the same reason as
-/// open_model_info.
+/// open_models.
 #[tauri::command]
 async fn open_history(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(HISTORY_WINDOW) {
@@ -936,6 +965,9 @@ fn clear_history(app: AppHandle) {
 struct Manifest {
     modelname: String,
     classes_out: Option<Vec<String>>,
+    // Resampling was full quality until QQ became the default, so a manifest
+    // that predates the key came from a full-quality run.
+    full_quality_decode: bool,
 }
 
 // buzzdetect writes this into dir_out to record the settings that determine
@@ -960,9 +992,14 @@ fn read_manifest(dir_out: String) -> Result<Option<Manifest>, String> {
             .filter_map(|c| c.as_str().map(|s| s.to_string()))
             .collect()
     });
+    let full_quality_decode = value
+        .get("full_quality_decode")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     Ok(Some(Manifest {
         modelname,
         classes_out,
+        full_quality_decode,
     }))
 }
 
@@ -992,6 +1029,10 @@ pub struct AnalysisSettings {
     verbosity_log: String,
     #[serde(default)]
     log_progress: bool,
+    #[serde(default)]
+    benchmark: bool,
+    #[serde(default)]
+    full_quality_decode: bool,
 }
 
 fn default_chunklength() -> f64 {
@@ -1035,6 +1076,10 @@ fn engine_args(settings: &AnalysisSettings) -> Vec<String> {
         settings.verbosity_log.clone(),
         "--log_progress".into(),
         settings.log_progress.to_string(),
+        "--benchmark".into(),
+        settings.benchmark.to_string(),
+        "--full_quality_decode".into(),
+        settings.full_quality_decode.to_string(),
         "--classes_out".into(),
     ];
     args.extend(settings.classes_out.iter().cloned());
@@ -1469,7 +1514,12 @@ pub fn run() {
             list_models,
             get_model_classes,
             model_details,
-            open_model_info,
+            open_models,
+            catalog::models_overview,
+            catalog::download_model,
+            catalog::set_model_ignored,
+            catalog::set_model_disabled,
+            catalog::catalog_model_details,
             open_model_file,
             import_model,
             remove_model,
@@ -1528,6 +1578,8 @@ mod tests {
         assert_eq!(s.verbosity_log, "DEBUG");
         assert!(!s.gpu_fp16);
         assert!(!s.log_progress);
+        assert!(!s.benchmark);
+        assert!(!s.full_quality_decode);
         assert!(s.n_streamers.is_none());
         assert!(s.stream_buffer_depth.is_none());
     }
@@ -1545,6 +1597,8 @@ mod tests {
             "verbosity_print": "DEBUG",
             "verbosity_log": "INFO",
             "log_progress": true,
+            "benchmark": true,
+            "full_quality_decode": true,
             "n_streamers": 3,
             "stream_buffer_depth": 7,
         })));
@@ -1557,6 +1611,8 @@ mod tests {
         assert_eq!(value_after(&args, "--verbosity_print").as_deref(), Some("DEBUG"));
         assert_eq!(value_after(&args, "--verbosity_log").as_deref(), Some("INFO"));
         assert_eq!(value_after(&args, "--log_progress").as_deref(), Some("true"));
+        assert_eq!(value_after(&args, "--benchmark").as_deref(), Some("true"));
+        assert_eq!(value_after(&args, "--full_quality_decode").as_deref(), Some("true"));
         assert_eq!(value_after(&args, "--n_streamers").as_deref(), Some("3"));
         assert_eq!(value_after(&args, "--stream_buffer_depth").as_deref(), Some("7"));
     }
@@ -1617,6 +1673,18 @@ mod tests {
     }
 
     #[test]
+    fn audio_seconds_sums_every_chunk_including_final_ones() {
+        let mut r = RunRecord::default();
+        let chunk = |s: f64, e: f64, done: bool| {
+            serde_json::json!({ "event": "chunk_done", "path": "a.wav", "chunk_start": s, "chunk_end": e, "done": done })
+        };
+        r.push_event(serde_json::json!({ "event": "file_start", "path": "a.wav" }));
+        r.push_event(chunk(0.0, 200.0, false));
+        r.push_event(chunk(200.0, 300.0, true));
+        assert_eq!(r.audio_seconds, 300.0);
+    }
+
+    #[test]
     fn a_marked_line_becomes_a_progress_event() {
         let line = format!("{PROGRESS_MARKER}{{\"event\": \"chunk_done\", \"done\": true}}");
         match classify_line(line) {
@@ -1673,6 +1741,22 @@ mod tests {
         let manifest = read_manifest(dir.to_string_lossy().into()).unwrap().unwrap();
         assert_eq!(manifest.modelname, "model_general_v3");
         assert_eq!(manifest.classes_out.unwrap(), ["frog", "ins_buzz"]);
+        // no full_quality_decode key: written before it existed, when resampling was HQ
+        assert!(manifest.full_quality_decode);
+    }
+
+    #[test]
+    fn a_manifest_records_the_decode_quality_it_was_run_at() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-manifest-quality");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("buzzdetect_manifest.json"),
+            r#"{"modelname": "m", "output_mode": "activations", "classes_out": ["a"],
+                "precision": null, "framehop_prop": 1, "full_quality_decode": false}"#,
+        )
+        .unwrap();
+        let manifest = read_manifest(dir.to_string_lossy().into()).unwrap().unwrap();
+        assert!(!manifest.full_quality_decode);
     }
 
     #[test]
@@ -1764,18 +1848,17 @@ mod tests {
         assert_eq!(info.description, None);
         assert!(!info.has_readme);
         let details = model_details_in(&dir, "bare");
-        assert!(details.readme.is_none() && details.thresholds.is_none());
+        assert!(details.readme.is_none());
     }
 
     #[test]
-    fn description_thresholds_and_readme_are_read() {
+    fn description_and_readme_are_read() {
         let dir = std::env::temp_dir().join("buzzdetect-test-details-full");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let config = good_config().replacen(
             '{',
-            r#"{"description": "  Buzz.  ", "thresholds": {"a": -1.2},
-                "threshold_stats": {"a": {"folds": 8}},"#,
+            r#"{"description": "  Buzz.  ","#,
             1,
         );
         std::fs::write(dir.join("config_model.json"), config).unwrap();
@@ -1786,8 +1869,6 @@ mod tests {
         assert!(info.has_readme);
         let details = model_details_in(&dir, "full");
         assert_eq!(details.readme.as_deref(), Some("# hi"));
-        assert_eq!(details.thresholds.unwrap()["a"], -1.2);
-        assert_eq!(details.threshold_stats.unwrap()["a"]["folds"], 8);
     }
 
     #[test]

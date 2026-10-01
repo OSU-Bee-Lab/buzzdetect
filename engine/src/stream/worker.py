@@ -16,13 +16,15 @@ from src.pipeline.coordination import Coordinator
 from src.stream.audio import get_duration
 from src.inference.models import OnnxModel
 from src.pipeline.progress_json import emit_progress
+from src.pipeline.benchmark import now
 
 class WorkerStreamer:
     def __init__(self,
                  id_streamer,
                  model: OnnxModel,
                  chunklength: float,
-                 coordinator: Coordinator, ):
+                 coordinator: Coordinator,
+                 full_quality_decode: bool = False, ):
 
         self.model = model
         self.id_streamer = id_streamer
@@ -31,6 +33,11 @@ class WorkerStreamer:
         self.chunklength = chunklength
         self.framelength_s = self.model.framelength_s
         self.resample_rate = self.model.samplerate
+        # soxr QQ is ~3x cheaper than HQ and lands ~-46 dB from a VHQ reference
+        # in-band, against ~-88 dB for HQ; see --full_quality_decode
+        self.resample_quality = 'HQ' if full_quality_decode else 'QQ'
+        # the analyzers build their sessions at this length (see WorkerInferer.run)
+        self.samples_session = self.model.session_length(chunklength)
 
     def __call__(self):
         self.run()
@@ -124,10 +131,13 @@ class WorkerStreamer:
         sample_to = int(chunk[1] * a_file.track.samplerate)
         read_size = sample_to - sample_from
 
+        t0 = now()
         a_file.track.seek(sample_from)
         samples = a_file.track.read(read_size, dtype=np.float32)
+        t1 = now()
         if a_file.track.channels > 1:
             samples = np.mean(samples, axis=1)
+        t2 = now()
 
         n_samples = len(samples)
 
@@ -141,18 +151,37 @@ class WorkerStreamer:
         # soxr directly rather than librosa.resample, which is a thin wrapper
         # over this same call (res_type='soxr_hq') but drags numba/llvmlite/scipy
         # in with it -- a few hundred MB of dependency for one function.
-        samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality='HQ')
+        samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality=self.resample_quality)
         samples = samples.astype(np.float32)
+        t3 = now()
+
+        # pad here rather than in the analyzer, which should only ever run the model
+        n_audio = len(samples)
+        samples = self.model.pad(samples, self.samples_session)
+        t_pad = now() - t3
 
         last_chunk = force_last or not continue_file
-        a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, last_chunk=last_chunk)
+        a_chunk = AssignChunk(file=a_file, chunk=chunk, samples=samples, n_samples=n_audio, last_chunk=last_chunk)
         self.coordinator.put_analyze(a_chunk)
+        t4 = now()
+
+        self.coordinator.bench.record(
+            'streamer', self.id_streamer,
+            t_read=t1 - t0,
+            t_downmix=t2 - t1,
+            t_resample=t3 - t2,
+            t_pad=t_pad,
+            t_put_wait=t4 - t3 - t_pad,
+            audio_s=round(chunk[1] - chunk[0], 2),
+        )
 
         return continue_file
 
     def stream_to_queue(self, a_file: AssignFile):
         try:
+            t_open = now()
             self._chunk_file(a_file)
+            self.coordinator.bench.record('streamer_open', self.id_streamer, t_open=now() - t_open)
 
             last_index = len(a_file.chunklist) - 1
             for i, chunk in enumerate(a_file.chunklist):
@@ -173,7 +202,9 @@ class WorkerStreamer:
         while True:
             if self.coordinator.event_exitanalysis.is_set():
                 break
+            t_idle = now()
             a_file = self.coordinator.get_stream()
+            self.coordinator.bench.record('streamer_idle', self.id_streamer, t_wait_file=now() - t_idle)
             if a_file == 'exit' or self.coordinator.event_exitanalysis.is_set():
                 break
 

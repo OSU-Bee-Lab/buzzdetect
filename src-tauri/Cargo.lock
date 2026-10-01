@@ -336,8 +336,12 @@ name = "buzzdetect"
 version = "2.0.0-a4"
 dependencies = [
  "libc",
+ "reqwest",
+ "rustls",
+ "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

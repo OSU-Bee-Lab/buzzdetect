@@ -6,6 +6,7 @@ from src.pipeline.coordination import Coordinator
 from src.pipeline.loglevels import loglevels
 
 logging.addLevelName(loglevels['PROGRESS'], 'PROGRESS')
+logging.addLevelName(loglevels['BENCHMARK'], 'BENCHMARK')
 
 
 class PeriodFormatter(logging.Formatter):
@@ -26,7 +27,8 @@ class WorkerLogger:
                  coordinator: Coordinator,
                  verbosity_print: str='PROGRESS',
                  verbosity_log: str="DEBUG",
-                 log_progress: bool=False):
+                 log_progress: bool=False,
+                 benchmark: bool=False):
 
         self.path_log = path_log
         self.coordinator = coordinator
@@ -37,7 +39,9 @@ class WorkerLogger:
 
         self.format_file = PeriodFormatter("%(asctime)s [%(levelname)s] %(message)s")
         self.handle_file = logging.FileHandler(path_log)
-        self.handle_file.setLevel(verbosity_log)
+        # a benchmark run asked for these lines, so they outrank the verbosity setting
+        level_file = loglevels[verbosity_log]
+        self.handle_file.setLevel(min(level_file, loglevels['BENCHMARK']) if benchmark else level_file)
         if not log_progress:
             self.handle_file.addFilter(FilterDropProgress())
         self.handle_file.setFormatter(self.format_file)
