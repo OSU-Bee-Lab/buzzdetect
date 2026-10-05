@@ -14,9 +14,8 @@ Run from anywhere; it chdirs to engine/ (src/config.py uses relative paths).
 Default runs CPU and GPU, each at fp32 and (where a model has one) fp16, and prints one
 table. A GPU column is omitted if no GPU provider actually loads.
 
-fp16 only means something on a provider that acts on it. On CPU the fp16 graph
-is loaded directly; on GPU it goes through BUZZDETECT_GPU_FP16=1, exactly as the
-engine does (CoreML only -- elsewhere the engine ignores fp16 and so does this).
+On CPU the fp16 graph is loaded directly; on GPU it goes through
+BUZZDETECT_GPU_FP16=1, exactly as the engine does.
 """
 import argparse
 import json

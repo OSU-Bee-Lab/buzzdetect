@@ -91,9 +91,9 @@ class TestFp16(ProviderTestCase):
         os.environ[onnx.ENV_ALLOW_FP16] = '0'
         self.assertFalse(onnx.allow_fp16())
 
-    def test_only_coreml_acts_on_it(self):
+    def test_every_gpu_provider_acts_on_it(self):
         self.assertTrue(onnx.fp16_supported(COREML))
-        self.assertFalse(onnx.fp16_supported(CUDA))
+        self.assertTrue(onnx.fp16_supported(CUDA))
         self.assertFalse(onnx.fp16_supported(CPU))
 
     def test_coreml_reaches_the_neural_engine_when_asked(self):
@@ -102,7 +102,8 @@ class TestFp16(ProviderTestCase):
             _, options = onnx.providers_for('GPU')
         self.assertEqual(options[0], onnx.COREML_FP16)
 
-    def test_cuda_ignores_it(self):
+    def test_cuda_options_are_unchanged(self):
+        # CUDA gets fp16 from the graph file, not from provider options.
         os.environ[onnx.ENV_ALLOW_FP16] = '1'
         with available(CUDA, CPU):
             _, options = onnx.providers_for('GPU')
@@ -145,10 +146,16 @@ class TestPathFor(ProviderTestCase):
             self.assertEqual(onnx.path_for(self.fp32, 'GPU'), self.fp32)
         self.assertIn('no-fp16-graph', onnx._warned)
 
-    def test_asked_for_on_a_provider_that_cannot_use_it(self):
+    def test_asked_for_on_cuda_with_a_sibling_graph(self):
+        os.environ[onnx.ENV_ALLOW_FP16] = '1'
+        expected = self.write_fp16()
+        with available(CUDA, CPU):
+            self.assertEqual(onnx.path_for(self.fp32, 'GPU'), expected)
+
+    def test_asked_for_with_no_gpu_provider_falls_back_to_full_precision(self):
         os.environ[onnx.ENV_ALLOW_FP16] = '1'
         self.write_fp16()
-        with available(CUDA, CPU):
+        with available(CPU), mock.patch('builtins.print'):
             self.assertEqual(onnx.path_for(self.fp32, 'GPU'), self.fp32)
 
 
@@ -240,6 +247,31 @@ class TestMakeSession(ProviderTestCase):
         with available(CUDA, CPU), mock.patch.object(onnx.ort, 'InferenceSession', return_value=session):
             onnx.make_session('/models/m/model.onnx', 'GPU', 16000)
         self.assertEqual(onnx._warned, set())
+
+    def test_an_fp16_graph_that_will_not_load_falls_back_to_fp32(self):
+        os.environ[onnx.ENV_ALLOW_FP16] = '1'
+        session = mock.Mock()
+        session.get_providers.return_value = [COREML, CPU]
+        built = mock.Mock(side_effect=[RuntimeError('no kernel for FusedConv'), session])
+        with available(COREML, CPU), \
+                mock.patch.object(onnx.os.path, 'exists', return_value=True), \
+                mock.patch.object(onnx.ort, 'InferenceSession', built), \
+                mock.patch('builtins.print'):
+            self.assertIs(onnx.make_session('/models/m/model.onnx', 'GPU', 16000), session)
+        first, second = built.call_args_list
+        self.assertTrue(first.args[0].endswith(onnx.FNAME_FP16))
+        self.assertEqual(second.args[0], '/models/m/model.onnx')
+        # And with the fp32 options: ALL would send an fp32 graph to the
+        # Neural Engine's NeuralNetwork path.
+        self.assertEqual(second.kwargs['provider_options'][0]['MLComputeUnits'], 'CPUAndGPU')
+        self.assertIn('fp16-failed', onnx._warned)
+
+    def test_an_fp32_graph_that_will_not_load_still_raises(self):
+        built = mock.Mock(side_effect=RuntimeError('broken'))
+        with available(CUDA, CPU), mock.patch.object(onnx.ort, 'InferenceSession', built):
+            with self.assertRaises(RuntimeError):
+                onnx.make_session('/models/m/model.onnx', 'GPU', 16000)
+        self.assertEqual(built.call_count, 1)
 
 
 if __name__ == '__main__':

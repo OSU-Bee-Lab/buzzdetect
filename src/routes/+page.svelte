@@ -211,9 +211,9 @@
 					settings.value.analyzersGpu = 0;
 					settings.save();
 				}
-				// fp16 only affects Apple's Neural Engine (see the setting's
-				// tooltip), so default it on for a CoreML-capable machine unless
-				// the user has already made a choice of their own.
+				// fp16 is a reliable win only on Apple's Neural Engine; on NVIDIA
+				// it depends on the card. So default it on for a CoreML-capable
+				// machine unless the user has already made a choice of their own.
 				if (
 					status.usable &&
 					!settings.value.gpuFp16Touched &&
@@ -823,8 +823,8 @@ If you're using GPU, you probably don't want any CPU analyzers."
 					Reduced precision (fp16)
 					<span
 						class="qmark"
-						data-tooltip="Runs the model at half precision on Apple's Neural Engine, which is about twice as fast but shifts results by roughly 0.015 against a full-precision run.
-Results from a reduced-precision run are not directly comparable with full-precision ones near a detection threshold. Currently affects Apple GPUs only."
+						data-tooltip="Runs the model at half precision on the GPU. On Apple silicon this uses the Neural Engine and is about twice as fast; on NVIDIA it is usually faster on RTX cards (which have tensor cores) and can be slower on older ones. Either way it shifts results by roughly 0.015 against a full-precision run.
+Results from a reduced-precision run are not directly comparable with full-precision ones near a detection threshold."
 					>
 						?
 					</span>
