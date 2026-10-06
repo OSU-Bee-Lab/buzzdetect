@@ -1576,7 +1576,11 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		min-height: 0;
 		overflow-y: auto;
 		overflow-x: hidden;
-		padding-right: 0.25rem;
+		/* The scroll box clips at its edges, and .field-error's outline and the
+		   Models badge both stick out ~3px; this gutter makes room for them and
+		   the negative margin keeps the contents where they were. */
+		padding: 4px 0.25rem 4px 4px;
+		margin: -4px 0 -4px -4px;
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
