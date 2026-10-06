@@ -1283,7 +1283,7 @@ Locked once an output folder has results, since mixing the two in one folder wou
 								{installing ? 'Installing…' : 'Install and restart'}
 							</button>
 						{/if}
-						{#if installError}<span class="update-error">{installError}</span>{/if}
+						{#if installError}<span class="update-error" title={installError}>{installError}</span>{/if}
 					{/if}
 				</div>
 			{/if}
@@ -2001,14 +2001,17 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		flex-shrink: 0;
 	}
 
+	/* A row, not a column: this sits on the window's bottom edge, so anything
+	   stacked under the version would be drawn off-screen. Reversed so the
+	   version stays rightmost. */
 	.version-box {
 		position: absolute;
 		top: 0;
 		right: 0;
 		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: 0.2rem;
+		flex-direction: row-reverse;
+		align-items: center;
+		gap: 0.5rem;
 		font-size: 0.75rem;
 	}
 
@@ -2035,7 +2038,9 @@ Locked once an output folder has results, since mixing the two in one folder wou
 	.update-error {
 		color: #dc2626;
 		max-width: 20rem;
-		text-align: right;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.log {
