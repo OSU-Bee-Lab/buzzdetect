@@ -644,9 +644,25 @@
 		queue.save();
 	}
 
+	// Set while the running item is being stopped on purpose to move on to the
+	// next one, as opposed to Stop Queue, which ends the whole batch.
+	let skipping = false;
+	let confirmSkip = $state(false);
+
+	async function skipCurrent() {
+		confirmSkip = false;
+		if (!queue.current || run.stopping) return;
+		skipping = true;
+		await cancel();
+	}
+
 	function finishQueueItem(cancelled: boolean) {
 		const item = queue.current;
 		if (!item) return;
+		const skipped = skipping;
+		skipping = false;
+		// The run the modal asked about is over; don't let it skip the next one.
+		confirmSkip = false;
 		const t = run.tree;
 		const status: QueueStatus = run.error ? 'error' : cancelled ? 'stopped' : 'done';
 		queue.finish(item.id, {
@@ -660,7 +676,7 @@
 			summary: run.summary,
 			error: run.error
 		});
-		if (cancelled) {
+		if (cancelled && !skipped) {
 			queue.active = false;
 			queue.save();
 			return;
@@ -679,6 +695,11 @@
 	const EMPTY_WEIGHTS = { totalSeconds: 0, priorSeconds: 0, doneSeconds: 0, activeSeconds: 0 };
 
 	const selectedIndex = $derived(queue.items.findIndex((i) => i.id === queue.selectedId));
+
+	async function stopQueue() {
+		if (!run.stopping) skipping = false;
+		await cancel();
+	}
 
 	async function cancel() {
 		// A second click, while it's already winding down, kills it outright.
@@ -1124,8 +1145,8 @@ Locked once an output folder has results, since mixing the two in one folder wou
 					>
 				{/if}
 				{#if busy}
-					<button class="danger" onclick={cancel}>
-						{run.stopping ? 'Force Stop' : 'Stop Analysis'}
+					<button class="danger" onclick={stopQueue}>
+						{run.stopping ? 'Force Stop' : queue.items.length > 0 ? 'Stop Queue' : 'Stop Analysis'}
 					</button>
 				{:else if queue.hasRunnable}
 					<button onclick={runQueue}>Run Queue</button>
@@ -1308,6 +1329,13 @@ Locked once an output folder has results, since mixing the two in one folder wou
 								aria-label="Remove from queue"
 								onclick={() => removeQueued(item.id)}>×</button
 							>
+						{:else if !run.stopping}
+							<button
+								type="button"
+								class="queue-delete"
+								aria-label="Skip current run"
+								onclick={() => (confirmSkip = true)}>×</button
+							>
 						{/if}
 					</li>
 				{/each}
@@ -1315,6 +1343,30 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		</section>
 	{/if}
 </div>
+
+{#if confirmSkip}
+	<div class="modal-backdrop" role="presentation" onclick={() => (confirmSkip = false)}>
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="skip-title"
+			tabindex="-1"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.key === 'Escape' && (confirmSkip = false)}
+		>
+			<h2 id="skip-title">Skip Current Run</h2>
+			<p>
+				Are you sure you want to stop the current run? This will leave partial files and proceed
+				to the next queue item.
+			</p>
+			<div class="modal-actions">
+				<button type="button" onclick={() => (confirmSkip = false)}>Cancel</button>
+				<button type="button" class="danger" onclick={skipCurrent}>Stop Run</button>
+			</div>
+		</div>
+	</div>
+{/if}
 </main>
 
 <style>
@@ -1484,6 +1536,39 @@ Locked once an output folder has results, since mixing the two in one folder wou
 	.queue-delete:hover {
 		opacity: 1;
 		color: #d33;
+	}
+
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.45);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+	}
+
+	.modal {
+		background: Canvas;
+		color: CanvasText;
+		border: 1px solid rgba(127, 127, 127, 0.4);
+		border-radius: 8px;
+		padding: 1.25rem;
+		max-width: 26rem;
+	}
+
+	.modal h2 {
+		margin: 0 0 0.5rem 0;
+	}
+
+	.modal p {
+		margin: 0 0 1rem 0;
+	}
+
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
 	}
 
 	.settings-body {
