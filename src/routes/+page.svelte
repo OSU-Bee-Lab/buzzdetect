@@ -563,12 +563,19 @@
 	);
 
 	// Edits to a selected, still-editable queued run land in its queue entry.
+	// Only settings.value may be tracked here. queue.save() snapshots every
+	// item, so tracked it would subscribe this effect to the item.settings it
+	// has just written, and the effect would re-run itself until Svelte gave up
+	// with effect_update_depth_exceeded -- which also abandons the batch the
+	// page's own render effects were in, freezing the whole UI.
 	$effect(() => {
 		const snap = $state.snapshot(settings.value) as Settings;
-		const item = untrack(() => queue.selected);
-		if (!item || !isEditable(item)) return;
-		item.settings = snap;
-		queue.save();
+		untrack(() => {
+			const item = queue.selected;
+			if (!item || !isEditable(item)) return;
+			item.settings = snap;
+			queue.save();
+		});
 	});
 
 	async function selectQueued(id: number) {
