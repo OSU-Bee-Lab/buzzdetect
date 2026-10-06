@@ -10,8 +10,8 @@
           "size": 4440897
         },
         "model.fp16.onnx": {
-          "sha256": "436ad2161ffea6c189231249a33f0767099f3ff760ca97b20644714e07cfb8be",
-          "size": 2840564
+          "sha256": "ba465dce9fbd481e4e51242223577f5e0473d3d1c031696c829950747599b943",
+          "size": 2849544
         },
         "config_model.json": {
           "sha256": "e4e88f7c98465d85c6bb1c2e971e2b5fb0e9adfca9b5cf3b90e47d588d0b0b78",
@@ -29,8 +29,8 @@
           "size": 20695033
         },
         "model.fp16.onnx": {
-          "sha256": "a51618a479aa2d9c262809407b33c962163c783cee5cbd487941276106b4cb87",
-          "size": 11578765
+          "sha256": "10cac694022b71f8c4ce53afe25d8b33bd3a2277824fffbb0991f479706df7cd",
+          "size": 11597381
         },
         "config_model.json": {
           "sha256": "2d99967ac5bd05e1896fc7d07f833b4b91cfcd017f5a2a1b979b853a0f3c3bf7",
@@ -48,8 +48,8 @@
           "size": 3591498
         },
         "model.fp16.onnx": {
-          "sha256": "6dbf5b7c1403f65c18f18e761cfcff5fcb43a354d5eb879b010baa63ebf2a15e",
-          "size": 1985742
+          "sha256": "ccf75ad76f8a3e56c624a991173980eceb33a579897fbf4e346faf4a0b5e5831",
+          "size": 1994949
         },
         "config_model.json": {
           "sha256": "280fe6c1455c54d15b1d4498c08d9fcbc74f0e9494875f5da91473dbb207d94c",
@@ -67,8 +67,8 @@
           "size": 14005606
         },
         "model.fp16.onnx": {
-          "sha256": "762a074f92d4edee0e50333074d2b3d906a39f6911d25f12b24f35a93b8998c1",
-          "size": 7610503
+          "sha256": "55253eda53802ef428c8c58b6cba156891ec9af0d08842a92194c335e1f66f43",
+          "size": 7617746
         },
         "config_model.json": {
           "sha256": "f4e271a84e99807ac136a0bb6f0bc166a93e02a06265d025bebe41f746501ec2",
