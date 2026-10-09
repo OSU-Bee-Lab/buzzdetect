@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import multiprocessing
 import os
 import sys
@@ -35,23 +36,23 @@ def _resolve_classes_out(modelname, classes_out):
 
 
 def reconcile_with_manifest(modelname, dir_out, classes_out, precision, framehop_prop,
-                            full_quality_decode=False):
+                            full_quality_decode=False, gain=1.0):
     """If the output folder already holds results from different settings, show the
     conflicts and offer to adopt the existing settings. Returns the (possibly
-    overridden) (modelname, classes_out, precision, framehop_prop, full_quality_decode).
+    overridden) (modelname, classes_out, precision, framehop_prop, full_quality_decode, gain).
     Exits on decline."""
     from src.pipeline.manifest import build_manifest, read_manifest, diff_manifests, KEYS_LEGACY
 
     existing = read_manifest(_resolve_dir_out(dir_out, modelname))
     if existing is None:
-        return modelname, classes_out, precision, framehop_prop, full_quality_decode
+        return modelname, classes_out, precision, framehop_prop, full_quality_decode, gain
 
     resolved_classes = _resolve_classes_out(modelname, classes_out) if precision is None else classes_out
     candidate = build_manifest(modelname, framehop_prop, precision, resolved_classes,
-                               full_quality_decode=full_quality_decode)
+                               full_quality_decode=full_quality_decode, gain=gain)
     conflicts = diff_manifests(existing, candidate)
     if not conflicts:
-        return modelname, classes_out, precision, framehop_prop, full_quality_decode
+        return modelname, classes_out, precision, framehop_prop, full_quality_decode, gain
 
     print("The output folder already contains results from different settings:")
     for c in conflicts:
@@ -63,9 +64,10 @@ def reconcile_with_manifest(modelname, dir_out, classes_out, precision, framehop
         sys.exit(0)
 
     quality = existing.get('full_quality_decode', KEYS_LEGACY['full_quality_decode'])
+    gain = existing.get('gain', KEYS_LEGACY['gain'])
     if existing['output_mode'] == 'detections':
-        return existing['modelname'], 'all', existing['precision'], existing['framehop_prop'], quality
-    return existing['modelname'], existing['classes_out'], None, existing['framehop_prop'], quality
+        return existing['modelname'], 'all', existing['precision'], existing['framehop_prop'], quality, gain
+    return existing['modelname'], existing['classes_out'], None, existing['framehop_prop'], quality, gain
 
 
 def main():
@@ -159,7 +161,13 @@ def main():
                         help='Resample audio at full quality (soxr HQ) instead of the faster default (QQ). Results differ slightly; QQ is about 3x cheaper to resample.',
                         required=False, default=False, type=str2bool)
 
+    parser.add_argument('--gain',
+                        help='Multiplier applied to the audio before analysis, without changing the source files. 0.5 halves amplitude, 4 quadruples it. Must be > 0.',
+                        required=False, default=1.0, type=float)
+
     args = parser.parse_args()
+    if not math.isfinite(args.gain) or args.gain <= 0:
+        parser.error('--gain must be a number > 0')
 
     # First sign of life a host GUI gets. Everything before this point is
     # interpreter startup (several seconds for the frozen sidecar, which
@@ -178,13 +186,14 @@ def main():
     elif isinstance(classes_out, str) and classes_out == 'all':
         classes_out = 'all'
 
-    modelname, classes_out, precision, framehop_prop, full_quality_decode = reconcile_with_manifest(
+    modelname, classes_out, precision, framehop_prop, full_quality_decode, gain = reconcile_with_manifest(
         modelname=args.modelname,
         dir_out=args.dir_out,
         classes_out=classes_out,
         precision=args.precision,
         framehop_prop=args.framehop_prop,
         full_quality_decode=args.full_quality_decode,
+        gain=args.gain,
     )
 
     completed = analyze(
@@ -204,6 +213,7 @@ def main():
         log_progress=args.log_progress,
         benchmark=args.benchmark,
         full_quality_decode=full_quality_decode,
+        gain=gain,
     )
 
     if not completed:

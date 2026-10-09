@@ -26,6 +26,8 @@ export interface Settings {
 	logProgress: boolean;
 	benchmark: boolean;
 	fullQualityDecode: boolean;
+	// Multiplier on the audio before it reaches the model; must be > 0.
+	gain: number;
 }
 
 const STORAGE_KEY = 'buzzdetect.settings';
@@ -48,7 +50,8 @@ function defaults(): Settings {
 		verbosityLog: 'DEBUG',
 		logProgress: false,
 		benchmark: false,
-		fullQualityDecode: false
+		fullQualityDecode: false,
+		gain: 1
 	};
 }
 

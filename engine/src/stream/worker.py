@@ -24,7 +24,8 @@ class WorkerStreamer:
                  model: OnnxModel,
                  chunklength: float,
                  coordinator: Coordinator,
-                 full_quality_decode: bool = False, ):
+                 full_quality_decode: bool = False,
+                 gain: float = 1.0, ):
 
         self.model = model
         self.id_streamer = id_streamer
@@ -36,6 +37,7 @@ class WorkerStreamer:
         # soxr QQ is ~3x cheaper than HQ and lands ~-46 dB from a VHQ reference
         # in-band, against ~-88 dB for HQ; see --full_quality_decode
         self.resample_quality = 'HQ' if full_quality_decode else 'QQ'
+        self.gain = gain
         # the analyzers build their sessions at this length (see WorkerInferer.run)
         self.samples_session = self.model.session_length(chunklength)
 
@@ -153,6 +155,10 @@ class WorkerStreamer:
         # in with it -- a few hundred MB of dependency for one function.
         samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality=self.resample_quality)
         samples = samples.astype(np.float32)
+        # after resampling, where there are usually fewer samples to scale.
+        # Not clipped: the model takes float input with no ceiling.
+        if self.gain != 1:
+            samples *= np.float32(self.gain)
         t3 = now()
 
         # pad here rather than in the analyzer, which should only ever run the model

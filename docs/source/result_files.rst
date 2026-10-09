@@ -139,6 +139,7 @@ The following settings are recorded:
 * **modelname:** the model used for analysis.
 * **classes_out:** which classes' activations are written.
 * **full_quality_decode:** whether audio was resampled with the full-quality filter (see :doc:`gui`).
+* **gain:** the multiplier applied to the audio before analysis (see :doc:`gui`).
 
 Additionally, it stores model metadata that's needed to interpret results:
 

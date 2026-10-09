@@ -24,6 +24,7 @@
 		modelname: string;
 		classes_out: string[] | null;
 		full_quality_decode: boolean;
+		gain: number;
 	}
 
 	// Every installed model, disabled ones included.
@@ -326,6 +327,7 @@
 		if (!manifest || manifest.modelname !== settings.value.modelname) return;
 		if (manifest.classes_out) settings.value.classesOut = manifest.classes_out;
 		settings.value.fullQualityDecode = manifest.full_quality_decode;
+		settings.value.gain = manifest.gain;
 		settings.save();
 	}
 
@@ -485,6 +487,7 @@
 		if (h.log_progress !== undefined) v.logProgress = h.log_progress;
 		if (h.benchmark !== undefined) v.benchmark = h.benchmark;
 		if (h.full_quality_decode !== undefined) v.fullQualityDecode = h.full_quality_decode;
+		if (h.gain !== undefined) v.gain = h.gain;
 		settings.save();
 		await onModelChange();
 	}
@@ -505,7 +508,8 @@
 			verbosity_log: s.verbosityLog,
 			log_progress: s.logProgress,
 			benchmark: s.benchmark,
-			full_quality_decode: s.fullQualityDecode
+			full_quality_decode: s.fullQualityDecode,
+			gain: s.gain
 		};
 	}
 
@@ -555,10 +559,13 @@
 	const panelLocked = $derived(
 		queue.selected ? !isEditable(queue.selected) : busy && !queue.current
 	);
+	// An emptied number input binds as null, which isFinite also refuses.
+	const gainValid = $derived(Number.isFinite(settings.value.gain) && settings.value.gain > 0);
 	const draftValid = $derived(
 		!!settings.value.dirAudio &&
 			!!settings.value.modelname &&
 			settings.value.classesOut.length > 0 &&
+			gainValid &&
 			!modelMismatch
 	);
 
@@ -1128,6 +1135,27 @@ Locked once an output folder has results, since mixing the two in one folder wou
 					?
 				</span>
 			</label>
+			<label class:locked={manifestLocked}>
+				<span class="label-text">
+					Gain
+					<span
+						class="qmark"
+						data-tooltip="Multiplies the audio's amplitude before analysis, without changing the source files.
+0.5 halves the volume, 4 quadruples it; 1 leaves it unchanged.
+Locked once an output folder has results, since results at different gains aren't comparable."
+					>
+						?
+					</span>
+				</span>
+				<input
+					type="number"
+					min="0"
+					step="any"
+					disabled={manifestLocked}
+					bind:value={settings.value.gain}
+					oninput={() => settings.save()}
+				/>
+			</label>
 		</details>
 
 		</fieldset>
@@ -1165,6 +1193,9 @@ Locked once an output folder has results, since mixing the two in one folder wou
 				{/if}
 				{#if settings.value.classesOut.length === 0}
 					<p class="error">Select at least one class to output.</p>
+				{/if}
+				{#if !gainValid}
+					<p class="error">Gain must be a number greater than 0.</p>
 				{/if}
 				{#if !settings.value.dirAudio || !settings.value.dirOut}
 					<p class="hint">Set audio and output directories to begin.</p>
@@ -1704,7 +1735,8 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		color: rgba(127, 127, 127, 0.9);
 	}
 
-	label.checkbox.locked {
+	label.checkbox.locked,
+	.advanced label.locked {
 		color: rgba(127, 127, 127, 0.9);
 	}
 

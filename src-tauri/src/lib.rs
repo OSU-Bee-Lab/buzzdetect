@@ -985,6 +985,8 @@ struct Manifest {
     // Resampling was full quality until QQ became the default, so a manifest
     // that predates the key came from a full-quality run.
     full_quality_decode: bool,
+    // Unity before gain existed.
+    gain: f64,
 }
 
 // buzzdetect writes this into dir_out to record the settings that determine
@@ -1013,10 +1015,12 @@ fn read_manifest(dir_out: String) -> Result<Option<Manifest>, String> {
         .get("full_quality_decode")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
+    let gain = value.get("gain").and_then(|v| v.as_f64()).unwrap_or(1.0);
     Ok(Some(Manifest {
         modelname,
         classes_out,
         full_quality_decode,
+        gain,
     }))
 }
 
@@ -1050,8 +1054,13 @@ pub struct AnalysisSettings {
     benchmark: bool,
     #[serde(default)]
     full_quality_decode: bool,
+    #[serde(default = "default_gain")]
+    gain: f64,
 }
 
+fn default_gain() -> f64 {
+    1.0
+}
 fn default_chunklength() -> f64 {
     200.0
 }
@@ -1097,6 +1106,8 @@ fn engine_args(settings: &AnalysisSettings) -> Vec<String> {
         settings.benchmark.to_string(),
         "--full_quality_decode".into(),
         settings.full_quality_decode.to_string(),
+        "--gain".into(),
+        settings.gain.to_string(),
         "--classes_out".into(),
     ];
     args.extend(settings.classes_out.iter().cloned());
@@ -1597,6 +1608,7 @@ mod tests {
         assert!(!s.log_progress);
         assert!(!s.benchmark);
         assert!(!s.full_quality_decode);
+        assert_eq!(s.gain, 1.0);
         assert!(s.n_streamers.is_none());
         assert!(s.stream_buffer_depth.is_none());
     }
@@ -1616,6 +1628,7 @@ mod tests {
             "log_progress": true,
             "benchmark": true,
             "full_quality_decode": true,
+            "gain": 0.5,
             "n_streamers": 3,
             "stream_buffer_depth": 7,
         })));
@@ -1630,6 +1643,7 @@ mod tests {
         assert_eq!(value_after(&args, "--log_progress").as_deref(), Some("true"));
         assert_eq!(value_after(&args, "--benchmark").as_deref(), Some("true"));
         assert_eq!(value_after(&args, "--full_quality_decode").as_deref(), Some("true"));
+        assert_eq!(value_after(&args, "--gain").as_deref(), Some("0.5"));
         assert_eq!(value_after(&args, "--n_streamers").as_deref(), Some("3"));
         assert_eq!(value_after(&args, "--stream_buffer_depth").as_deref(), Some("7"));
     }
@@ -1760,20 +1774,23 @@ mod tests {
         assert_eq!(manifest.classes_out.unwrap(), ["frog", "ins_buzz"]);
         // no full_quality_decode key: written before it existed, when resampling was HQ
         assert!(manifest.full_quality_decode);
+        assert_eq!(manifest.gain, 1.0);
     }
 
     #[test]
-    fn a_manifest_records_the_decode_quality_it_was_run_at() {
+    fn a_manifest_records_the_decode_quality_and_gain_it_was_run_at() {
         let dir = std::env::temp_dir().join("buzzdetect-test-manifest-quality");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("buzzdetect_manifest.json"),
             r#"{"modelname": "m", "output_mode": "activations", "classes_out": ["a"],
-                "precision": null, "framehop_prop": 1, "full_quality_decode": false}"#,
+                "precision": null, "framehop_prop": 1, "full_quality_decode": false,
+                "gain": 4.0}"#,
         )
         .unwrap();
         let manifest = read_manifest(dir.to_string_lossy().into()).unwrap().unwrap();
         assert!(!manifest.full_quality_decode);
+        assert_eq!(manifest.gain, 4.0);
     }
 
     #[test]

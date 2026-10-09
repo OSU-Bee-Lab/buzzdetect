@@ -47,6 +47,8 @@ For more details on these settings and on tuning analyses, see :doc:`tuning`.
 - **Full quality decoding:** resample audio to the model's sample rate with a slower, more accurate filter.
   The default is low-quality, faster, and adequate for detection, but the activations can differ very slightly between the two.
   Like the model and classes, this is locked once an output folder has results, so a folder never mixes the two.
+- **Gain:** multiply the audio's amplitude before analysis, without touching the source files. 0.5 halves the volume, 4 quadruples it, 1 leaves it unchanged; any number above 0 is allowed.
+  Also locked once an output folder has results.
 
 Models window
 --------------

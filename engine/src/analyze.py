@@ -76,6 +76,7 @@ class Analyzer:
             log_progress: bool = False,
             benchmark: bool = False,
             full_quality_decode: bool = False,
+            gain: float = 1.0,
             coordinator: Coordinator = None,
     ):
         """Initialize the analyzer with configuration parameters.
@@ -110,6 +111,7 @@ class Analyzer:
         self.log_progress = log_progress
         self.benchmark = benchmark
         self.full_quality_decode = full_quality_decode
+        self.gain = gain
 
         self.coordinator = coordinator
 
@@ -233,6 +235,7 @@ class Analyzer:
                     'chunklength': self.chunklength,
                     'coordinator': self.coordinator,
                     'full_quality_decode': self.full_quality_decode,
+                    'gain': self.gain,
                 }
             )
             self.threads_streamers.append(streamer)
@@ -312,6 +315,7 @@ class Analyzer:
             precision=self.precision,
             classes_out=self.classes_out,
             full_quality_decode=self.full_quality_decode,
+            gain=self.gain,
             framelength_s=self.model.framelength_s,
             thresholds=self.model.config.get('thresholds'),
             dir_audio=self.dir_audio,
@@ -522,6 +526,7 @@ def analyze(
         log_progress: bool = False,
         benchmark: bool = False,
         full_quality_decode: bool = False,
+        gain: float = 1.0,
         q_gui: multiprocessing.Queue = None,
         event_stopanalysis: multiprocessing.Event = None,
 ):
@@ -577,6 +582,9 @@ def analyze(
         Resample audio to the model's rate at soxr's HQ setting instead of the default QQ,
         by default False. QQ is about three times cheaper and adequate for detection; results
         differ slightly between the two.
+    gain : float, optional
+        Multiplier applied to the audio before it reaches the model, by default 1 (unchanged).
+        0.5 halves amplitude, 4 quadruples it. Applied on the fly; source files are untouched.
     q_gui : multiprocessing.Queue, optional
         Queue for passing log messages to GUI, by default None
     event_stopanalysis : multiprocessing.Event, optional
@@ -622,6 +630,7 @@ def analyze(
         log_progress=log_progress,
         benchmark=benchmark,
         full_quality_decode=full_quality_decode,
+        gain=gain,
         coordinator=coordinator
     )
 

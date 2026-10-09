@@ -273,6 +273,42 @@ class TestDetections(EngineTestCase):
         self.assertEqual(read_manifest(self.dir_out)['output_mode'], 'detections')
 
 
+class TestGain(EngineTestCase):
+    def test_gain_is_the_same_as_louder_source_audio(self):
+        quiet = self.add_wav('siteA/rec.wav', seconds=3)
+        self.analyze('--gain', '4')
+        with_gain = pd.read_csv(self.results('siteA/rec'))
+        self.assertEqual(read_manifest(self.dir_out)['gain'], 4.0)
+
+        samples, sr = sf.read(quiet, dtype='float32')
+        sf.write(quiet, samples * 4, sr)
+        self.dir_out = os.path.join(self.tmp.name, 'out_loud')
+        self.analyze()
+        louder = pd.read_csv(self.results('siteA/rec'))
+
+        unity = os.path.join(self.tmp.name, 'out_unity')
+        sf.write(quiet, samples, sr)
+        self.dir_out = unity
+        self.analyze()
+        untouched = pd.read_csv(self.results('siteA/rec'))
+
+        cols = [c for c in with_gain.columns if c != 'start']
+        np.testing.assert_allclose(with_gain[cols], louder[cols], atol=1e-3)
+        self.assertFalse(np.allclose(with_gain[cols], untouched[cols], atol=1e-3))
+
+    def test_gain_must_be_positive(self):
+        self.add_wav('siteA/rec.wav', seconds=3)
+        run = self.analyze('--gain', '0', expect_success=False)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('--gain', run.stderr)
+
+    def test_a_different_gain_conflicts_with_the_folder(self):
+        self.add_wav('siteA/rec.wav', seconds=3)
+        self.analyze('--gain', '2')
+        run = self.analyze('--gain', '0.5', stdin='n\n')
+        self.assertIn('gain: existing=2.0, requested=0.5', run.stdout)
+
+
 class TestFormats(EngineTestCase):
     def test_an_mp3_is_analyzed_through_our_own_driver(self):
         self.add_fixture('truncating.mp3', 'siteA/rec.mp3')
