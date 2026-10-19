@@ -59,7 +59,9 @@ class OnnxModel:
     tuning choice: CoreML's MLProgram format cannot compile a graph with an
     unbounded dimension, so a dynamic session simply fails to run on macOS.
     predict() zero-pads each chunk up to that length and returns only the
-    frames the real audio covers.
+    frames the chunk's own audio covers. The streamer fills most of that
+    length with the audio after the chunk first (WorkerStreamer.queue_chunk),
+    so only the end of a file is ever scored against padding.
     """
 
     def __init__(self, modelname, model_dir, config, framehop_prop):
@@ -105,6 +107,11 @@ class OnnxModel:
         and a chunk that came back a few samples long would otherwise not fit
         the session it was sized for. The spare frame costs one frame of
         compute per chunk and removes the whole class of problem.
+
+        It is also exactly the look-ahead a chunk's last frame needs: the
+        streamer fills the session past the chunk's end with the next chunk's
+        audio, and heavy_v1's last frame depends on audio up to a frame past
+        its own samples_min window.
         """
         n_chunk = int(round(chunklength_s * self.samplerate))
         return self.samples_min + self.samples_hop * self.n_frames(n_chunk)

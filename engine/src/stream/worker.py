@@ -18,6 +18,18 @@ from src.inference.models import OnnxModel
 from src.pipeline.progress_json import emit_progress
 from src.pipeline.benchmark import now
 
+
+def resampled_length(n, rate_in, rate_out):
+    """How many samples soxr.resample returns for `n` samples in.
+
+    Its one-shot call rounds half up (C's floor(x + 0.5), not Python's round,
+    which rounds half to even), checked against soxr 1.1 at every rate and
+    quality the engine can hand it. Integer arithmetic so a long chunk can't
+    land on the wrong side of a .5.
+    """
+    return (2 * n * rate_out + rate_in) // (2 * rate_in)
+
+
 class WorkerStreamer:
     def __init__(self,
                  id_streamer,
@@ -40,6 +52,11 @@ class WorkerStreamer:
         self.gain = gain
         # the analyzers build their sessions at this length (see WorkerInferer.run)
         self.samples_session = self.model.session_length(chunklength)
+
+        # Audio read past the end of the previous chunk, kept for the next one;
+        # see _read_span. Native rate, downmixed. Reset per file.
+        self._carry = None
+        self._carry_from = None
 
     def __call__(self):
         self.run()
@@ -128,17 +145,76 @@ class WorkerStreamer:
         a_file.chunklist = gaps_to_chunklist(gaps, self.chunklength)
         return
 
+    def _read_span(self, a_file, sample_from, sample_to):
+        """Native-rate mono samples [sample_from, sample_to), or fewer at EOF.
+
+        Reads only forward. Chunks are normally contiguous, so the look-ahead
+        read for one chunk is the start of the next: it is kept in `_carry`
+        and the track, already positioned at its end, carries on from there.
+        Seeking back to re-read it instead would be cheap on a wav and ruinous
+        elsewhere -- the mts driver answers a backward seek by decoding the
+        file again from its first sample, every chunk.
+        """
+        track = a_file.track
+        parts = []
+        position = sample_from
+        carry = self._carry
+        if carry is not None and self._carry_from <= sample_from <= self._carry_from + len(carry):
+            kept = carry[sample_from - self._carry_from:sample_to - self._carry_from]
+            parts.append(kept)
+            position = self._carry_from + len(carry)
+        else:
+            # Not the chunk the carry was read for (the first one, or after a
+            # gap in resumed results): an ordinary seek.
+            track.seek(sample_from)
+
+        if position < sample_to:
+            new = track.read(sample_to - position, dtype=np.float32)
+            if track.channels > 1:
+                new = np.mean(new, axis=1)
+            parts.append(new)
+
+        if not parts:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(parts) if len(parts) > 1 else parts[0]
+
     def queue_chunk(self, a_file, chunk: tuple[float, float], force_last: bool = False):
-        sample_from = int(chunk[0] * a_file.track.samplerate)
-        sample_to = int(chunk[1] * a_file.track.samplerate)
+        """Read, resample and pad one chunk for the analyzers.
+
+        The chunk is read together with enough of the audio after it to fill
+        the session, not padded with silence. A frame's input runs past the
+        frame -- 15 ms on a YAMNet-framed model, nearly a whole frame more on
+        heavy_v1 (samples_min is 30719) -- so the last frame of a chunk padded
+        with zeros is computed against silence that is not in the file, and
+        moves by up to ~0.5 on heavy_v1 at every seam. That made a result
+        depend on the chunk length. With the look-ahead, every frame sees the
+        audio a whole-file pass would give it, and only the end of the file is
+        padded. The look-ahead is input only: the frames returned are still
+        those of the chunk's own audio (n_samples), so nothing is reported
+        twice.
+        """
+        rate_in = a_file.track.samplerate
+        # Rounded, not truncated: chunk times are decimal seconds, and
+        # 267.84 * 44100 comes out at 11811743.999999998. int() put about one
+        # chunk start in twenty a sample early at 44.1/48 kHz, which shifts
+        # every frame in that chunk off the file's frame grid -- through the
+        # resampler that moved heavy_v1 by up to 1.0. Contiguous chunks still
+        # meet exactly, since both ends go through the same expression.
+        sample_from = round(chunk[0] * rate_in)
+        sample_to = round(chunk[1] * rate_in)
         read_size = sample_to - sample_from
 
+        # Native samples that, resampled, fill the session behind the chunk.
+        # One spare sample, since the two lengths are rounded separately.
+        n_chunk_out = resampled_length(read_size, rate_in, self.resample_rate)
+        lookahead = max(0, -(-(self.samples_session - n_chunk_out) * rate_in // self.resample_rate) + 1)
+
         t0 = now()
-        a_file.track.seek(sample_from)
-        samples = a_file.track.read(read_size, dtype=np.float32)
+        span = self._read_span(a_file, sample_from, sample_to + lookahead)
         t1 = now()
-        if a_file.track.channels > 1:
-            samples = np.mean(samples, axis=1)
+        samples = span[:read_size]
+        self._carry = span[read_size:]
+        self._carry_from = sample_to
         t2 = now()
 
         n_samples = len(samples)
@@ -153,16 +229,21 @@ class WorkerStreamer:
         # soxr directly rather than librosa.resample, which is a thin wrapper
         # over this same call (res_type='soxr_hq') but drags numba/llvmlite/scipy
         # in with it -- a few hundred MB of dependency for one function.
-        samples = soxr.resample(samples, a_file.track.samplerate, self.resample_rate, quality=self.resample_quality)
-        samples = samples.astype(np.float32)
+        # The chunk and its look-ahead in one call, so the resampler runs
+        # straight through the seam rather than ending on the chunk's last
+        # sample. n_audio is what the chunk alone would have resampled to.
+        n_audio = resampled_length(n_samples, rate_in, self.resample_rate)
+        samples = soxr.resample(span if continue_file else samples, rate_in, self.resample_rate,
+                                quality=self.resample_quality)
+        samples = samples[:self.samples_session].astype(np.float32)
         # after resampling, where there are usually fewer samples to scale.
         # Not clipped: the model takes float input with no ceiling.
         if self.gain != 1:
             samples *= np.float32(self.gain)
         t3 = now()
 
-        # pad here rather than in the analyzer, which should only ever run the model
-        n_audio = len(samples)
+        # pad here rather than in the analyzer, which should only ever run the model;
+        # only the end of the file still gets any
         samples = self.model.pad(samples, self.samples_session)
         t_pad = now() - t3
 
@@ -184,6 +265,8 @@ class WorkerStreamer:
         return continue_file
 
     def stream_to_queue(self, a_file: AssignFile):
+        self._carry = None
+        self._carry_from = None
         try:
             t_open = now()
             self._chunk_file(a_file)
