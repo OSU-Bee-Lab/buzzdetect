@@ -1,0 +1,55 @@
+cff-version: 1.2.0
+message: "If you use buzzdetect, please cite the paper for the method and the Zenodo record for the version you used."
+title: "buzzdetect"
+type: software
+abstract: >-
+  buzzdetect is a tool for passive acoustic monitoring of pollinator activity.
+  It uses machine learning to analyze audio and identify the buzz of insect
+  flight, enabling highly scalable, temporally rich observation.
+authors:
+  - family-names: "Hearon"
+    given-names: "Luke"
+    orcid: "https://orcid.org/0009-0004-3775-0849"
+    affiliation: "The Ohio State University"
+repository-code: "https://github.com/OSU-Bee-Lab/buzzdetect"
+url: "https://buzzdetect.readthedocs.io/en/latest/"
+license: MIT
+version: "2.1.0"  # set by scripts/sync-version.mjs (npm version)
+date-released: "2026-10-06"  # set by scripts/sync-version.mjs (npm version)
+keywords:
+  - bioacoustics
+  - passive acoustic monitoring
+  - pollinators
+  - machine learning
+# this is the concepts DOI representing all versions
+doi: "10.5281/zenodo.15537954"
+
+
+preferred-citation:
+  type: article
+  title: "buzzdetect: an open-source deep learning tool for automated bioacoustic pollinator monitoring"
+  authors:
+    - family-names: "Hearon"
+      given-names: "Luke E."
+      orcid: "https://orcid.org/0009-0004-3775-0849"
+    - family-names: "Johnson"
+      given-names: "Lillian H. P."
+      orcid: "https://orcid.org/0009-0009-9286-2305"
+    - family-names: "Underwood"
+      given-names: "James"
+      orcid: "https://orcid.org/0009-0007-0206-9115"
+    - family-names: "Lin"
+      given-names: "Chia-Hua"
+      orcid: "https://orcid.org/0000-0003-4508-7616"
+    - family-names: "Johnson"
+      given-names: "Reed M."
+      orcid: "https://orcid.org/0000-0002-2431-0180"
+  journal: "Journal of Insect Science"
+  year: 2025
+  month: 12
+  volume: 25
+  issue: 6
+  number: "ieaf104"   # article number; CFF's `pages` is a page count, not a range
+  issn: "1536-2442"
+  doi: "10.1093/jisesa/ieaf104"
+  url: "https://doi.org/10.1093/jisesa/ieaf104"
