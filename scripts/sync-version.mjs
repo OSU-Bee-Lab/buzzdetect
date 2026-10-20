@@ -31,4 +31,16 @@ writeFileSync(
 	)
 );
 
-console.log(`Synced version ${version} -> tauri.conf.json, Cargo.toml, Cargo.lock`);
+// CITATION.cff carries the version and release date too; Zenodo reads it when
+// the release is published. The date is the day `npm version` runs, which is
+// the day the tag is made. The regexes leave the trailing comments alone.
+const citationPath = resolve(root, 'CITATION.cff');
+const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local time
+writeFileSync(
+	citationPath,
+	readFileSync(citationPath, 'utf8')
+		.replace(/^version: ".*?"/m, `version: "${version}"`)
+		.replace(/^date-released: ".*?"/m, `date-released: "${today}"`)
+);
+
+console.log(`Synced version ${version} -> tauri.conf.json, Cargo.toml, Cargo.lock, CITATION.cff`);
