@@ -14,8 +14,8 @@ authors:
 repository-code: "https://github.com/OSU-Bee-Lab/buzzdetect"
 url: "https://buzzdetect.readthedocs.io/en/latest/"
 license: MIT
-version: "2.1.0"  # set by scripts/sync-version.mjs (npm version)
-date-released: "2026-10-06"  # set by scripts/sync-version.mjs (npm version)
+version: "2.2.0"  # set by scripts/sync-version.mjs (npm version)
+date-released: "2026-10-20"  # set by scripts/sync-version.mjs (npm version)
 keywords:
   - bioacoustics
   - passive acoustic monitoring
