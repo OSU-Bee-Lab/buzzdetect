@@ -54,3 +54,6 @@ autodoc_default_options = {
     # 'inherited-members': True,
     # 'show-inheritance': True,
 }
+
+html_static_path = ['_static']
+html_css_files = ['custom.css']

@@ -12,8 +12,10 @@ Desktop app
 
 To get the desktop app, all you have to do is download the installer for your platform and run it.
 The application ships with everything you need to start running analyses right out the gate.
-Other models can be downloaded from inside the app.
 See :doc:`gui` for a walkthrough of using the app.
+
+Downloads
+^^^^^^^^^^
 
 .. |badge-macos-arm| image:: https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000?style=for-the-badge&logo=apple&logoColor=white
    :target: https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-macOS-AppleSilicon.dmg
@@ -35,11 +37,44 @@ See :doc:`gui` for a walkthrough of using the app.
    :target: https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-Linux.deb
    :alt: Download for Linux (.deb)
 
-|badge-macos-arm| |badge-macos-intel| |badge-windows| |badge-windows-cuda| |badge-linux-deb|
+**Windows**
 
-All builds are attached to the `latest GitHub release <https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest>`_.
+.. rst-class:: download-badge
 
-If you have an NVIDIA GPU or an Apple Silicon Mac, see :doc:`gpu` for how to use it.
+|badge-windows|
+
+Most Windows users should download this version, unless they have an NVIDIA graphics card that's CUDA-capable.
+
+.. rst-class:: download-badge
+
+|badge-windows-cuda|
+
+Use this download if you have a CUDA-capable GPU that you want to run your analyses on.
+See :doc:`gpu` for using your GPU.
+
+**macOS**
+
+.. rst-class:: download-badge
+
+|badge-macos-arm|
+
+On newer Apple machines with an "M" chip, use this download.
+This version supports accelerated processing with Metal; see :doc:`gpu` for use.
+
+.. rst-class:: download-badge
+
+|badge-macos-intel|
+
+If you're on an older Apple machine with an Intel processor, use this download.
+
+**Linux**
+
+.. rst-class:: download-badge
+
+|badge-linux-deb|
+
+Only one option for you. It's big, sorry.
+
 
 macOS woes
 ^^^^^^^^^^^
