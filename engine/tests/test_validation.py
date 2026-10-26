@@ -117,6 +117,18 @@ class TestChunklength(unittest.TestCase):
                 self.assertFalse(v.validate_chunklength(bad).valid)
 
 
+class TestGain(unittest.TestCase):
+    def test_any_positive_multiplier_passes(self):
+        for gain in (0.001, 0.5, 1, 4, 1000):
+            with self.subTest(gain=gain):
+                self.assertTrue(v.validate_gain(gain).valid)
+
+    def test_zero_negative_and_non_numeric_are_refused(self):
+        for gain in (0, -1, float('inf'), float('nan'), 'loud'):
+            with self.subTest(gain=gain):
+                self.assertFalse(v.validate_gain(gain).valid)
+
+
 class TestInt(unittest.TestCase):
     def test_bounds_are_inclusive(self):
         self.assertTrue(v.validate_int(0, none_ok=False, value_min=0, value_max=1).valid)

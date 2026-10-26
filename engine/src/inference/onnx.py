@@ -78,14 +78,15 @@ def allow_fp16():
 
 
 def fp16_supported(provider):
-    """Whether reduced precision does anything for this provider.
+    """Whether reduced precision can do anything for this provider.
 
-    Only CoreML, for now. The CUDA and ROCm providers take precision from the
-    model's own dtype, so an fp16 graph would run in fp16 on them too -- but
-    nobody has measured whether that is a win there, and on the one card it was
-    tried (GTX 1650) fp16 ran at half speed.
+    Any GPU provider. CoreML needs different options to reach the Neural Engine
+    (COREML_FP16); CUDA and ROCm take precision from the graph's own dtype, so
+    handing them the fp16 sibling is all it takes. Whether that is a win depends
+    on the card: one without tensor cores (a GTX 1650 was tried) ran fp16 at
+    half speed, but that is the user's call, not ours.
     """
-    return provider == 'CoreMLExecutionProvider'
+    return provider != 'CPUExecutionProvider'
 
 
 def gpu_providers_available():
@@ -117,7 +118,7 @@ def providers_for(processor):
         if name not in available:
             continue
         options = dict(options)
-        if allow_fp16() and fp16_supported(name):
+        if allow_fp16() and name == 'CoreMLExecutionProvider':
             options = dict(COREML_FP16)
         return [name, 'CPUExecutionProvider'], [options, {}]
 
@@ -175,8 +176,25 @@ def make_session(path_onnx, processor, samples):
 
     so = ort.SessionOptions()
     so.add_free_dimension_override_by_name(DIM_SAMPLES, samples)
-    session = ort.InferenceSession(path_for(path_onnx, processor), so,
-                                   providers=requested, provider_options=options)
+    path = path_for(path_onnx, processor)
+    try:
+        session = ort.InferenceSession(path, so, providers=requested,
+                                       provider_options=options)
+    except Exception as e:
+        if path == path_onnx:
+            raise
+        # An fp16 graph exported before buzzdetect-training's unfuse_conv_relu
+        # carries fp16 FusedConv nodes, which nothing on an x86 CUDA machine
+        # has a kernel for. Full precision, with full-precision options, is
+        # always loadable.
+        _warn_once(
+            'fp16-failed',
+            f'The reduced-precision graph would not load ({str(e).splitlines()[0][:200]}). '
+            'Running at full precision; updating the model may fix this.'
+        )
+        options = [dict(dict(GPU_PROVIDERS)[requested[0]]), {}]
+        session = ort.InferenceSession(path_onnx, so, providers=requested,
+                                       provider_options=options)
 
     if processor == 'GPU' and requested[0] != 'CPUExecutionProvider':
         got = session.get_providers()

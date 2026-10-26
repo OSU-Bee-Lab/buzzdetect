@@ -1,0 +1,5 @@
+/* Pull a download badge close to the description beneath it. */
+p.download-badge {
+    margin-bottom: 8px;
+    line-height: 0;
+}

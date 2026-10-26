@@ -26,6 +26,8 @@ export interface Settings {
 	logProgress: boolean;
 	benchmark: boolean;
 	fullQualityDecode: boolean;
+	// Multiplier on the audio before it reaches the model; must be > 0.
+	gain: number;
 }
 
 const STORAGE_KEY = 'buzzdetect.settings';
@@ -48,7 +50,8 @@ function defaults(): Settings {
 		verbosityLog: 'DEBUG',
 		logProgress: false,
 		benchmark: false,
-		fullQualityDecode: false
+		fullQualityDecode: false,
+		gain: 1
 	};
 }
 
@@ -79,11 +82,15 @@ function load(): Settings {
 
 class SettingsStore {
 	value = $state<Settings>(load());
+	// While the panel is showing a queued run, `value` is that run's settings
+	// and the user's own are parked here. They are what gets persisted, so
+	// editing a queued run never becomes the app's remembered settings.
+	draft: Settings | null = null;
 
 	save() {
 		if (typeof localStorage === 'undefined') return;
 		try {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify(this.value));
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(this.draft ?? this.value));
 		} catch {
 			// best-effort; a private window or full storage just means no persistence
 		}

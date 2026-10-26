@@ -14,8 +14,8 @@
 //! in the user store with the same name.
 
 use super::{
-    list_models, model_dir, user_models_dir, validate_model_dir, AnalysisState, ModelDetails,
-    IMPORT_FILES, MODEL_MARKER, README,
+    cached_readme_path, is_license_file, is_model_file, list_models, model_dir, user_models_dir,
+    validate_model_dir, AnalysisState, ModelDetails, MODEL_MARKER, MODEL_ONNX, README,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -88,7 +88,7 @@ fn parse_catalog(bytes: &[u8]) -> Result<Catalog, String> {
         valid_name(&m.name)
             && m.files.contains_key("model.onnx")
             && m.files.contains_key(MODEL_MARKER)
-            && m.files.keys().all(|f| IMPORT_FILES.contains(&f.as_str()))
+            && m.files.keys().all(|f| is_model_file(f))
     });
     Ok(catalog)
 }
@@ -511,11 +511,39 @@ pub fn set_model_disabled(app: AppHandle, name: String, disabled: bool) -> Resul
     Ok(())
 }
 
+/// Keep a fetched README for offline use. A model in the user store gets it
+/// written over its own README.md; a bundled one can't be written to (it's
+/// inside the signed app), so it goes to a cache that `model_details` prefers.
+/// Best effort: failing to save never fails the lookup.
+fn store_readme(app: &AppHandle, name: &str, readme: &str) {
+    let installed = user_models_dir(app)
+        .map(|d| d.join(name))
+        .filter(|d| d.join(MODEL_MARKER).is_file());
+    let dest = match installed {
+        Some(dir) if model_dir(app, name).as_deref() == Some(dir.as_path()) => dir.join(README),
+        _ => match cached_readme_path(app, name) {
+            Some(p) => p,
+            None => return,
+        },
+    };
+    if std::fs::read_to_string(&dest).is_ok_and(|old| old == readme) {
+        return;
+    }
+    if let Some(parent) = dest.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = dest.with_extension("md.tmp");
+    if std::fs::write(&tmp, readme).is_ok() && std::fs::rename(&tmp, &dest).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
 /// A catalog model's details, read from its release: the config (for the
 /// description) and the README. For an installed model the
-/// window shows its local config but this README, which may be newer.
+/// window shows its local config but this README, which may be newer; the
+/// README is also saved locally so it's there next time offline.
 #[tauri::command]
-pub async fn catalog_model_details(name: String) -> Result<ModelDetails, String> {
+pub async fn catalog_model_details(app: AppHandle, name: String) -> Result<ModelDetails, String> {
     let entry = catalog_entry(&name).await?;
     let config: serde_json::Value = serde_json::from_slice(
         &fetch(&asset_url(&entry.url, MODEL_MARKER), CATALOG_TIMEOUT).await?,
@@ -529,7 +557,23 @@ pub async fn catalog_model_details(name: String) -> Result<ModelDetails, String>
     } else {
         None
     };
-    Ok(ModelDetails::from_parts(&name, &config, readme))
+    if let Some(text) = &readme {
+        store_readme(&app, &name, text);
+    }
+    let mut details = ModelDetails::from_parts(&name, &config, readme);
+    details.sha256 = entry.files.get(MODEL_ONNX).and_then(|f| f.sha256.clone());
+    Ok(details)
+}
+
+/// A licence file of a model that isn't installed, from its release.
+#[tauri::command]
+pub async fn catalog_license_text(name: String, file: String) -> Result<String, String> {
+    let entry = catalog_entry(&name).await?;
+    if !is_license_file(&file) || !entry.files.contains_key(&file) {
+        return Err(format!("{name} has no {file}"));
+    }
+    String::from_utf8(fetch(&asset_url(&entry.url, &file), CATALOG_TIMEOUT).await?)
+        .map_err(|_| format!("{file} isn't text"))
 }
 
 #[cfg(test)]
@@ -578,12 +622,29 @@ mod tests {
             .insert("../../evil".into(), CatalogFile::default());
         let mut no_onnx = entry("no_onnx");
         no_onnx.files.remove("model.onnx");
+        let mut bad_licence = entry("bad_licence");
+        bad_licence
+            .files
+            .insert("LICENSE/../../evil".into(), CatalogFile::default());
+        let mut licensed = entry("licensed");
+        licensed
+            .files
+            .insert("LICENSE-yamnet".into(), CatalogFile::default());
+        licensed.files.insert("LICENSES.md".into(), CatalogFile::default());
         let catalog = Catalog {
-            models: vec![entry("ok"), entry("../escape"), entry(".hidden"), bad_file, no_onnx],
+            models: vec![
+                entry("ok"),
+                entry("../escape"),
+                entry(".hidden"),
+                bad_file,
+                no_onnx,
+                bad_licence,
+                licensed,
+            ],
         };
         let parsed = parse_catalog(&serde_json::to_vec(&catalog).unwrap()).unwrap();
         let names: Vec<_> = parsed.models.iter().map(|m| m.name.as_str()).collect();
-        assert_eq!(names, ["ok"]);
+        assert_eq!(names, ["ok", "licensed"]);
     }
 
     #[test]

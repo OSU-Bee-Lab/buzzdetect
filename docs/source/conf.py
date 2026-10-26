@@ -10,10 +10,10 @@ copyright = f'{datetime.now().year}, OSU Bee Lab'
 author = 'OSU Bee Lab'
 
 # The short X.Y version
-version = '1.0'
+version = '2.0'
 
 # The full version, including alpha/beta/rc tags
-release = '1.0.1'
+release = '2.0.0'
 
 
 # -- General configuration ---------------------------------------------------
@@ -54,3 +54,6 @@ autodoc_default_options = {
     # 'inherited-members': True,
     # 'show-inheritance': True,
 }
+
+html_static_path = ['_static']
+html_css_files = ['custom.css']

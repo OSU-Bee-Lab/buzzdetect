@@ -196,6 +196,17 @@ def validate_full_quality_decode(full_quality_decode: bool):
         value_max=1,
     )
 
+def validate_gain(gain: float):
+    try:
+        gain = float(gain)
+    except (TypeError, ValueError):
+        return ArgValid(False, "must be numeric")
+    if not math.isfinite(gain):
+        return ArgValid(False, "must be numeric")
+    if gain <= 0:
+        return ArgValid(False, "must be > 0")
+    return ArgValid(True, None)
+
 validate_map = {
     'modelname': validate_modelname,
     'classes_out': validate_classes_out,
@@ -213,4 +224,5 @@ validate_map = {
     'log_progress': validate_log_progress,
     'benchmark': validate_benchmark,
     'full_quality_decode': validate_full_quality_decode,
+    'gain': validate_gain,
 }

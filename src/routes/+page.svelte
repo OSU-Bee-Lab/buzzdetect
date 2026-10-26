@@ -5,12 +5,14 @@
 	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { documentDir, join } from '@tauri-apps/api/path';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
 	import { run, formatDuration, type TreeDir } from '$lib/progress.svelte';
-	import { settings, LOGLEVELS } from '$lib/settings.svelte';
+	import { settings, LOGLEVELS, type Settings } from '$lib/settings.svelte';
+	import { queue, isEditable, type QueueItem, type QueueStatus } from '$lib/queue.svelte';
+	import { baseName } from '$lib/paths';
 	import DirRow from '$lib/DirRow.svelte';
 	import FileRows from '$lib/FileRows.svelte';
 	import ProgressBar from '$lib/ProgressBar.svelte';
@@ -22,6 +24,7 @@
 		modelname: string;
 		classes_out: string[] | null;
 		full_quality_decode: boolean;
+		gain: number;
 	}
 
 	// Every installed model, disabled ones included.
@@ -151,12 +154,12 @@
 		const unlistenUse = listen<HistorySettings>('history-use', (e) => useHistorySettings(e.payload));
 		// A download, import, removal or ignore in the Models window.
 		const unlistenModels = listen('models-changed', async () => {
-			if (!(run.running || run.stopping)) await reloadModels();
+			if (!panelLocked) await reloadModels();
 			refreshModelsBadge();
 		});
 		// Use this model, from the Models window.
 		const unlistenUseModel = listen<string>('models-use', async (e) => {
-			if (run.running || run.stopping) return;
+			if (panelLocked) return;
 			if (!installed.some((m) => m.name === e.payload)) await reloadModels();
 			if (!installed.some((m) => m.name === e.payload)) return;
 			const from = settings.value.modelname;
@@ -168,7 +171,11 @@
 				flushOutput();
 				// The run may have created the output folder.
 				checkManifest();
-				if (!run.running) return;
+				if (!run.running) {
+					// Already stopped by a failed stop/kill request.
+					if (queue.current) finishQueueItem(true);
+					return;
+				}
 				// A cancelled engine is killed, so it exits by signal (null code) or
 				// non-zero -- expected, not an error worth showing.
 				const cancelled = run.stopping;
@@ -180,6 +187,7 @@
 						runtimeSeconds: sum.runtimeSeconds
 					}).catch(() => {});
 				}
+				finishQueueItem(cancelled);
 			})
 		);
 
@@ -188,7 +196,10 @@
 		Promise.all([unlistenProgress, unlistenLog, unlistenExit])
 			.then(() => invoke<RunSnapshot>('attach_analysis'))
 			.then((snap) => {
-				if (!snap.running) return;
+				if (!snap.running) {
+					queue.orphaned();
+					return;
+				}
 				run.reset(snap.started_at_ms);
 				hasStarted = true;
 				hasAutoExpanded = false;
@@ -197,7 +208,7 @@
 				for (const l of snap.logs) run.handleLog(l.line, l.seq);
 				for (const ev of snap.events) run.handleEvent(ev);
 			})
-			.catch(() => {})
+			.catch(() => queue.orphaned())
 			.finally(() => {
 				const queued = held ?? [];
 				held = null;
@@ -211,9 +222,9 @@
 					settings.value.analyzersGpu = 0;
 					settings.save();
 				}
-				// fp16 only affects Apple's Neural Engine (see the setting's
-				// tooltip), so default it on for a CoreML-capable machine unless
-				// the user has already made a choice of their own.
+				// fp16 is a reliable win only on Apple's Neural Engine; on NVIDIA
+				// it depends on the card. So default it on for a CoreML-capable
+				// machine unless the user has already made a choice of their own.
 				if (
 					status.usable &&
 					!settings.value.gpuFp16Touched &&
@@ -316,6 +327,7 @@
 		if (!manifest || manifest.modelname !== settings.value.modelname) return;
 		if (manifest.classes_out) settings.value.classesOut = manifest.classes_out;
 		settings.value.fullQualityDecode = manifest.full_quality_decode;
+		settings.value.gain = manifest.gain;
 		settings.save();
 	}
 
@@ -453,7 +465,7 @@
 	// A model that has since been deleted leaves the picker blank; Launch
 	// waits for one to be chosen. A disabled one is still installed, so it's used.
 	async function useHistorySettings(h: HistorySettings) {
-		if (run.running || run.stopping) return;
+		if (panelLocked) return;
 		installed = await invoke<ModelInfo[]>('list_models').catch(() => installed);
 		const v = settings.value;
 		v.modelname = installed.some((m) => m.name === h.modelname) ? h.modelname : '';
@@ -475,27 +487,29 @@
 		if (h.log_progress !== undefined) v.logProgress = h.log_progress;
 		if (h.benchmark !== undefined) v.benchmark = h.benchmark;
 		if (h.full_quality_decode !== undefined) v.fullQualityDecode = h.full_quality_decode;
+		if (h.gain !== undefined) v.gain = h.gain;
 		settings.save();
 		await onModelChange();
 	}
 
-	function launchSettings() {
+	function launchSettings(s: Settings = settings.value) {
 		return {
-			modelname: settings.value.modelname,
-			dir_audio: settings.value.dirAudio,
-			dir_out: settings.value.dirOut,
-			classes_out: settings.value.classesOut,
-			chunklength: settings.value.chunklength,
-			analyzers_cpu: settings.value.analyzersCpu,
-			analyzers_gpu: settings.value.analyzersGpu,
-			gpu_fp16: settings.value.gpuFp16,
-			n_streamers: settings.value.nStreamers,
-			stream_buffer_depth: settings.value.streamBufferDepth,
-			verbosity_print: settings.value.verbosityPrint,
-			verbosity_log: settings.value.verbosityLog,
-			log_progress: settings.value.logProgress,
-			benchmark: settings.value.benchmark,
-			full_quality_decode: settings.value.fullQualityDecode
+			modelname: s.modelname,
+			dir_audio: s.dirAudio,
+			dir_out: s.dirOut,
+			classes_out: s.classesOut,
+			chunklength: s.chunklength,
+			analyzers_cpu: s.analyzersCpu,
+			analyzers_gpu: s.analyzersGpu,
+			gpu_fp16: s.gpuFp16,
+			n_streamers: s.nStreamers,
+			stream_buffer_depth: s.streamBufferDepth,
+			verbosity_print: s.verbosityPrint,
+			verbosity_log: s.verbosityLog,
+			log_progress: s.logProgress,
+			benchmark: s.benchmark,
+			full_quality_decode: s.fullQualityDecode,
+			gain: s.gain
 		};
 	}
 
@@ -514,19 +528,184 @@
 			startError = 'Select at least one class to output.';
 			return;
 		}
+		await launch(settings.value);
+	}
+
+	// Resolves to whether the engine was started.
+	async function launch(s: Settings): Promise<boolean> {
 		pending = [];
 		run.reset();
 		hasStarted = true;
 		hasAutoExpanded = false;
 		expanded.clear();
 		filesVisible = true;
-		startedKey = launchKey;
+		startedKey = JSON.stringify(launchSettings(s));
 		try {
-			await invoke('start_analysis', { settings: launchSettings() });
+			await invoke('start_analysis', { settings: launchSettings(s) });
+			return true;
 		} catch (e) {
 			startError = String(e);
 			run.stop(startError);
+			return false;
 		}
+	}
+
+	// --- Run queue ---------------------------------------------------------
+
+	const busy = $derived(run.running || run.stopping);
+	// The panel is frozen while it shows a run that has started (or finished),
+	// and during a run launched on its own. During a queued run with nothing
+	// selected it shows the user's own settings, free to edit and queue more.
+	const panelLocked = $derived(
+		queue.selected ? !isEditable(queue.selected) : busy && !queue.current
+	);
+	// An emptied number input binds as null, which isFinite also refuses.
+	const gainValid = $derived(Number.isFinite(settings.value.gain) && settings.value.gain > 0);
+	const draftValid = $derived(
+		!!settings.value.dirAudio &&
+			!!settings.value.modelname &&
+			settings.value.classesOut.length > 0 &&
+			gainValid &&
+			!modelMismatch
+	);
+
+	// Edits to a selected, still-editable queued run land in its queue entry.
+	// Only settings.value may be tracked here. queue.save() snapshots every
+	// item, so tracked it would subscribe this effect to the item.settings it
+	// has just written, and the effect would re-run itself until Svelte gave up
+	// with effect_update_depth_exceeded -- which also abandons the batch the
+	// page's own render effects were in, freezing the whole UI.
+	$effect(() => {
+		const snap = $state.snapshot(settings.value) as Settings;
+		untrack(() => {
+			const item = queue.selected;
+			if (!item || !isEditable(item)) return;
+			item.settings = snap;
+			queue.save();
+		});
+	});
+
+	async function selectQueued(id: number) {
+		if (queue.selectedId === id) return deselectQueued();
+		const item = queue.items.find((i) => i.id === id);
+		if (!item) return;
+		if (queue.selectedId === null) settings.draft = $state.snapshot(settings.value) as Settings;
+		queue.selectedId = id;
+		settings.value = structuredClone($state.snapshot(item.settings)) as Settings;
+		modelBeforeChange = settings.value.modelname;
+		await onModelChange();
+	}
+
+	async function deselectQueued() {
+		if (queue.selectedId === null) return;
+		queue.selectedId = null;
+		if (settings.draft) settings.value = settings.draft;
+		settings.draft = null;
+		modelBeforeChange = settings.value.modelname;
+		settings.save();
+		await onModelChange();
+	}
+
+	async function removeQueued(id: number) {
+		if (queue.selectedId === id) await deselectQueued();
+		queue.remove(id);
+	}
+
+	async function addToQueue() {
+		startError = null;
+		if (busy && !queue.current) {
+			// A run launched on its own becomes the head of the queue, and the
+			// new entry starts as a copy of it, opened for editing.
+			const head = queue.add($state.snapshot(settings.value) as Settings, 'running');
+			queue.active = true;
+			queue.save();
+			const copy = queue.add(head.settings);
+			await selectQueued(copy.id);
+			return;
+		}
+		queue.add($state.snapshot(settings.value) as Settings);
+	}
+
+	async function runQueue() {
+		startError = null;
+		queue.active = true;
+		queue.save();
+		await startQueued(queue.next());
+	}
+
+	// Starts `item`, or, if the engine refuses it, marks it errored and moves
+	// on to the next. An error never stops the queue; only Stop does.
+	async function startQueued(item: QueueItem | undefined) {
+		while (item && queue.active) {
+			queue.setStatus(item.id, 'running');
+			if (await launch(item.settings)) return;
+			queue.finish(item.id, {
+				status: 'error',
+				weights: null,
+				summary: null,
+				error: startError
+			});
+			item = queue.next(item.id);
+		}
+		queue.active = false;
+		queue.save();
+	}
+
+	// Set while the running item is being stopped on purpose to move on to the
+	// next one, as opposed to Stop Queue, which ends the whole batch.
+	let skipping = false;
+	let confirmSkip = $state(false);
+
+	async function skipCurrent() {
+		confirmSkip = false;
+		if (!queue.current || run.stopping) return;
+		skipping = true;
+		await cancel();
+	}
+
+	function finishQueueItem(cancelled: boolean) {
+		const item = queue.current;
+		if (!item) return;
+		const skipped = skipping;
+		skipping = false;
+		// The run the modal asked about is over; don't let it skip the next one.
+		confirmSkip = false;
+		const t = run.tree;
+		const status: QueueStatus = run.error ? 'error' : cancelled ? 'stopped' : 'done';
+		queue.finish(item.id, {
+			status,
+			weights: {
+				totalSeconds: t.totalSeconds,
+				priorSeconds: t.priorSeconds,
+				doneSeconds: t.doneSeconds,
+				activeSeconds: t.activeSeconds
+			},
+			summary: run.summary,
+			error: run.error
+		});
+		if (cancelled && !skipped) {
+			queue.active = false;
+			queue.save();
+			return;
+		}
+		if (queue.active) startQueued(queue.next(item.id));
+	}
+
+	const QUEUE_STATUS_LABELS: Record<QueueStatus, string> = {
+		pending: 'Queued',
+		running: 'Running',
+		done: 'Done',
+		stopped: 'Stopped',
+		error: 'Error'
+	};
+
+	const EMPTY_WEIGHTS = { totalSeconds: 0, priorSeconds: 0, doneSeconds: 0, activeSeconds: 0 };
+
+	const selectedIndex = $derived(queue.items.findIndex((i) => i.id === queue.selectedId));
+
+	async function stopQueue() {
+		if (!run.stopping) skipping = false;
+		await cancel();
 	}
 
 	async function cancel() {
@@ -642,9 +821,29 @@
 		style="left: {tooltipX}px; top: {tooltipY}px; max-width: {tooltipMaxWidth}px;"
 	>{tooltipText}</div>
 {/if}
-<div class="panels" style="grid-template-columns: {settingsWidth}px 6px 1fr">
+<div
+	class="panels"
+	style="grid-template-columns: {settingsWidth}px 6px 1fr{queue.items.length > 0 ? ' 240px' : ''}"
+>
 	<section class="settings">
-		<h2>Settings</h2>
+		<div class="settings-head">
+			<h2>
+				{#if queue.selected}
+					Queued run {selectedIndex + 1}
+				{:else}
+					Settings
+				{/if}
+			</h2>
+			{#if queue.selected}
+				<button type="button" class="back-btn" onclick={deselectQueued}>Done</button>
+			{/if}
+		</div>
+		{#if queue.selected && !isEditable(queue.selected)}
+			<p class="hint frozen-hint">
+				{queue.selected.status === 'running' ? 'This run has started' : 'This run has finished'}; its
+				settings can't be changed.
+			</p>
+		{/if}
 		<div class="settings-body">
 			<!-- Kept outside settings-fields: View Models must stay usable during a
 			     run (the model page is read-only) even though the model can't be changed. -->
@@ -661,7 +860,7 @@
 				<span class="model-row">
 					<select
 						id="model-select"
-						disabled={run.running || run.stopping}
+						disabled={panelLocked}
 						bind:value={settings.value.modelname}
 						onchange={() => {
 							onModelChange(modelBeforeChange);
@@ -683,7 +882,7 @@
 					<span class="error">{modelActionError}</span>
 				{/if}
 			</label>
-			<fieldset class="settings-fields" disabled={run.running || run.stopping}>
+			<fieldset class="settings-fields" disabled={panelLocked}>
 		<label class:field-error={!settings.value.dirAudio}>
 			<span class="label-text">Audio directory <span class="qmark" data-tooltip="Input folder containing audio files to analyze.">?</span></span>
 			<span class="path-row">
@@ -823,8 +1022,8 @@ If you're using GPU, you probably don't want any CPU analyzers."
 					Reduced precision (fp16)
 					<span
 						class="qmark"
-						data-tooltip="Runs the model at half precision on Apple's Neural Engine, which is about twice as fast but shifts results by roughly 0.015 against a full-precision run.
-Results from a reduced-precision run are not directly comparable with full-precision ones near a detection threshold. Currently affects Apple GPUs only."
+						data-tooltip="Runs the model at half precision on the GPU. On Apple silicon this uses the Neural Engine and is about twice as fast; on NVIDIA it is usually faster on RTX cards (which have tensor cores) and can be slower on older ones. Either way it shifts results by roughly 0.015 against a full-precision run.
+Results from a reduced-precision run are not directly comparable with full-precision ones near a detection threshold."
 					>
 						?
 					</span>
@@ -936,6 +1135,27 @@ Locked once an output folder has results, since mixing the two in one folder wou
 					?
 				</span>
 			</label>
+			<label class:locked={manifestLocked}>
+				<span class="label-text">
+					Gain
+					<span
+						class="qmark"
+						data-tooltip="Multiplies the audio's amplitude before analysis, without changing the source files.
+0.5 halves the volume, 4 quadruples it; 1 leaves it unchanged.
+Locked once an output folder has results, since results at different gains aren't comparable."
+					>
+						?
+					</span>
+				</span>
+				<input
+					type="number"
+					min="0"
+					step="any"
+					disabled={manifestLocked}
+					bind:value={settings.value.gain}
+					oninput={() => settings.save()}
+				/>
+			</label>
 		</details>
 
 		</fieldset>
@@ -944,21 +1164,27 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		<div class="settings-actions">
 			<div class="action-row">
 				<button type="button" class="history-btn" onclick={openHistory}>History</button>
-				{#if run.running || run.stopping}
-					<button class="danger" onclick={cancel}>
-						{run.stopping ? 'Force Stop' : 'Stop Analysis'}
-					</button>
-				{:else}
+				{#if !queue.selected}
 					<button
-						onclick={start}
-						disabled={!settings.value.dirAudio ||
-							!settings.value.modelname ||
-							settings.value.classesOut.length === 0 ||
-							modelMismatch}>{canRestart ? 'Restart Analysis' : 'Launch Analysis'}</button
+						type="button"
+						class="queue-btn"
+						onclick={addToQueue}
+						disabled={!draftValid}>Add to Queue</button
+					>
+				{/if}
+				{#if busy}
+					<button class="danger" onclick={stopQueue}>
+						{run.stopping ? 'Force Stop' : queue.items.length > 0 ? 'Stop Queue' : 'Stop Analysis'}
+					</button>
+				{:else if queue.hasRunnable}
+					<button onclick={runQueue}>Run Queue</button>
+				{:else}
+					<button onclick={start} disabled={!draftValid}
+						>{canRestart ? 'Restart Analysis' : 'Launch Analysis'}</button
 					>
 				{/if}
 			</div>
-			{#if !(run.running || run.stopping)}
+			{#if !panelLocked}
 				{#if modelMismatch}
 					<p class="error">
 						Results have already been written to this output folder with model "{manifest?.modelname}".
@@ -967,6 +1193,9 @@ Locked once an output folder has results, since mixing the two in one folder wou
 				{/if}
 				{#if settings.value.classesOut.length === 0}
 					<p class="error">Select at least one class to output.</p>
+				{/if}
+				{#if !gainValid}
+					<p class="error">Gain must be a number greater than 0.</p>
 				{/if}
 				{#if !settings.value.dirAudio || !settings.value.dirOut}
 					<p class="hint">Set audio and output directories to begin.</p>
@@ -1085,13 +1314,90 @@ Locked once an output folder has results, since mixing the two in one folder wou
 								{installing ? 'Installing…' : 'Install and restart'}
 							</button>
 						{/if}
-						{#if installError}<span class="update-error">{installError}</span>{/if}
+						{#if installError}<span class="update-error" title={installError}>{installError}</span>{/if}
 					{/if}
 				</div>
 			{/if}
 		</div>
 	</section>
+
+	{#if queue.items.length > 0}
+		<section class="queue">
+			<h2>Queue</h2>
+			<ol class="queue-list">
+				{#each queue.items as item, i (item.id)}
+					<li
+						class="queue-item"
+						class:selected={item.id === queue.selectedId}
+						class:running={item.status === 'running'}
+					>
+						<button type="button" class="queue-select" onclick={() => selectQueued(item.id)}>
+							<span class="queue-title">
+								<span class="queue-num">{i + 1}.</span>
+								{baseName(item.settings.dirAudio) || '(no audio folder)'}
+							</span>
+							<span class="queue-meta">
+								<span class="queue-status status-{item.status}"
+									>{QUEUE_STATUS_LABELS[item.status]}</span
+								>
+								· {item.settings.modelname}
+							</span>
+							{#if item.status === 'running'}
+								<ProgressBar weights={tree} provisional={!run.denominatorFinal} />
+							{:else}
+								<ProgressBar weights={item.weights ?? EMPTY_WEIGHTS} />
+							{/if}
+							{#if item.status === 'done' && item.summary}
+								<span class="queue-meta">{formatDuration(item.summary.audioSeconds)} analyzed</span>
+							{:else if item.status === 'error' && item.error}
+								<span class="queue-meta error">{item.error}</span>
+							{/if}
+						</button>
+						{#if item.status !== 'running'}
+							<button
+								type="button"
+								class="queue-delete"
+								aria-label="Remove from queue"
+								onclick={() => removeQueued(item.id)}>×</button
+							>
+						{:else if !run.stopping}
+							<button
+								type="button"
+								class="queue-delete"
+								aria-label="Skip current run"
+								onclick={() => (confirmSkip = true)}>×</button
+							>
+						{/if}
+					</li>
+				{/each}
+			</ol>
+		</section>
+	{/if}
 </div>
+
+{#if confirmSkip}
+	<div class="modal-backdrop" role="presentation" onclick={() => (confirmSkip = false)}>
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="skip-title"
+			tabindex="-1"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.key === 'Escape' && (confirmSkip = false)}
+		>
+			<h2 id="skip-title">Skip Current Run</h2>
+			<p>
+				Are you sure you want to stop the current run? This will leave partial files and proceed
+				to the next queue item.
+			</p>
+			<div class="modal-actions">
+				<button type="button" onclick={() => (confirmSkip = false)}>Cancel</button>
+				<button type="button" class="danger" onclick={skipCurrent}>Stop Run</button>
+			</div>
+		</div>
+	</div>
+{/if}
 </main>
 
 <style>
@@ -1133,9 +1439,167 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		box-sizing: border-box;
 	}
 
-	.settings h2 {
+	.settings-head {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
 		margin: 0 0 0.5rem 0;
 		flex-shrink: 0;
+	}
+
+	.settings h2 {
+		margin: 0;
+	}
+
+	.back-btn {
+		margin-left: auto;
+		padding: 0.15rem 0.6rem;
+		font-size: 0.8rem;
+	}
+
+	.frozen-hint {
+		margin: 0 0 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.queue {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		min-width: 0;
+		margin-left: 1rem;
+		padding-left: 1rem;
+		border-left: 2px solid rgba(127, 127, 127, 0.3);
+	}
+
+	.queue h2 {
+		margin: 0 0 0.5rem 0;
+		flex-shrink: 0;
+	}
+
+	.queue-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+
+	.queue-item {
+		position: relative;
+	}
+
+	.queue-select {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		width: 100%;
+		text-align: left;
+		background: transparent;
+	}
+
+	.queue-item.selected .queue-select {
+		border-color: #4c8dff;
+		background: rgba(76, 141, 255, 0.1);
+	}
+
+	.queue-title {
+		font-size: 0.85rem;
+		font-weight: 600;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		padding-right: 1.2rem;
+	}
+
+	.queue-num {
+		opacity: 0.5;
+		font-weight: 400;
+	}
+
+	.queue-meta {
+		font-size: 0.75rem;
+		opacity: 0.7;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.queue-meta.error {
+		opacity: 1;
+	}
+
+	.status-running {
+		color: #4c8dff;
+	}
+
+	.status-done {
+		color: #4caf50;
+	}
+
+	.status-stopped {
+		color: #c98a2b;
+	}
+
+	.status-error {
+		color: #d33;
+	}
+
+	.queue-delete {
+		position: absolute;
+		top: 0.25rem;
+		right: 0.25rem;
+		padding: 0 0.35rem;
+		line-height: 1.2;
+		font-size: 0.9rem;
+		opacity: 0;
+		background: transparent;
+		border-color: transparent;
+	}
+
+	.queue-item:hover .queue-delete,
+	.queue-delete:focus-visible {
+		opacity: 0.8;
+	}
+
+	.queue-delete:hover {
+		opacity: 1;
+		color: #d33;
+	}
+
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.45);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+	}
+
+	.modal {
+		background: Canvas;
+		color: CanvasText;
+		border: 1px solid rgba(127, 127, 127, 0.4);
+		border-radius: 8px;
+		padding: 1.25rem;
+		max-width: 26rem;
+	}
+
+	.modal h2 {
+		margin: 0 0 0.5rem 0;
+	}
+
+	.modal p {
+		margin: 0 0 1rem 0;
+	}
+
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
 	}
 
 	.settings-body {
@@ -1143,7 +1607,11 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		min-height: 0;
 		overflow-y: auto;
 		overflow-x: hidden;
-		padding-right: 0.25rem;
+		/* The scroll box clips at its edges, and .field-error's outline and the
+		   Models badge both stick out ~3px; this gutter makes room for them and
+		   the negative margin keeps the contents where they were. */
+		padding: 4px 0.25rem 4px 4px;
+		margin: -4px 0 -4px -4px;
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
@@ -1267,7 +1735,8 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		color: rgba(127, 127, 127, 0.9);
 	}
 
-	label.checkbox.locked {
+	label.checkbox.locked,
+	.advanced label.locked {
 		color: rgba(127, 127, 127, 0.9);
 	}
 
@@ -1422,7 +1891,8 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		min-width: 0;
 	}
 
-	.settings-actions .history-btn {
+	.settings-actions .history-btn,
+	.settings-actions .queue-btn {
 		flex: 0 0 auto;
 		font-size: 0.8rem;
 		font-weight: 400;
@@ -1567,14 +2037,17 @@ Locked once an output folder has results, since mixing the two in one folder wou
 		flex-shrink: 0;
 	}
 
+	/* A row, not a column: this sits on the window's bottom edge, so anything
+	   stacked under the version would be drawn off-screen. Reversed so the
+	   version stays rightmost. */
 	.version-box {
 		position: absolute;
 		top: 0;
 		right: 0;
 		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: 0.2rem;
+		flex-direction: row-reverse;
+		align-items: center;
+		gap: 0.5rem;
 		font-size: 0.75rem;
 	}
 
@@ -1601,7 +2074,9 @@ Locked once an output folder has results, since mixing the two in one folder wou
 	.update-error {
 		color: #dc2626;
 		max-width: 20rem;
-		text-align: right;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.log {

@@ -230,6 +230,46 @@ class TestResuming(EngineTestCase):
         self.assertEqual(len(finished), len(df))
 
 
+class TestChunkLength(EngineTestCase):
+    """Results must not depend on where the chunks fall.
+
+    heavy_v1 reads nearly two frames of audio for each one it scores, so a
+    chunk's last frame used to be computed against zeros where the next chunk's
+    audio belonged, and moved by up to ~0.5. Separately, chunk starts were
+    truncated from float seconds, which at 44.1 kHz put some (18.24 s and
+    22.08 s here) a sample early and shifted every frame in them.
+
+    One-frame chunks put a seam on every frame. The remaining tolerance is
+    resampling each chunk on its own rather than the file in one pass, which
+    is ~1e-3; both failures were hundreds of times that.
+    """
+
+    def test_one_frame_chunks_agree_with_one_chunk(self):
+        rate = 44100
+        t = np.arange(24 * rate) / rate
+        rng = np.random.default_rng(3)
+        # Something with structure for the model to respond to: a buzz-like
+        # harmonic stack that comes and goes, over field-recording-level noise.
+        buzz = sum(np.sin(2 * np.pi * 220 * h * t) / h for h in range(1, 8))
+        gate = (np.sin(2 * np.pi * t / 7) > 0).astype(float)
+        audio = 0.05 * buzz * gate + 0.005 * rng.standard_normal(len(t))
+        path = os.path.join(self.dir_audio, 'siteA', 'rec.wav')
+        sf.write(path, audio.astype('float32'), rate, subtype='FLOAT')
+
+        def run(chunklength):
+            self.dir_out = os.path.join(self.tmp.name, f'out_{chunklength}')
+            self.analyze('--modelname', 'heavy_v1', '--classes_out', 'all',
+                         '--chunklength', chunklength)
+            return pd.read_csv(self.results('siteA/rec')).sort_values('start')
+
+        whole = run('100')
+        split = run('0.96')
+        self.assertEqual(list(split['start']), list(whole['start']))
+        columns = [c for c in whole.columns if c.startswith('activation_')]
+        diff = split[columns].to_numpy() - whole[columns].to_numpy()
+        self.assertLess(np.abs(diff).max(), 0.02)
+
+
 class TestManifestLock(EngineTestCase):
     def setUp(self):
         super().setUp()
@@ -271,6 +311,42 @@ class TestDetections(EngineTestCase):
         self.assertEqual(list(df.columns), ['start', 'detections_ins_buzz'])
         self.assertTrue(set(df['detections_ins_buzz']) <= {0, 1})
         self.assertEqual(read_manifest(self.dir_out)['output_mode'], 'detections')
+
+
+class TestGain(EngineTestCase):
+    def test_gain_is_the_same_as_louder_source_audio(self):
+        quiet = self.add_wav('siteA/rec.wav', seconds=3)
+        self.analyze('--gain', '4')
+        with_gain = pd.read_csv(self.results('siteA/rec'))
+        self.assertEqual(read_manifest(self.dir_out)['gain'], 4.0)
+
+        samples, sr = sf.read(quiet, dtype='float32')
+        sf.write(quiet, samples * 4, sr)
+        self.dir_out = os.path.join(self.tmp.name, 'out_loud')
+        self.analyze()
+        louder = pd.read_csv(self.results('siteA/rec'))
+
+        unity = os.path.join(self.tmp.name, 'out_unity')
+        sf.write(quiet, samples, sr)
+        self.dir_out = unity
+        self.analyze()
+        untouched = pd.read_csv(self.results('siteA/rec'))
+
+        cols = [c for c in with_gain.columns if c != 'start']
+        np.testing.assert_allclose(with_gain[cols], louder[cols], atol=1e-3)
+        self.assertFalse(np.allclose(with_gain[cols], untouched[cols], atol=1e-3))
+
+    def test_gain_must_be_positive(self):
+        self.add_wav('siteA/rec.wav', seconds=3)
+        run = self.analyze('--gain', '0', expect_success=False)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('--gain', run.stderr)
+
+    def test_a_different_gain_conflicts_with_the_folder(self):
+        self.add_wav('siteA/rec.wav', seconds=3)
+        self.analyze('--gain', '2')
+        run = self.analyze('--gain', '0.5', stdin='n\n')
+        self.assertIn('gain: existing=2.0, requested=0.5', run.stdout)
 
 
 class TestFormats(EngineTestCase):

@@ -129,6 +129,17 @@ class TestDiff(unittest.TestCase):
         self.assertTrue(
             mf.diff_manifests(legacy, mf.build_manifest('m', 1, None, ['a'], full_quality_decode=False)))
 
+    def test_gain_locks_the_folder(self):
+        quiet = mf.build_manifest('m', 1, None, ['a'], gain=0.5)
+        loud = mf.build_manifest('m', 1, None, ['a'], gain=4)
+        self.assertTrue(any('gain' in c for c in mf.diff_manifests(quiet, loud)))
+        self.assertEqual(mf.diff_manifests(loud, mf.build_manifest('m', 1, None, ['a'], gain=4.0)), [])
+
+    def test_a_manifest_from_before_gain_was_recorded_is_unity(self):
+        legacy = {k: v for k, v in mf.build_manifest('m', 1, None, ['a']).items() if k != 'gain'}
+        self.assertEqual(mf.diff_manifests(legacy, mf.build_manifest('m', 1, None, ['a'], gain=1)), [])
+        self.assertTrue(mf.diff_manifests(legacy, mf.build_manifest('m', 1, None, ['a'], gain=2)))
+
     def test_thresholds_do_not_lock_the_folder(self):
         # A re-exported model can change its suggestion; results already
         # written are still the same schema.

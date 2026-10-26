@@ -11,8 +11,11 @@ Desktop app
 ------------
 
 To get the desktop app, all you have to do is download the installer for your platform and run it.
-The analysis engine and latest models ship inside the app, so you don't have to mess around with the command line and installing dependencies.
+The application ships with everything you need to start running analyses right out the gate.
 See :doc:`gui` for a walkthrough of using the app.
+
+Downloads
+^^^^^^^^^^
 
 .. |badge-macos-arm| image:: https://img.shields.io/badge/Download-macOS%20Apple%20Silicon-000?style=for-the-badge&logo=apple&logoColor=white
    :target: https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-macOS-AppleSilicon.dmg
@@ -34,20 +37,53 @@ See :doc:`gui` for a walkthrough of using the app.
    :target: https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest/download/buzzdetect-Linux.deb
    :alt: Download for Linux (.deb)
 
-|badge-macos-arm| |badge-macos-intel| |badge-windows| |badge-windows-cuda| |badge-linux-deb|
+**Windows**
 
-All builds are attached to the `latest GitHub release <https://github.com/OSU-Bee-Lab/buzzdetect/releases/latest>`_.
+.. rst-class:: download-badge
 
-If you have an NVIDIA GPU or an Apple Silicon Mac, see :doc:`gpu` for how to use it.
+|badge-windows|
+
+Most Windows users should download this version, unless they have an NVIDIA graphics card that's CUDA-capable.
+
+.. rst-class:: download-badge
+
+|badge-windows-cuda|
+
+Use this download if you have a CUDA-capable GPU that you want to run your analyses on.
+See :doc:`gpu` for using your GPU.
+
+**macOS**
+
+.. rst-class:: download-badge
+
+|badge-macos-arm|
+
+On newer Apple machines with an "M" chip, use this download.
+This version supports accelerated processing with Metal; see :doc:`gpu` for use.
+
+.. rst-class:: download-badge
+
+|badge-macos-intel|
+
+If you're on an older Apple machine with an Intel processor, use this download.
+
+**Linux**
+
+.. rst-class:: download-badge
+
+|badge-linux-deb|
+
+Only one option for you. It's big, sorry.
+
 
 macOS woes
 ^^^^^^^^^^^
 
-buzzdetect is not code-signed, because we cannot afford the developer licenses. Because of this, macOS helpfully pitches a tantrum when you try to use this tool.
+Due to developer license fees, buzzdetect is not code-signed. Because of this, macOS helpfully pitches a tantrum when you try to use this tool.
 
-Install it to ``/Applications`` (drag it there from the DMG), then open it. You'll get one of two complaints, and they need different answers.
+Install it to ``/Applications`` (drag it there from the DMG), then open it. You'll get one of two complaints.
 
-**"buzzdetect.app" is damaged and can't be opened.** Nothing is damaged — this is what macOS says about an unsigned app it has quarantined, and there's no button that gets past it. Remove the quarantine flag in Terminal:
+**"buzzdetect.app" is damaged and can't be opened.** Nothing is damaged — this is what macOS says about an unsigned app it has quarantined. Remove the quarantine flag in Terminal:
 
 ::
 
@@ -55,7 +91,7 @@ Install it to ``/Applications`` (drag it there from the DMG), then open it. You'
 
 Then open it normally.
 
-**"buzzdetect.app" Not Opened.** The milder version, which you can click through:
+**"buzzdetect.app" Not Opened.** You can click through this one without running commands:
 
 1. Click "Done".
 2. Open System Settings → Privacy & Security, scroll to the Security section near the bottom. You should see ""buzzdetect.app" was blocked to protect your Mac".
@@ -89,6 +125,7 @@ The engine uses `uv <https://docs.astral.sh/uv/>`_ to manage its own virtual env
 separate from the desktop app's Node/Rust toolchain.
 
 ::
+
     cd buzzdetect/engine
     uv venv --python 3.13 .venv
     uv pip install -r requirements.txt
@@ -101,7 +138,9 @@ separate from the desktop app's Node/Rust toolchain.
     .venv/bin/python3 buzzdetect_cli.py --modelname <name> --dir_audio <dir> --dir_out <dir>
 
 ``<name>`` is a model directory under ``models/`` (see ``shipped-models.txt`` for what's
-bundled). Run ``buzzdetect_cli.py --help`` for the full set of options, which correspond to the desktop app's settings.
+bundled).
+Other models are published as GitHub releases tagged ``model-<name>``; download one into a folder of its own
+and point ``BUZZDETECT_MODELS_PATH`` at the folder that contains it. Run ``buzzdetect_cli.py --help`` for the full set of options, which correspond to the desktop app's settings.
 
 Building it yourself
 --------------------------------------
@@ -112,9 +151,9 @@ To build the desktop app itself rather than just running the engine, you'll addi
 ::
 
     npm install
-    npm run build:engine     # freezes the Python engine into a sidecar binary
+    npm run build:engine     # freezes the Python engine into src-tauri/engine-payload/
     npx tauri build
 
-To work on it without freezing the engine each time, set up ``engine/.venv`` (``cd engine && uv venv --python 3.13 .venv && uv pip install -r requirements.txt``) and run ``npx tauri dev`` — the app falls back to running the engine from source when no sidecar is present.
+To work on it without freezing the engine each time, set up ``engine/.venv`` (``cd engine && uv venv --python 3.13 .venv && uv pip install -r requirements.txt``) and run ``npx tauri dev`` — the app runs the engine from source when no frozen engine has been built.
 
 Happy listening!
