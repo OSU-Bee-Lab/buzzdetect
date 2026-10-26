@@ -203,6 +203,48 @@ const IMPORT_FILES: [&str; 6] = [
 
 const README: &str = "README.md";
 const FNAME_FP16: &str = "model.fp16.onnx";
+const MODEL_ONNX: &str = "model.onnx";
+
+/// Licence files travel with a model beyond IMPORT_FILES: buzzdetect-training
+/// writes one `LICENSE-<id>` per third-party model whose weights the model owes
+/// (plus `LICENSE-<id>-<file>` extras and a `LICENSES.md` summary), named in
+/// config_model.json's `licenses` block. They're flat, because catalog files
+/// are GitHub release assets. The name check also keeps them from being paths.
+fn is_license_file(name: &str) -> bool {
+    name.starts_with("LICENSE")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        && !name.contains("..")
+}
+
+/// Whether a model directory may carry this file: the fixed list, or a licence.
+fn is_model_file(name: &str) -> bool {
+    IMPORT_FILES.contains(&name) || is_license_file(name)
+}
+
+/// The files in `dir` that belong to the model: IMPORT_FILES that exist, then
+/// its licence files.
+fn model_files(dir: &std::path::Path) -> Vec<String> {
+    let mut files: Vec<String> = IMPORT_FILES
+        .iter()
+        .filter(|f| dir.join(f).is_file())
+        .map(|f| f.to_string())
+        .collect();
+    let mut licenses: Vec<String> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().is_file())
+                .filter_map(|e| e.file_name().to_str().map(str::to_string))
+                .filter(|n| is_license_file(n))
+                .collect()
+        })
+        .unwrap_or_default();
+    licenses.sort();
+    files.extend(licenses);
+    files
+}
 
 /// Per-user model store, outside the app bundle. `None` if the platform data
 /// dir can't be resolved (shouldn't happen in practice).
@@ -475,11 +517,8 @@ fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
         std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
 
         let copied = (|| -> std::io::Result<()> {
-            for file in IMPORT_FILES {
-                let from = model_src.join(file);
-                if from.is_file() {
-                    std::fs::copy(&from, dest.join(file))?;
-                }
+            for file in model_files(&model_src) {
+                std::fs::copy(model_src.join(&file), dest.join(&file))?;
             }
             Ok(())
         })();
@@ -498,20 +537,35 @@ fn import_model(app: AppHandle, src: String) -> Result<ModelInfo, String> {
     result
 }
 
-/// Everything the model info window shows: the description and the README.
+/// Everything the model info window shows: the description, the README, and
+/// what its Attribution view is built from -- config_model.json's `metadata`
+/// (provenance: internal name, training date, embedder, teacher) and
+/// `licenses` (who to cite, and the third-party models it owes weights to; see
+/// buzzdetect-training's embedders/licensing.py). Either is null for a model
+/// exported before it was written.
 #[derive(Serialize)]
 struct ModelDetails {
     name: String,
     description: Option<String>,
     readme: Option<String>,
+    metadata: Option<serde_json::Value>,
+    licenses: Option<serde_json::Value>,
+    /// model.onnx's SHA-256, when it's known without hashing anything: the
+    /// catalog's, for a model that isn't installed. An installed model's comes
+    /// from model_sha256.
+    sha256: Option<String>,
 }
 
 impl ModelDetails {
     fn from_parts(name: &str, config: &serde_json::Value, readme: Option<String>) -> ModelDetails {
+        let object = |key: &str| config.get(key).filter(|v| v.is_object()).cloned();
         ModelDetails {
             name: name.to_string(),
             description: description_of(config),
             readme,
+            metadata: object("metadata"),
+            licenses: object("licenses"),
+            sha256: None,
         }
     }
 }
@@ -534,6 +588,32 @@ fn model_details(app: AppHandle, modelname: String) -> Result<ModelDetails, Stri
         }
     }
     Ok(details)
+}
+
+/// model.onnx's SHA-256, which pins exactly which model a citation means.
+/// Hashed on request rather than with the details, because a model can be
+/// tens of megabytes.
+#[tauri::command]
+async fn model_sha256(app: AppHandle, modelname: String) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let dir = model_dir(&app, &modelname).ok_or_else(|| format!("model '{modelname}' not found"))?;
+    let bytes = std::fs::read(dir.join(MODEL_ONNX)).map_err(|e| e.to_string())?;
+    Ok(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The text of one of the model's licence files (see is_license_file).
+fn license_text_in(dir: &std::path::Path, file: &str) -> Result<String, String> {
+    if !is_license_file(file) {
+        return Err(format!("{file} isn't a licence file"));
+    }
+    let path = file_in_model_dir(dir, file).ok_or_else(|| format!("this model has no {file}"))?;
+    std::fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn model_license_text(app: AppHandle, modelname: String, file: String) -> Result<String, String> {
+    let dir = model_dir(&app, &modelname).ok_or_else(|| format!("model '{modelname}' not found"))?;
+    license_text_in(&dir, &file)
 }
 
 const MODELS_WINDOW: &str = "models";
@@ -1542,12 +1622,15 @@ pub fn run() {
             list_models,
             get_model_classes,
             model_details,
+            model_sha256,
+            model_license_text,
             open_models,
             catalog::models_overview,
             catalog::download_model,
             catalog::set_model_ignored,
             catalog::set_model_disabled,
             catalog::catalog_model_details,
+            catalog::catalog_license_text,
             open_model_file,
             import_model,
             remove_model,
@@ -1903,6 +1986,51 @@ mod tests {
         assert!(info.has_readme);
         let details = model_details_in(&dir, "full");
         assert_eq!(details.readme.as_deref(), Some("# hi"));
+    }
+
+    #[test]
+    fn licence_files_are_flat_licence_names_only() {
+        assert!(is_license_file("LICENSE-yamnet"));
+        assert!(is_license_file("LICENSE-aves2_beats-MODEL_CARD.md"));
+        assert!(is_license_file("LICENSES.md"));
+        assert!(!is_license_file("README.md"));
+        assert!(!is_license_file("LICENSE/../model.onnx"));
+        assert!(!is_license_file("LICENSE-..md"));
+        assert!(!is_license_file("LICENSE x"));
+        assert!(is_model_file("weights.csv") && is_model_file("LICENSE-yamnet"));
+        assert!(!is_model_file("history.pickle"));
+    }
+
+    #[test]
+    fn licences_and_provenance_are_read_with_the_details() {
+        let dir = std::env::temp_dir().join("buzzdetect-test-details-licences");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = good_config().replacen(
+            '{',
+            r#"{"metadata": {"modelname_internal": "v4"},
+                "licenses": {"commercial_use": true, "components": [{"id": "yamnet"}]},"#,
+            1,
+        );
+        std::fs::write(dir.join("config_model.json"), config).unwrap();
+        std::fs::write(dir.join("model.onnx"), "w").unwrap();
+        std::fs::write(dir.join("LICENSE-yamnet"), "Apache").unwrap();
+        std::fs::write(dir.join("LICENSES.md"), "# x").unwrap();
+        std::fs::write(dir.join("history.pickle"), "").unwrap();
+
+        let details = model_details_in(&dir, "lic");
+        assert_eq!(details.metadata.unwrap()["modelname_internal"], "v4");
+        assert_eq!(details.licenses.unwrap()["components"][0]["id"], "yamnet");
+        assert_eq!(
+            model_files(&dir),
+            ["model.onnx", "config_model.json", "LICENSE-yamnet", "LICENSES.md"]
+        );
+        assert_eq!(license_text_in(&dir, "LICENSE-yamnet").unwrap(), "Apache");
+        assert!(license_text_in(&dir, "config_model.json").is_err());
+        assert!(license_text_in(&dir, "LICENSE-aves").is_err());
+
+        let bare = model_details_in(&dir.join("nowhere"), "bare");
+        assert!(bare.metadata.is_none() && bare.licenses.is_none());
     }
 
     #[test]

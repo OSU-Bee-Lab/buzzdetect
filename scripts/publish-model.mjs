@@ -28,7 +28,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +59,11 @@ const REQUIRED_CONFIG_KEYS = [
 	'samples_min'
 ];
 const UNHASHED = new Set(['README.md']);
+// Plus the model's licence files (LICENSE-<id>, LICENSES.md, written by
+// buzzdetect-training's export), which the app's Attribution view shows;
+// mirrors is_license_file in lib.rs. Hashed, so a model republished with its
+// licences is offered as an update to anyone who has it without them.
+const isLicenseFile = (f) => /^LICENSE[A-Za-z0-9_.-]*$/.test(f) && !f.includes('..');
 
 function usage(msg) {
 	if (msg) console.error(`error: ${msg}\n`);
@@ -101,7 +106,12 @@ const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const missing = REQUIRED_CONFIG_KEYS.filter((k) => !(k in config));
 if (missing.length) usage(`config_model.json is missing ${missing.join(', ')}`);
 
-const files = MODEL_FILES.filter((f) => existsSync(join(dir, f)));
+const files = [
+	...MODEL_FILES.filter((f) => existsSync(join(dir, f))),
+	...readdirSync(dir)
+		.filter((f) => isLicenseFile(f) && statSync(join(dir, f)).isFile())
+		.sort()
+];
 // A README is optional: a model can go out undocumented and get one later
 // with --readme, which adds it to the catalog entry.
 const readmePath = join(dir, 'README.md');

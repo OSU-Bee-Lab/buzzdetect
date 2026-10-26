@@ -74,6 +74,9 @@ const MODEL_FILES = [
 	// Shown in the app's model info window.
 	'README.md'
 ];
+// Plus the model's licence files (LICENSE-<id>, LICENSES.md), which its
+// Attribution view shows; mirrors is_license_file in src-tauri/src/lib.rs.
+const isLicenseFile = (f) => /^LICENSE[A-Za-z0-9_.-]*$/.test(f) && !f.includes('..');
 
 const CUDA = process.argv.includes('--cuda');
 
@@ -268,7 +271,8 @@ function assemblePayload() {
 		// to tens of gigabytes. Copy only the files the engine reads.
 		const dirOut = join(modelsOut, name);
 		mkdirSync(dirOut, { recursive: true });
-		for (const file of MODEL_FILES) {
+		const licenses = readdirSync(dir).filter((f) => isLicenseFile(f) && statSync(join(dir, f)).isFile());
+		for (const file of [...MODEL_FILES, ...licenses]) {
 			const from = join(dir, file);
 			if (existsSync(from)) cpSync(from, join(dirOut, file), { dereference: true });
 		}

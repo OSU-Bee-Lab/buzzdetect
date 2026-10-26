@@ -4,6 +4,7 @@
 	// on the right. Opened by the main window's View Models button through
 	// open_models. Downloads, imports, removals and ignores all happen here;
 	// each emits models-changed, which the main window listens for too.
+	import { getVersion } from '@tauri-apps/api/app';
 	import { invoke } from '@tauri-apps/api/core';
 	import { emitTo, listen } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -13,9 +14,13 @@
 	import DOMPurify from 'dompurify';
 	import { onMount } from 'svelte';
 	import {
+		BUZZDETECT,
+		citeModel,
 		classifyLink,
+		describeVia,
 		formatSize,
 		groupModels,
+		inheritedTerms,
 		type ModelDetails,
 		type ModelInfo,
 		type ModelRow,
@@ -29,6 +34,89 @@
 	let error = $state<string | null>(null);
 	let downloading = $state<Record<string, boolean>>({});
 	let body: HTMLElement | undefined = $state();
+
+	// The Attribution view: how to cite the selected model and what it's built
+	// from, from config_model.json's `metadata` and `licenses` blocks.
+	let view = $state<'readme' | 'attribution'>('readme');
+	let appVersion = $state<string | null>(null);
+	let sha = $state<{ name: string; value: string | null } | null>(null);
+	let licenseTexts = $state<Record<string, string>>({});
+	let openLicense = $state<string | null>(null);
+	let copied = $state<string | null>(null);
+	const citation = $derived(
+		details && selected ? citeModel(selected, details, appVersion, sha?.value ?? null) : null
+	);
+	const components = $derived(details?.licenses?.components ?? []);
+	const terms = $derived(inheritedTerms(details?.licenses ?? null));
+	const provenance = $derived.by(() => {
+		const md = details?.metadata ?? {};
+		const own = details?.licenses?.model;
+		const rows: [string, string | null | undefined, boolean?][] = [
+			['Model', selected],
+			['Trained as', md.modelname_internal],
+			['Trained', md.trained_date],
+			['Training set', md.set],
+			['Embedder', md.embeddername],
+			['Distilled from', md.teacher],
+			['Ensemble of', md.ensemble_of?.join(', ')],
+			['Training branch', md.branch],
+			['Model license', own?.spdx],
+			['model.onnx SHA-256', sha?.name === selected ? (sha.value ?? 'unavailable') : 'computing…', true],
+			['buzzdetect version', appVersion]
+		];
+		return rows.filter(([, v]) => v);
+	});
+
+	// An installed model's hash is computed on request; a catalog one comes
+	// with its details.
+	$effect(() => {
+		const name = selected;
+		if (view !== 'attribution' || !details || sha?.name === name) return;
+		if (details.sha256 || !row?.installed) {
+			sha = { name, value: details.sha256 };
+			return;
+		}
+		invoke<string>('model_sha256', { modelname: name })
+			.then((value) => {
+				if (selected === name) sha = { name, value };
+			})
+			.catch(() => {
+				if (selected === name) sha = { name, value: null };
+			});
+	});
+
+	async function toggleLicense(file: string) {
+		if (openLicense === file) {
+			openLicense = null;
+			return;
+		}
+		const name = selected;
+		if (!(file in licenseTexts)) {
+			try {
+				const text = await (row?.installed
+					? invoke<string>('model_license_text', { modelname: name, file })
+					: invoke<string>('catalog_license_text', { name, file }));
+				if (selected !== name) return;
+				licenseTexts = { ...licenseTexts, [file]: text };
+			} catch (e) {
+				error = String(e);
+				return;
+			}
+		}
+		openLicense = file;
+	}
+
+	async function copy(key: string, text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+			copied = key;
+			setTimeout(() => {
+				if (copied === key) copied = null;
+			}, 1500);
+		} catch (e) {
+			error = String(e);
+		}
+	}
 
 	const groups = $derived(overview ? groupModels(overview.models) : []);
 	const row = $derived(overview?.models.find((m) => m.name === selected) ?? null);
@@ -73,6 +161,11 @@
 	let loadToken = 0;
 	async function load(name: string) {
 		const token = ++loadToken;
+		if (name !== selected) {
+			sha = null;
+			licenseTexts = {};
+			openLicense = null;
+		}
 		selected = name;
 		error = null;
 		history.replaceState(null, '', `?model=${encodeURIComponent(name)}`);
@@ -188,6 +281,9 @@
 							: '';
 
 	onMount(() => {
+		getVersion()
+			.then((v) => (appVersion = v))
+			.catch(() => {});
 		refresh(true)
 			.then(() => (selected ? load(selected) : undefined))
 			.catch((e) => (error = String(e)));
@@ -255,7 +351,120 @@
 			<p class="hint">Loading…</p>
 		{/if}
 
-		{#if details && !details.readme}
+		{#if view === 'attribution' && details && citation}
+			<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+			<article class="readme attribution" onclick={onClick}>
+				<h2>Citing this model</h2>
+				<p>Cite this model as:</p>
+				<div class="cite">
+					<pre>{citation.text}</pre>
+					<button type="button" onclick={() => copy('model', citation.text)}
+						>{copied === 'model' ? 'Copied' : 'Copy'}</button
+					>
+				</div>
+				<details>
+					<summary>BibTeX</summary>
+					<div class="cite">
+						<pre>{citation.bibtex}</pre>
+						<button type="button" onclick={() => copy('model-bib', citation.bibtex)}
+							>{copied === 'model-bib' ? 'Copied' : 'Copy'}</button
+						>
+					</div>
+				</details>
+				<p>
+					And cite the method, buzzdetect, as described in the <a
+						href="https://doi.org/10.1093/jisesa/ieaf104">paper</a
+					>:
+				</p>
+				<div class="cite">
+					<pre>{BUZZDETECT.paper}</pre>
+					<button type="button" onclick={() => copy('paper', BUZZDETECT.paper)}
+						>{copied === 'paper' ? 'Copied' : 'Copy'}</button
+					>
+				</div>
+				<details>
+					<summary>BibTeX</summary>
+					<div class="cite">
+						<pre>{BUZZDETECT.paperBibtex}</pre>
+						<button type="button" onclick={() => copy('paper-bib', BUZZDETECT.paperBibtex)}
+							>{copied === 'paper-bib' ? 'Copied' : 'Copy'}</button
+						>
+					</div>
+				</details>
+				<p>
+					Every buzzdetect release is archived on Zenodo: <a
+						href="https://doi.org/{BUZZDETECT.zenodoDoi}">doi:{BUZZDETECT.zenodoDoi}</a
+					>. The SHA-256 below pins exactly which model file you ran.
+				</p>
+
+				<h3>Identifying this model</h3>
+				<table>
+					<tbody>
+						{#each provenance as [label, value, mono]}
+							<tr>
+								<th scope="row">{label}</th>
+								<td>{#if mono}<code class="hash">{value}</code>{:else}{value}{/if}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				{#each terms as t}
+					<p class="terms">{t}</p>
+				{/each}
+
+				<h2>The sources for this model</h2>
+				{#if components.length}
+					<p>
+						This model contains, or was derived from, the weights of the model{components.length > 1
+							? 's'
+							: ''} below. Each stays under its own license: credit {components.length > 1
+							? 'each'
+							: 'it'} when you cite or share this model.
+					</p>
+					{#each components as c}
+						<section class="source">
+							<h3>{c.name}</h3>
+							<dl>
+								{#if c.copyright}<dt>Authors</dt><dd>{c.copyright}</dd>{/if}
+								<dt>License</dt>
+								<dd>
+									{c.spdx}
+									{#if c.files?.length}
+										<button type="button" class="link" onclick={() => toggleLicense(c.files![0].name)}
+											>{openLicense === c.files[0].name ? 'Hide license' : 'View license'}</button
+										>
+									{/if}
+								</dd>
+								{#if c.source}<dt>Source</dt><dd><a href={c.source}>{c.source}</a></dd>{/if}
+								{#if c.weights}<dt>Weights</dt><dd><a href={c.weights}>{c.weights}</a></dd>{/if}
+								{#if c.revision}<dt>Revision</dt><dd><code>{c.revision}</code></dd>{/if}
+								{#if c.paper}<dt>Paper</dt><dd><a href={c.paper}>{c.paper}</a></dd>{/if}
+								{#if describeVia(c.via)}<dt>In this model</dt><dd>{describeVia(c.via)}</dd>{/if}
+							</dl>
+							{#if c.note}<p class="note">{c.note}</p>{/if}
+							{#if (c.files?.length ?? 0) > 1}
+								<p class="extra">
+									Also included:
+									{#each c.files!.slice(1) as f}
+										<button type="button" class="link" onclick={() => toggleLicense(f.name)}
+											>{openLicense === f.name ? `Hide ${f.label}` : f.label}</button
+										>
+									{/each}
+								</p>
+							{/if}
+							{#if openLicense && c.files?.some((f) => f.name === openLicense)}
+								<pre class="license">{licenseTexts[openLicense]}</pre>
+							{/if}
+						</section>
+					{/each}
+				{:else}
+					<p class="hint">
+						This model was exported before buzzdetect models recorded their sources, so there is
+						nothing to list here. Its README may say what it was built from.
+					</p>
+				{/if}
+			</article>
+		{:else if details && !details.readme}
 			<p class="hint">This model has no README.</p>
 		{:else if html}
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized above -->
@@ -268,6 +477,15 @@
 				<span class="status" class:notify={row.update}>{status(row)}</span>
 				{#if downloading[row.name]}<span class="spinner" aria-hidden="true"></span>{/if}
 				<span class="actions">
+					{#if details}
+						<button
+							type="button"
+							onclick={() => {
+								view = view === 'attribution' ? 'readme' : 'attribution';
+								body?.scrollTo(0, 0);
+							}}>{view === 'attribution' ? 'View README' : 'View Attribution'}</button
+						>
+					{/if}
 					{#if row.installed}
 						{#if row.bundled}
 							<button type="button" onclick={() => setDisabled(row.name, !row.disabled)}
@@ -590,6 +808,102 @@
 
 	.readme :global(img) {
 		max-width: 100%;
+	}
+
+	.attribution .cite {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		margin: 0.4rem 0 0.8rem;
+	}
+
+	.attribution .cite pre {
+		flex: 1;
+		margin: 0;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		font-size: 0.85rem;
+	}
+
+	.attribution button {
+		font: inherit;
+		font-size: 0.8rem;
+		padding: 0.2rem 0.6rem;
+		border-radius: 6px;
+		border: 1px solid rgba(127, 127, 127, 0.4);
+		background: rgba(127, 127, 127, 0.08);
+		color: inherit;
+		cursor: pointer;
+	}
+
+	.attribution button.link {
+		margin-left: 0.4rem;
+	}
+
+	.attribution details summary {
+		cursor: pointer;
+		font-size: 0.85rem;
+		opacity: 0.75;
+	}
+
+	.attribution table {
+		display: table;
+	}
+
+	.attribution th {
+		text-align: left;
+		font-weight: 600;
+		padding: 0.25rem 1rem 0.25rem 0;
+		border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+		white-space: nowrap;
+	}
+
+	.attribution td {
+		padding: 0.25rem 0;
+		overflow-wrap: anywhere;
+	}
+
+	.attribution .hash {
+		font-size: 0.8em;
+	}
+
+	.attribution .terms {
+		padding: 0.5rem 0.75rem;
+		border-left: 3px solid #d98a1c;
+		background: rgba(217, 138, 28, 0.1);
+	}
+
+	.attribution .source {
+		margin-bottom: 1.25rem;
+	}
+
+	.attribution dl {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 0.3rem 1rem;
+		margin: 0.5rem 0;
+	}
+
+	.attribution dt {
+		font-weight: 600;
+	}
+
+	.attribution dd {
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.attribution .note,
+	.attribution .extra {
+		font-size: 0.9rem;
+		opacity: 0.85;
+	}
+
+	.attribution pre.license {
+		max-height: 24rem;
+		overflow: auto;
+		white-space: pre-wrap;
+		font-size: 0.8rem;
 	}
 
 	.readme :global(blockquote) {
