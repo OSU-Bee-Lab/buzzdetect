@@ -106,5 +106,39 @@
       "human": "teacher"
     },
     "note": "distilled single-pass student; activation_centers folded into the head bias"
+  },
+  "licenses": {
+    "model": {
+      "authors": [
+        "Hearon, Luke E."
+      ],
+      "publisher": "OSU Bee Lab",
+      "spdx": "MIT",
+      "source": "https://github.com/OSU-Bee-Lab/buzzdetect"
+    },
+    "commercial_use": true,
+    "share_alike": [],
+    "components": [
+      {
+        "id": "yamnet",
+        "name": "YAMNet",
+        "spdx": "Apache-2.0",
+        "copyright": "Copyright 2022 Google LLC",
+        "source": "https://github.com/tensorflow/models/tree/master/research/audioset/yamnet",
+        "via": [
+          "teacher v4-ft-ps-e60-moderate",
+          "init"
+        ],
+        "commercial_use": true,
+        "share_alike": false,
+        "weights": "https://storage.googleapis.com/audioset/yamnet.h5",
+        "files": [
+          {
+            "name": "LICENSE-yamnet",
+            "label": "License"
+          }
+        ]
+      }
+    ]
   }
 }
